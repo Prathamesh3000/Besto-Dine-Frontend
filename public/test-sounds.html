@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification Sound Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .card { background: white; border-radius: 20px; padding: 32px; max-width: 420px; width: 90%; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+        h1 { font-size: 22px; color: #1a181b; margin-bottom: 6px; }
+        p { font-size: 13px; color: #8d848f; margin-bottom: 24px; }
+        .btn-group { display: flex; flex-direction: column; gap: 10px; }
+        button { padding: 14px 20px; border: none; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s; }
+        button:active { transform: scale(0.97); }
+        .chef { background: #FFF7ED; color: #EA580C; border: 1.5px solid #FED7AA; }
+        .chef:hover { background: #FFEDD5; }
+        .waiter { background: #EFF6FF; color: #2563EB; border: 1.5px solid #BFDBFE; }
+        .waiter:hover { background: #DBEAFE; }
+        .customer { background: #F0FDF4; color: #16A34A; border: 1.5px solid #BBF7D0; }
+        .customer:hover { background: #DCFCE7; }
+        .admin { background: #FDF4FF; color: #9333EA; border: 1.5px solid #E9D5FF; }
+        .admin:hover { background: #FAE8FF; }
+        .desc { font-size: 11px; opacity: 0.7; font-weight: 500; }
+        .icon { font-size: 20px; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .chef .icon { background: #FE8301; color: white; }
+        .waiter .icon { background: #2563EB; color: white; }
+        .customer .icon { background: #16A34A; color: white; }
+        .admin .icon { background: #9333EA; color: white; }
+        .info { margin-top: 20px; padding: 12px 16px; background: #FFF9F2; border: 1px solid #FED7AA; border-radius: 10px; font-size: 12px; color: #92400E; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Notification Sounds</h1>
+        <p>Click each button to hear the sound for that role.</p>
+
+        <div class="btn-group">
+            <button class="chef" onclick="playChefAlert()">
+                <span class="icon">&#x1F468;&#x200D;&#x1F373;</span>
+                <div>
+                    <div>Chef Alert</div>
+                    <div class="desc">Double-ding &mdash; new order in kitchen</div>
+                </div>
+            </button>
+
+            <button class="waiter" onclick="playWaiterChime()">
+                <span class="icon">&#x1F3E8;</span>
+                <div>
+                    <div>Waiter Chime</div>
+                    <div class="desc">Rising bell &mdash; order ready / customer request</div>
+                </div>
+            </button>
+
+            <button class="customer" onclick="playCustomerPop()">
+                <span class="icon">&#x1F4F1;</span>
+                <div>
+                    <div>Customer Pop</div>
+                    <div class="desc">Soft pop &mdash; order status update</div>
+                </div>
+            </button>
+
+            <button class="admin" onclick="playAdminDing()">
+                <span class="icon">&#x1F4CA;</span>
+                <div>
+                    <div>Admin Ding</div>
+                    <div class="desc">Cash register &mdash; new order / cancellation</div>
+                </div>
+            </button>
+        </div>
+
+        <div class="info">
+            These exact sounds play automatically in the app when new notifications arrive. No audio files needed &mdash; generated via Web Audio API.
+        </div>
+    </div>
+
+    <script>
+        let audioCtx = null;
+        function getAudioContext() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            return audioCtx;
+        }
+
+        function playTone(frequency, duration, type = 'sine', volume = 0.3) {
+            const ctx = getAudioContext();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+            gain.gain.setValueAtTime(volume, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + duration);
+        }
+
+        function playChefAlert() {
+            playTone(880, 0.15, 'sine', 0.4);
+            setTimeout(() => playTone(1100, 0.2, 'sine', 0.4), 180);
+        }
+
+        function playWaiterChime() {
+            playTone(660, 0.12, 'sine', 0.3);
+            setTimeout(() => playTone(880, 0.12, 'sine', 0.3), 140);
+            setTimeout(() => playTone(1100, 0.25, 'sine', 0.3), 280);
+        }
+
+        function playCustomerPop() {
+            playTone(520, 0.08, 'sine', 0.2);
+            setTimeout(() => playTone(780, 0.15, 'sine', 0.2), 100);
+        }
+
+        function playAdminDing() {
+            playTone(1200, 0.08, 'triangle', 0.3);
+            setTimeout(() => playTone(1500, 0.15, 'triangle', 0.25), 120);
+        }
+    </script>
+</body>
+</html>

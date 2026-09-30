@@ -1,0 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@200..800&family=Montserrat:wght@100..900&family=Nunito:wght@200..1000&family=PT+Sans+Narrow:wght@400;700&family=Varela+Round&display=swap');
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --cormorant-font: 'Cormorant Garamond', serif;
+    --montserrat-font: 'Montserrat', sans-serif;
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Manrope';
+    /* Prevent overscroll bounce on iOS for the whole page */
+    overscroll-behavior: none;
+  }
+
+  /* Reserve the vertical scrollbar gutter even when content is short
+     enough not to need scrolling. Prevents the entire page (anything
+     using `mx-auto` for centering) from shifting horizontally by ~15px
+     when navigating between a tall view (scrollbar visible) and a short
+     view (scrollbar hidden) — most visible on the Subscription page's
+     tab strip, but affects every centered layout in the app.
+     Supported in all modern Chromium / Firefox / Safari 16+. */
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  /* Faster tap response on touch devices */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Smooth momentum scrolling on iOS for all scrollable elements */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@theme {
+  --font-sans: 'Manrope';
+  --font-cormorant: 'Cormorant Garamond', serif;
+  --font-montserrat: 'Montserrat', sans-serif;
+  --font-inter: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Kiosk module fonts */
+  --font-nunito: 'Nunito', sans-serif;
+  --font-pt-sans: 'PT Sans Narrow', sans-serif;
+  --font-varela: 'Varela Round', sans-serif;
+  --animate-slide-up: slide-up 0.3s ease-out;
+  --glow-speed: 1s;
+  --animate-blinking-glow: blinking-glow var(--glow-speed) infinite ease-in-out;
+
+  @keyframes slide-up {
+    from {
+      transform: translateY(100%);
+    }
+
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes blinking-glow {
+
+    0%,
+    100% {
+      box-shadow: 0px 4px 12px 0px rgba(255, 59, 48, 0.1);
+    }
+
+    50% {
+      box-shadow: 0px 4px 20px 8px rgba(255, 59, 48, 0.2);
+    }
+  }
+}
+
+@utility no-scrollbar {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Kiosk module uses `scrollbar-hide` interchangeably with `no-scrollbar` */
+@utility scrollbar-hide {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@utility custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #f1f1f1;
+    border-radius: 10px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #e5e5e5;
+  }
+}
+
+@utility scroll-fade {
+  mask-image: linear-gradient(to bottom, black 95%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 95%, transparent 100%);
+}
+
+/* ── Customer-screen animations ────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.93); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@utility animate-fadeIn {
+  animation: fadeIn 0.25s ease-out both;
+}
+
+@utility animate-scaleIn {
+  animation: scaleIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@utility animate-slideUp {
+  animation: slideUp 0.3s ease-out both;
+}
