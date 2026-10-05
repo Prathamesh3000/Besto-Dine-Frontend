@@ -390,8 +390,11 @@ function SearchScreen() {
   };
 
   const handleSearchKeyDown = (e) => {
-    if (e.key === "Enter" && searchQuery.trim()) {
-      performSearchAction(searchQuery);
+    // Voice search passes the recognised text on a synthetic event —
+    // `searchQuery` is still the pre-voice value in this render.
+    const query = typeof e?.target?.value === "string" ? e.target.value : searchQuery;
+    if (e.key === "Enter" && query.trim()) {
+      performSearchAction(query);
     }
   };
 

@@ -42,6 +42,21 @@ const BillReceipt = () => {
 
   function mapInvoice(inv) {
     if (!inv) return null;
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+    const round2 = (n) => Math.round(n * 100) / 100;
+    // Itemised breakdown — read only what the invoice actually carries
+    // (no made-up rates: the old 5% / 10% fallbacks printed a ₹0.00 GST
+    // line under an invented rate).
+    const gst = num(inv.gst);
+    const serviceCharge = num(inv.serviceCharge);
+    const additionalCharges = (Array.isArray(inv.additionalCharges) ? inv.additionalCharges : [])
+      .map((c) => ({ name: c?.name || 'Charges', type: c?.type, value: num(c?.value), amount: num(c?.amount) }))
+      .filter((c) => c.amount > 0);
+    const itemised = gst + serviceCharge + additionalCharges.reduce((s, c) => s + c.amount, 0);
+    // An invoice that only carries the combined `tax` (GST + service +
+    // charges) shows it as one row; whatever the itemised rows don't
+    // cover is shown the same way.
+    const otherTaxes = Math.max(0, round2(num(inv.tax) - itemised));
     return {
       // Prefer the friendly order ID (e.g. ORD-0001) populated from the order doc,
       // then the invoice number, then a placeholder. NEVER fall back to inv._id —
@@ -53,11 +68,14 @@ const BillReceipt = () => {
         quantity: i.quantity || 1,
         price: i.price || 0,
       })),
-      gst: inv.gst || 0,
-      gstPct: inv.gstPercentage || 5,
-      serviceCharge: inv.serviceCharge || 0,
-      serviceChargePct: inv.serviceChargePercentage || 10,
-      total: inv.total || inv.grandTotal || 0,
+      gst,
+      gstPct: num(inv.gstPercentage) || null,
+      serviceCharge,
+      serviceChargePct: num(inv.serviceChargePercentage) || null,
+      additionalCharges,
+      otherTaxes,
+      discount: num(inv.discount),
+      total: num(inv.total ?? inv.grandTotal),
       paymentMethod: inv.paymentMethod || 'Cash',
     };
   }
@@ -181,23 +199,56 @@ const BillReceipt = () => {
 
           {/* Taxes */}
           <div className="space-y-3 mb-8">
-            <div className="flex justify-between items-center text-[14px]">
-              <span className="text-[#645E66] font-regular varela-rounded">
-                GST ({receipt.gstPct}%)
-              </span>
-              <span className="text-[#645E66] varela-rounded font-medium">
-                ₹{receipt.gst.toFixed(2)}
-              </span>
-            </div>
+            {/* Rows only for what the receipt actually carries. */}
+            {receipt.gst > 0 && (
+              <div className="flex justify-between items-center text-[14px]">
+                <span className="text-[#645E66] font-regular varela-rounded">
+                  GST{receipt.gstPct ? ` (${receipt.gstPct}%)` : ''}
+                </span>
+                <span className="text-[#645E66] varela-rounded font-medium">
+                  ₹{receipt.gst.toFixed(2)}
+                </span>
+              </div>
+            )}
             {/* Service charge is dine-in only — takeaway receipts carry 0,
-                so omit the row instead of printing "₹0.00 (10%)". */}
+                so omit the row instead of printing "₹0.00". */}
             {receipt.serviceCharge > 0 && (
               <div className="flex justify-between items-center text-[14px]">
                 <span className="text-[#645E66] font-regular varela-rounded">
-                  Service Charge ({receipt.serviceChargePct}%)
+                  Service Charge{receipt.serviceChargePct ? ` (${receipt.serviceChargePct}%)` : ''}
                 </span>
                 <span className="text-[#645E66] varela-rounded font-medium">
                   ₹{receipt.serviceCharge.toFixed(2)}
+                </span>
+              </div>
+            )}
+            {(receipt.additionalCharges || []).map((c, i) => (
+              <div key={c.name || i} className="flex justify-between items-center text-[14px]">
+                <span className="text-[#645E66] font-regular varela-rounded">
+                  {c.name}{c.type === 'Percentage' && c.value ? ` (${c.value}%)` : ''}
+                </span>
+                <span className="text-[#645E66] varela-rounded font-medium">
+                  ₹{c.amount.toFixed(2)}
+                </span>
+              </div>
+            ))}
+            {receipt.otherTaxes > 0 && (
+              <div className="flex justify-between items-center text-[14px]">
+                <span className="text-[#645E66] font-regular varela-rounded">
+                  Taxes &amp; charges
+                </span>
+                <span className="text-[#645E66] varela-rounded font-medium">
+                  ₹{receipt.otherTaxes.toFixed(2)}
+                </span>
+              </div>
+            )}
+            {receipt.discount > 0 && (
+              <div className="flex justify-between items-center text-[14px]">
+                <span className="text-[#645E66] font-regular varela-rounded">
+                  Discount
+                </span>
+                <span className="text-[#645E66] varela-rounded font-medium">
+                  -₹{receipt.discount.toFixed(2)}
                 </span>
               </div>
             )}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CalendarCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { publicAPI } from '../../utils/api';
+import { sanitizeMobileInput, isValidMobile, mobileError, mobileInputAttrs } from '../../utils/mobile';
 
 /**
  * "Request a demo" lead form — shared by the staff-login modal
@@ -34,11 +35,11 @@ export default function RequestDemoForm({ source = 'staff-login', onDone, doneLa
         setError('');
         const name = values.name.trim();
         const restaurantName = values.restaurantName.trim();
-        const phoneDigits = values.phone.replace(/[^\d]/g, '').replace(/^91(?=\d{10}$)/, '');
+        const phoneDigits = sanitizeMobileInput(values.phone);
         const emailVal = values.email.trim();
         if (name.length < 2) return setError(t('demo.err_name', 'Please enter your name.'));
         if (restaurantName.length < 2) return setError(t('demo.err_restaurant', 'Please enter your restaurant name.'));
-        if (!/^[6-9]\d{9}$/.test(phoneDigits)) return setError(t('demo.err_phone', 'Please enter a valid 10-digit mobile number.'));
+        if (!isValidMobile(phoneDigits)) return setError(t('demo.err_phone', 'Please enter a valid 10-digit mobile number.'));
         if (emailVal && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) return setError(t('demo.err_email', 'Please enter a valid email address.'));
 
         setSubmitting(true);
@@ -104,7 +105,10 @@ export default function RequestDemoForm({ source = 'staff-login', onDone, doneLa
             </div>
             <div>
                 <label htmlFor={id('phone')} className={labelCls}>{t('demo.phone', 'Mobile number')} <span className="text-red-500">*</span></label>
-                <input id={id('phone')} type="tel" inputMode="tel" className={inputCls} value={values.phone} onChange={set('phone')} maxLength={16} placeholder="98765 43210" autoComplete="tel" />
+                <input id={id('phone')} {...mobileInputAttrs} className={inputCls} value={values.phone} onChange={(e) => setValues((v) => ({ ...v, phone: sanitizeMobileInput(e.target.value) }))} placeholder="98765 43210" aria-describedby={id('phone-hint')} />
+                {values.phone && mobileError(values.phone) && values.phone.length === 10 && (
+                    <p id={id('phone-hint')} role="alert" className="mt-1 text-[12px] text-red-600">{mobileError(values.phone)}</p>
+                )}
             </div>
             <div>
                 <label htmlFor={id('email')} className={labelCls}>{t('demo.email', 'Email')}</label>

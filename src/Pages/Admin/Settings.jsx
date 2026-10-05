@@ -9,6 +9,7 @@ import { toast } from 'react-hot-toast'
 import { SkeletonStatGrid, SkeletonRows } from '../../Components/Common/Skeleton'
 import { useAuth } from '../../Context/AuthContext'
 import LandingPageSettings from './components/LandingPageSettings'
+import ParkingSettingsCard from './components/ParkingSettingsCard'
 
 // First human-readable message from a failed settings save. The API
 // returns either { message, errors: { field: msg } } (mongoose validation)
@@ -141,7 +142,9 @@ const Settings = () => {
         maxRedeemPercent: 50,
         pointsToRupee: 0.1,
         pointsExpiryDays: 365,
-        refundMode: 'wallet',
+        // Decision 1 (2026-10): refunds go back to the original payment
+        // method by default (matches the backend default).
+        refundMode: 'original',
         allowNegativeBalance: false,
         multiBranchMode: false,
         branchRefundMode: 'global',
@@ -1682,6 +1685,12 @@ const Settings = () => {
                         </div>
                     </div>
 
+                    {/* Parking (QA N10/N11) — vehicle types, hourly prices, durations */}
+                    <ParkingSettingsCard
+                        value={reservationConfig.parking}
+                        onChange={(parking) => handleReservationChange('parking', parking)}
+                    />
+
                     {/* Info Note */}
                     <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-xl px-4 py-3 flex items-start gap-2.5">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="mt-0.5 flex-shrink-0">
@@ -1869,30 +1878,10 @@ const Settings = () => {
                             <div className="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
                                 <h3 className="text-[15px] font-[600] text-[#1A181B] mb-1">Refund &amp; Payment Settings</h3>
                                 <p className="text-[12px] font-[400] text-[#6B7280] mb-3">Refund Mode</p>
+                                {/* Decision 1 (2026-10): original payment method is the default. */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                                    {/* Wallet option */}
-                                    <label className="flex items-center justify-between p-4 rounded-[10px] border border-gray-200 bg-white cursor-pointer transition-all hover:border-gray-300">
-                                        <input
-                                            type="radio"
-                                            name="refundMode"
-                                            value="wallet"
-                                            checked={walletConfig.refundMode === 'wallet'}
-                                            onChange={() => handleWalletChange('refundMode', 'wallet')}
-                                            className="sr-only"
-                                        />
-                                        <div>
-                                            <p className="text-[14px] font-[600] text-[#1A181B]">Wallet</p>
-                                            <p className="text-[11px] text-[#9CA3AF]">Refunds credited to customer wallet</p>
-                                        </div>
-                                        {/* Custom radio dot */}
-                                        <div className={`w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${walletConfig.refundMode === 'wallet' ? 'border-[#FE8301]' : 'border-gray-300'}`}>
-                                            {walletConfig.refundMode === 'wallet' && (
-                                                <div className="w-[10px] h-[10px] rounded-full bg-[#FE8301]" />
-                                            )}
-                                        </div>
-                                    </label>
-                                    {/* Original Payment option */}
-                                    <label className="flex items-center justify-between p-4 rounded-[10px] border border-gray-200 bg-white cursor-pointer transition-all hover:border-gray-300">
+                                    {/* Original Payment option (default) */}
+                                    <label className="flex items-center justify-between gap-3 p-4 rounded-[10px] border border-gray-200 bg-white cursor-pointer transition-all hover:border-gray-300">
                                         <input
                                             type="radio"
                                             name="refundMode"
@@ -1902,12 +1891,38 @@ const Settings = () => {
                                             className="sr-only"
                                         />
                                         <div>
-                                            <p className="text-[14px] font-[600] text-[#1A181B]">Original Payment</p>
-                                            <p className="text-[11px] text-[#9CA3AF]">Refunds to original payment method</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-[14px] font-[600] text-[#1A181B]">Original payment method</p>
+                                                <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#15803D] text-[10px] font-[600] rounded-full">Recommended</span>
+                                            </div>
+                                            <p className="text-[11px] text-[#6B7280]">Default. Money goes back the way the customer paid — online payments are refunded to their card / UPI / bank (usually 5–7 working days).</p>
                                         </div>
                                         {/* Custom radio dot */}
                                         <div className={`w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${walletConfig.refundMode === 'original' ? 'border-[#FE8301]' : 'border-gray-300'}`}>
                                             {walletConfig.refundMode === 'original' && (
+                                                <div className="w-[10px] h-[10px] rounded-full bg-[#FE8301]" />
+                                            )}
+                                        </div>
+                                    </label>
+                                    {/* Wallet option */}
+                                    <label className="flex items-center justify-between gap-3 p-4 rounded-[10px] border border-gray-200 bg-white cursor-pointer transition-all hover:border-gray-300">
+                                        <input
+                                            type="radio"
+                                            name="refundMode"
+                                            value="wallet"
+                                            checked={walletConfig.refundMode === 'wallet'}
+                                            onChange={() => handleWalletChange('refundMode', 'wallet')}
+                                            className="sr-only"
+                                        />
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-[14px] font-[600] text-[#1A181B]">Customer wallet</p>
+                                            </div>
+                                            <p className="text-[11px] text-[#6B7280]">Money is added to the customer's BestoDine wallet instantly. They can spend it only at your restaurant — it does not go back to their bank.</p>
+                                        </div>
+                                        {/* Custom radio dot */}
+                                        <div className={`w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${walletConfig.refundMode === 'wallet' ? 'border-[#FE8301]' : 'border-gray-300'}`}>
+                                            {walletConfig.refundMode === 'wallet' && (
                                                 <div className="w-[10px] h-[10px] rounded-full bg-[#FE8301]" />
                                             )}
                                         </div>
@@ -2122,7 +2137,7 @@ const Settings = () => {
                                     {/* Refund Mode */}
                                     <div className="bg-white rounded-[10px] border border-[#E5E7EB] p-3">
                                         <p className="text-[11px] text-[#9CA3AF] mb-1.5">Refund Mode</p>
-                                        <p className="text-[14px] font-[600] text-[#1A181B]">{walletConfig.refundMode === 'wallet' ? 'wallet' : 'original'}</p>
+                                        <p className="text-[14px] font-[600] text-[#1A181B]">{walletConfig.refundMode === 'wallet' ? 'Customer wallet' : 'Original payment'}</p>
                                     </div>
                                 </div>
                             </div>

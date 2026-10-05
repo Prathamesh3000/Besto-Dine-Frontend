@@ -1,6 +1,8 @@
 // Unified image utilities — single source of truth for fallbacks and error handling
+import { backendOrigin } from './apiOrigin';
 
-const BASE_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || '';
+// LAN-aware (localhost API host → page hostname on a phone).
+const BASE_URL = backendOrigin();
 
 /**
  * Append CDN resize/quality params to known image-host URLs so a

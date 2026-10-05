@@ -9,6 +9,8 @@ import {
 } from './authStorage';
 import { clearDineInTable, requestTableScan } from './dineInSession';
 import { isReservedSlug } from './reservedSlugs';
+import { configuredApiUrl } from './apiOrigin';
+import { startActivityTracking, msSinceActivity, CUSTOMER_IDLE_TIMEOUT_MS } from './customerActivity';
 
 // ─── Axios instance ───────────────────────────────────────────────────────────
 //
@@ -18,8 +20,12 @@ import { isReservedSlug } from './reservedSlugs';
 // terminates TLS), the browser silently blocks every API call as
 // "Mixed Content". Auto-upgrade the protocol so the kiosk and customer
 // app keep working in HTTPS deployments without rebuilding the bundle.
+//
+// LAN guard: VITE_API_URL=http://localhost:5000/... is swapped to the
+// page's own hostname when the app is opened from another device (phone
+// on http://192.168.x.x:5173) — see utils/apiOrigin.js.
 function resolveApiBaseUrl() {
-    let base = import.meta.env.VITE_API_URL || '';
+    let base = configuredApiUrl('');
     if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && base.startsWith('http://')) {
         base = base.replace(/^http:\/\//, 'https://');
     }
@@ -79,11 +85,34 @@ function tokenExpiresAtMs(token) {
     }
 }
 
+// ─── Customer session expiry (QA N14) ────────────────────────────────────────
+// Customer logins end after 60 min without use (server:
+// CUSTOMER_IDLE_TIMEOUT_MINUTES) or 24h in total. When the server refuses
+// a customer refresh, AuthContext (listening for this event) drops the
+// login — keeping any guest QR scan session / cart — shows "Your session
+// expired, please log in again" and routes to the restaurant page.
+export const CUSTOMER_SESSION_EXPIRED_EVENT = 'bd:customer-session-expired';
+let _customerExpiryAnnounced = false;
+function announceCustomerSessionExpired(code) {
+    if (_customerExpiryAnnounced) return;
+    if (!getRefreshToken('customer') && !getToken('customer')) return; // nothing to expire (guest)
+    _customerExpiryAnnounced = true;
+    setTimeout(() => { _customerExpiryAnnounced = false; }, 5000);
+    try {
+        window.dispatchEvent(new CustomEvent(CUSTOMER_SESSION_EXPIRED_EVENT, { detail: { code: code || null } }));
+    } catch { /* very old browser — the next foreground 401 still logs out */ }
+}
+
 async function doRefresh(aud) {
     const presented = getRefreshToken(aud);
     if (!presented) return null;
     try {
-        const res = await refreshClient.post('/auth/refresh', { refreshToken: presented });
+        // Customers report how long since they last touched the app, so a
+        // background poll can't keep an abandoned session alive.
+        const body = aud === 'customer'
+            ? { refreshToken: presented, idleMs: msSinceActivity() }
+            : { refreshToken: presented };
+        const res = await refreshClient.post('/auth/refresh', body);
         const { token, refreshToken } = res.data || {};
         if (!token) return null;
         setTokens(token, refreshToken, aud);
@@ -95,8 +124,40 @@ async function doRefresh(aud) {
         // Another tab rotated the token while we were in flight.
         const current = getRefreshToken(aud);
         if (current && current !== presented) return getToken(aud);
+        if (aud === 'customer' && err.response.status === 401) {
+            announceCustomerSessionExpired(err.response.data?.code);
+        }
         return null;
     }
+}
+
+// Keep an ACTIVE customer's session alive and end an idle one promptly:
+//  * while the customer is interacting, renew the access token before it
+//    lapses (each renewal extends the server's 60-min idle window), so a
+//    diner browsing a cached menu isn't timed out mid-use;
+//  * when the tab becomes visible again after the idle timeout, ask the
+//    server right away (it refuses → "session expired") instead of
+//    waiting for the next tap to fail.
+function customerSessionTick({ onReturn = false } = {}) {
+    if (!getRefreshToken('customer') || identityMismatch('customer')) return;
+    const idle = msSinceActivity();
+    if (onReturn) {
+        if (idle >= CUSTOMER_IDLE_TIMEOUT_MS) refreshSession('customer').catch(() => {});
+        return;
+    }
+    if (idle > 2 * 60 * 1000) return; // not actively using the app
+    const token = getToken('customer');
+    const exp = token && tokenExpiresAtMs(token);
+    if (!token || (exp && exp - Date.now() < 10 * 60 * 1000)) {
+        refreshSession('customer').catch(() => {});
+    }
+}
+if (typeof window !== 'undefined') {
+    startActivityTracking();
+    setInterval(() => customerSessionTick(), 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') customerSessionTick({ onReturn: true });
+    });
 }
 
 /**
@@ -459,6 +520,14 @@ api.interceptors.response.use(
 
             const isGuestSession = localStorage.getItem('isGuest') === 'true';
             const isIntentionalLogout = sessionStorage.getItem('intentional_logout') === 'true';
+            // Customer login gone (idle / absolute timeout, revoked): let
+            // AuthContext explain "session expired" and route to the
+            // restaurant page, keeping any guest QR session intact.
+            if (aud === 'customer' && !isGuestSession && !isIntentionalLogout && cfg.headers?.Authorization && !NO_REFRESH_URL.test(url)
+                && (getToken('customer') || getRefreshToken('customer'))) {
+                announceCustomerSessionExpired(error.response?.data?.code);
+                return Promise.reject(error);
+            }
             if (!isGuestSession && !isIntentionalLogout && !isBackground) {
                 clearAuth(aud);
                 // Defer redirect so React finishes the current render cycle first
@@ -515,7 +584,7 @@ api.interceptors.response.use(
                 const u = JSON.parse(getStoredUser() || 'null');
                 userRole = u?.role || null;
             } catch { /* malformed blob — treat as anonymous */ }
-            const isStaffRole = ['admin', 'waiter', 'captain', 'chef'].includes(userRole);
+            const isStaffRole = ['admin', 'manager', 'waiter', 'captain', 'chef'].includes(userRole);
             if (isStaffRole) {
                 openUpgradePrompt({
                     feature: error.response.data.feature,

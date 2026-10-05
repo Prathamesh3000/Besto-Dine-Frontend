@@ -1,8 +1,11 @@
 import { io } from 'socket.io-client';
 import { getToken, identityMismatch } from './authStorage';
+import { configuredApiUrl } from './apiOrigin';
 
-// Derive the Socket.io server URL from the API URL (strip /api/v1 suffix)
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+// Derive the Socket.io server URL from the API URL (strip /api/v1 suffix).
+// configuredApiUrl swaps a localhost host for the page's LAN hostname
+// when opened from a phone (see utils/apiOrigin.js).
+const API_URL = configuredApiUrl('http://localhost:5000/api/v1');
 const SOCKET_URL = API_URL.replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '');
 
 let socket = null;

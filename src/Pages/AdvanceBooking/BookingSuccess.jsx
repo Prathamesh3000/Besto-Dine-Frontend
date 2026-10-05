@@ -7,6 +7,13 @@ import { useAuth } from '../../Context/AuthContext';
 import { settingsAPI } from '../../utils/api';
 import { activeRestaurantPath } from '../../utils/tenant';
 import useBlockBackNav from '../../hooks/useBlockBackNav';
+import {
+    parkingRowsFromState,
+    parkingHoursFromState,
+    parkingChargeFromState,
+    describeParkingTime,
+    describeVehicles,
+} from './parkingUtils';
 
 // Normalise a free-form booking time like "8 PM", "8-9 PM", "20:00",
 // "8:30 PM" into a 24-hour "HH:MM". Falls back to 19:00 if unparseable
@@ -133,9 +140,6 @@ const BookingSuccess = () => {
     specialMessage,
     selectedTypeNames,
     selectedAddonDetails,
-    selectedVehicle,
-    vehicleCount,
-    parkingDuration,
     parkingSkipped,
     couponCode,
     couponDiscount,
@@ -287,11 +291,8 @@ const BookingSuccess = () => {
     const addonTotal = pb.addon || computedAddonTotal;
 
     // Parking total — recompute from rate × count × hours if pb missing.
-    let computedParking = 0;
-    if (!parkingSkipped && selectedVehicle) {
-      const parkingRates = location.state?.parkingRates || {};
-      computedParking = (parkingRates[selectedVehicle] || 0) * (vehicleCount || 1) * (parkingDuration || 2);
-    }
+    const parkingRows = parkingSkipped ? [] : parkingRowsFromState(location.state || {});
+    const computedParking = parkingSkipped ? 0 : parkingChargeFromState(location.state || {});
     const parkingTotal = pb.parking || computedParking;
 
     // Hall components.
@@ -368,13 +369,17 @@ const BookingSuccess = () => {
     // customer didn't skip parking. Was previously hidden when
     // pb.parking was missing.
     let parkingSection = '';
-    if (!parkingSkipped && selectedVehicle) {
-      const vLabel = selectedVehicle.charAt(0).toUpperCase() + selectedVehicle.slice(1);
+    if (parkingRows.length > 0) {
+      const parkingTime = describeParkingTime({
+        mode: location.state?.parkingMode === 'event' ? 'event' : 'custom',
+        hours: parkingHoursFromState(location.state || {}),
+        startTime: location.state?.parkingStartTime,
+      });
       parkingSection = `<div class="section">
         <p class="section-title">Parking Booking</p>
         <table>
-          ${row('Vehicle', `${vehicleCount || 1} ${vLabel}`)}
-          ${row('Parking hours', `${parkingDuration || 2} hrs`)}
+          ${row('Vehicles', describeVehicles(parkingRows, location.state?.parkingLabels || {}))}
+          ${row('Parking time', parkingTime)}
           ${chargesRow(parkingTotal)}
         </table>
       </div>`;

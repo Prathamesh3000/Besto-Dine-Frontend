@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useMemo, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useAuth } from './AuthContext';
 import { isDineInLocked, needsTableScan, requestTableScan } from '../utils/dineInSession';
 import { CUSTOMER_DATA_CLEARED_EVENT } from '../utils/customerSession';
 import { mergeLine, countDistinctLines, cartSubtotal } from '../utils/cart';
+import { getActiveTenantSlug, subscribeActiveTenant } from '../utils/tenant';
 import toast from 'react-hot-toast';
 
 // The cart store shared by the customer and waiter flows. Lives here
@@ -18,9 +19,26 @@ const CartContext = createContext();
 // table-first ordering flow). The waiter flow calls setActiveTable(id)
 // when a table is chosen so subsequent cart mutations land in that
 // table's slot and don't bleed across tables.
+//
+// Slots are also keyed per tenant: with an active restaurant the slot
+// key is `<table|_default_>@<tenant slug>`, so entering a different
+// restaurant shows (and persists) that restaurant's cart and never
+// carries tenant A's menuItem ids into a tenant B order. Coming back
+// to A finds A's cart where it was left.
 const STORAGE_KEY = 'cart_by_table';
 const LEGACY_KEY  = 'cart';
 const DEFAULT_SLOT = '_default_';
+
+/** Storage slot for a table (or the default slot) under a tenant. */
+function cartSlotKey(tableId, tenantSlug) {
+    const base = tableId ? String(tableId) : DEFAULT_SLOT;
+    return tenantSlug ? `${base}@${tenantSlug}` : base;
+}
+
+/** True for a customer (default) slot of any tenant. */
+function isDefaultCartSlot(key) {
+    return key === DEFAULT_SLOT || String(key).startsWith(`${DEFAULT_SLOT}@`);
+}
 
 // One-time migration from the old single-blob `cart` key to the new
 // per-table shape. If the legacy key exists and the new one doesn't,
@@ -73,10 +91,14 @@ export const CartProvider = ({ children }) => {
         try { return localStorage.getItem('cart_active_table') || null; } catch { return null; }
     });
 
+    // The active restaurant — carts are kept per tenant.
+    const tenantSlug = useSyncExternalStore(subscribeActiveTenant, getActiveTenantSlug);
+
     const { user, isGuest, isLoading } = useAuth();
 
-    // Effective slot key — activeTableId wins; else the shared default.
-    const slotKey = activeTableId || DEFAULT_SLOT;
+    // Effective slot key — activeTableId wins; else the shared default;
+    // both scoped to the active tenant.
+    const slotKey = cartSlotKey(activeTableId, tenantSlug);
 
     // Persist the table map
     useEffect(() => {
@@ -137,7 +159,7 @@ export const CartProvider = ({ children }) => {
             const guestStart = localStorage.getItem('guest_session_start');
             const cartReset = localStorage.getItem('guest_cart_reset');
             if (guestStart && guestStart !== cartReset) {
-                setCartsByTable(prev => ({ ...prev, [DEFAULT_SLOT]: {} }));
+                setCartsByTable(prev => ({ ...prev, [cartSlotKey(null, getActiveTenantSlug())]: {} }));
                 localStorage.setItem('guest_cart_reset', guestStart);
             }
         }
@@ -149,9 +171,10 @@ export const CartProvider = ({ children }) => {
     // copy too, or the persist effect above writes it straight back.
     useEffect(() => {
         const onCleared = () => setCartsByTable(prev => {
-            if (!prev[DEFAULT_SLOT]) return prev;
+            const defaults = Object.keys(prev).filter(isDefaultCartSlot);
+            if (!defaults.length) return prev;
             const next = { ...prev };
-            delete next[DEFAULT_SLOT];
+            defaults.forEach((k) => { delete next[k]; });
             return next;
         });
         window.addEventListener(CUSTOMER_DATA_CLEARED_EVENT, onCleared);
@@ -234,14 +257,14 @@ export const CartProvider = ({ children }) => {
 
     // Clear a specific table's cart (used when closing / settling a table)
     const clearCartForTable = useCallback((tableId) => {
-        const key = tableId ? String(tableId) : DEFAULT_SLOT;
+        const key = cartSlotKey(tableId, tenantSlug);
         setCartsByTable(prev => {
             if (!prev[key]) return prev;
             const next = { ...prev };
             delete next[key];
             return next;
         });
-    }, []);
+    }, [tenantSlug]);
 
     const cartItems = useMemo(() => cartsByTable[slotKey] || {}, [cartsByTable, slotKey]);
 

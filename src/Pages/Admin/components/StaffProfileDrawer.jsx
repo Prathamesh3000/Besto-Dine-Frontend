@@ -3,8 +3,9 @@ import { X, Check, Pencil, Ban, KeyRound, Copy, Trash2, Clock, ChevronRight } fr
 import StaffPerformanceModal from './StaffPerformanceModal'
 import { toast } from 'react-hot-toast'
 import api from '../../../utils/api'
+import { backendOrigin } from '../../../utils/apiOrigin';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL.replace(/\/api.*$/, '');
+const BACKEND_URL = backendOrigin();
 const resolveAvatar = (url, name) => {
     if (!url) return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'Staff')}&background=random`;
     if (url.startsWith('/uploads/')) return `${BACKEND_URL}${url}`;

@@ -3,7 +3,8 @@
 // The signup lands in Super Admin → Pending Approvals; the owner can sign in
 // at /staff-login once it's approved (until then login answers 403
 // SIGNUP_PENDING, which Pages/Login.jsx renders as a status panel).
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { toast } from 'react-hot-toast';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { publicAPI } from '../../utils/api';
 import { getPublicAppOrigin } from '../../utils/customerLinks';
+import { sanitizeMobileInput, mobileError, mobileInputAttrs } from '../../utils/mobile';
 import { passwordError, MIN_LENGTH } from '../../utils/passwordPolicy';
 import PasswordStrengthMeter from '../../Components/Common/PasswordStrengthMeter';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
@@ -122,6 +124,10 @@ const RegisterRestaurant = () => {
     const [submitting, setSubmitting] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [result, setResult] = useState(null);
+    // Confirmation popup shown on top of the success screen (N5).
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [phoneBlurred, setPhoneBlurred] = useState(false);
+    const formErrorRef = useRef(null);
 
     const plansQuery = usePublicPlans();
     const plans = plansQuery.data || [];
@@ -234,8 +240,10 @@ const RegisterRestaurant = () => {
         const email = values.contactEmail.trim();
         if (!EMAIL_REGEX.test(email)) e.contactEmail = t('register_hotel.err_email', 'Please enter a valid email address.');
         else if (email.length > 120) e.contactEmail = t('register_hotel.err_email_long', 'Email cannot exceed 120 characters.');
-        const phone = values.contactPhone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
-        if (!/^[6-9]\d{9}$/.test(phone)) e.contactPhone = t('register_hotel.err_phone', 'Please enter a valid 10-digit mobile number.');
+        const phoneErr = mobileError(values.contactPhone);
+        if (phoneErr) e.contactPhone = values.contactPhone
+            ? phoneErr
+            : t('register_hotel.err_phone', 'Please enter a valid 10-digit mobile number.');
         const pwErr = passwordError(values.password);
         if (pwErr) e.password = pwErr;
         if (!values.confirmPassword) e.confirmPassword = t('register_hotel.err_confirm', 'Please re-enter your password.');
@@ -280,7 +288,7 @@ const RegisterRestaurant = () => {
             restaurantName: trimmedName,
             ownerName: values.ownerName.trim(),
             contactEmail: values.contactEmail.trim().toLowerCase(),
-            contactPhone: values.contactPhone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, ''),
+            contactPhone: values.contactPhone, // already normalised to 10 digits by sanitizeMobileInput
             city: values.city.trim(),
             password: values.password,
             acceptTerms: true,
@@ -303,10 +311,16 @@ const RegisterRestaurant = () => {
                 planName: data.requestedPlan?.name || selectedPlan?.name || '',
             });
             setStep('done');
+            setShowConfirm(true);
+            toast.success(t('register_hotel.toast_success', "Registration submitted — we'll review and email you."), { id: 'register-hotel-success' });
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (err) {
             const status = err.response?.status;
             const body = err.response?.data || {};
+            // The request is _silent (no global toast) and the error banner
+            // sits at the top of a long form — surface failures visibly so
+            // a rejected submit never looks like "nothing happened".
+            toast.error(body.message || t('register_hotel.err_generic', 'Registration failed. Please check your details and try again.'), { id: 'register-hotel-error' });
             if (!err.response) {
                 setFormError(t('register_hotel.err_network', "We couldn't reach BestoDine. Check your connection and try again."));
             } else if (status === 429) {
@@ -330,10 +344,16 @@ const RegisterRestaurant = () => {
                     setFormError(message);
                 }
             }
+            setTimeout(() => formErrorRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }), 60);
         } finally {
             setSubmitting(false);
         }
     };
+
+    // Live mobile feedback: once 10 digits are in (or the field was left).
+    const livePhoneError = values.contactPhone && (values.contactPhone.length === 10 || phoneBlurred)
+        ? mobileError(values.contactPhone)
+        : '';
 
     // ── Success ───────────────────────────────────────────────────────
     if (step === 'done' && result) {
@@ -377,6 +397,13 @@ const RegisterRestaurant = () => {
                             </li>
                         )}
                     </ol>
+                    {showConfirm && (
+                        <SubmittedDialog
+                            name={result.name}
+                            email={result.email}
+                            onClose={() => setShowConfirm(false)}
+                        />
+                    )}
                     {result.planName && (
                         <p className="mt-5 text-[13px] text-[#667085]">
                             {t('register_hotel.done_plan', 'Requested plan:')}{' '}
@@ -432,7 +459,7 @@ const RegisterRestaurant = () => {
 
                 <div className="px-5 sm:px-8 py-6">
                     {formError && (
-                        <div role="alert" className="mb-5 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-[14px] text-red-700 font-medium">
+                        <div ref={formErrorRef} role="alert" className="mb-5 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-[14px] text-red-700 font-medium">
                             <AlertCircle size={17} className="shrink-0 mt-0.5" /> {formError}
                         </div>
                     )}
@@ -606,13 +633,23 @@ const RegisterRestaurant = () => {
 
                             <div>
                                 <label htmlFor="contactPhone" className={labelCls}>{t('register_hotel.phone', 'Mobile number')}</label>
+                                {/* Digits only, max 10. A pasted "+91 98765-43210" is
+                                    normalised to 9876543210 (utils/mobile). No maxLength:
+                                    it would truncate the paste before onChange runs. */}
                                 <IconInput
-                                    icon={Phone} id="contactPhone" type="tel" inputMode="numeric" error={errors.contactPhone}
+                                    icon={Phone} id="contactPhone" {...mobileInputAttrs}
+                                    error={errors.contactPhone || livePhoneError}
                                     value={values.contactPhone}
-                                    onChange={(e) => { setValues(prev => ({ ...prev, contactPhone: e.target.value.replace(/[^\d+\s-]/g, '').slice(0, 16) })); clearError('contactPhone'); }}
-                                    autoComplete="tel-national" required placeholder="98765 43210"
+                                    onChange={(e) => { setValues(prev => ({ ...prev, contactPhone: sanitizeMobileInput(e.target.value) })); clearError('contactPhone'); }}
+                                    onBlur={() => setPhoneBlurred(true)}
+                                    required placeholder="98765 43210"
                                 />
-                                <FieldError id="contactPhone-error" message={errors.contactPhone} />
+                                {!(errors.contactPhone || livePhoneError) && (
+                                    <p className="mt-1.5 text-[12px] text-[#667085] tabular-nums">
+                                        {t('register_hotel.phone_hint', '10-digit Indian mobile')} · {values.contactPhone.length}/10
+                                    </p>
+                                )}
+                                <FieldError id="contactPhone-error" message={errors.contactPhone || livePhoneError} />
                             </div>
 
                             <div>
@@ -709,6 +746,59 @@ const RegisterRestaurant = () => {
         </Shell>
     );
 };
+
+/** "Registration submitted" confirmation popup (N5) — shown over the success screen. */
+function SubmittedDialog({ name, email, onClose }) {
+    const { t } = useTranslation();
+    const closeRef = useRef(null);
+    useEffect(() => {
+        closeRef.current?.focus();
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
+    return (
+        <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={onClose}
+        >
+            <div
+                role="dialog" aria-modal="true" aria-labelledby="register-submitted-title"
+                className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 sm:p-7"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="w-14 h-14 rounded-2xl bg-[#ECFDF3] text-[#067647] flex items-center justify-center">
+                    <CheckCircle2 size={28} />
+                </div>
+                <h2 id="register-submitted-title" className="mt-4 text-[22px] font-extrabold tracking-tight text-[#101828]">
+                    {t('register_hotel.popup_title', 'Registration submitted 🎉')}
+                </h2>
+                <p className="mt-1.5 text-[15px] text-[#475467] leading-relaxed">
+                    {t('register_hotel.popup_body', "We'll review {{name}} and email you at {{email}}.", { name, email })}
+                </p>
+                <ol className="mt-4 space-y-2 text-[14px] text-[#344054] list-decimal pl-5">
+                    <li>{t('register_hotel.popup_step1', 'Our team reviews your application — usually within one business day.')}</li>
+                    <li>{t('register_hotel.popup_step2', 'You get an approval email at {{email}}.', { email })}</li>
+                    <li>{t('register_hotel.popup_step3', 'Sign in at Staff login with the email and password you just created.')}</li>
+                </ol>
+                <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                    <button
+                        ref={closeRef} type="button" onClick={onClose}
+                        className="flex-1 inline-flex items-center justify-center px-5 py-3 rounded-xl text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] transition-colors"
+                    >
+                        {t('register_hotel.popup_ok', 'Got it')}
+                    </button>
+                    <Link
+                        to="/staff-login"
+                        className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[15px] font-bold text-[#1A181B] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors"
+                    >
+                        <LogIn size={17} /> {t('register_hotel.go_login', 'Go to staff login')}
+                    </Link>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 /** Page frame: slim brand bar, benefits column on desktop, content column. */
 function Shell({ children }) {

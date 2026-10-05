@@ -20,7 +20,7 @@
  * only after filling in their mobile number and accepting the terms,
  * via a rejection that pointed at no field.
  *
- * Now: the client enforces the server's rules (8+ chars, upper, lower,
+ * Now: the client enforces the server's rules (8–128 chars, upper, lower,
  * digit, special — which always scores at least "Good"), and it does so
  * on step 1 where the field actually lives.
  *
@@ -45,6 +45,9 @@ export const MIN_PASSWORD_SCORE = 3;
 
 /** Minimum accepted length (a "Good" password). */
 export const MIN_LENGTH = 8;
+
+/** Maximum accepted length — mirrors Backend/utils/passwordPolicy.js isStrongPassword. */
+export const MAX_LENGTH = 128;
 
 /** Length that separates "Good" from "Strong". */
 export const STRONG_LENGTH = 12;
@@ -78,6 +81,7 @@ export function scorePassword(pw) {
 export function passwordRuleFailures(pw) {
     const failures = [];
     if (!pw || pw.length < MIN_LENGTH) failures.push('length');
+    if (pw && pw.length > MAX_LENGTH) failures.push('maxLength');
     if (!(/[A-Z]/.test(pw || '') && /[a-z]/.test(pw || ''))) failures.push('case');
     if (!/\d/.test(pw || '')) failures.push('digit');
     if (!/[!@#$%^&*()_\-+=<>?]/.test(pw || '')) failures.push('special');
@@ -100,6 +104,7 @@ export function passwordError(pw) {
     if (failures.includes('length')) {
         return `Use at least ${MIN_LENGTH} characters`;
     }
+    if (failures.includes('maxLength')) return `Use at most ${MAX_LENGTH} characters`;
     if (failures.includes('case')) return 'Add both upper and lower case letters';
     if (failures.includes('digit')) return 'Add a number';
     return 'Add a special character (!@#$…)';

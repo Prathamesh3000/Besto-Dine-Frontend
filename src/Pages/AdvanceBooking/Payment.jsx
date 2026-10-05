@@ -84,7 +84,12 @@ function Payment() {
   // (treat `total` as the full value and compute the advance locally).
   const bookingData = location.state || {};
   const paymentType = bookingData.paymentType || 'advance';
-  const bookingTotal = Number(bookingData.bookingTotal || bookingData.total || 0);
+  // `??`, not `||`: a booking fully covered by points / coupon has a
+  // legitimate total of ₹0, which is not "missing".
+  const rawBookingTotal = bookingData.bookingTotal ?? bookingData.total;
+  const hasBookingTotal = rawBookingTotal !== undefined && rawBookingTotal !== null
+    && rawBookingTotal !== '' && Number.isFinite(Number(rawBookingTotal));
+  const bookingTotal = hasBookingTotal ? Number(rawBookingTotal) : 0;
   // Was: `Math.ceil(totalAmount * 0.5)` against an already-halved value,
   // which displayed ₹1,763 instead of ₹3,525 and silently charged the
   // customer the wrong amount via Razorpay. Now we trust the review
@@ -96,13 +101,16 @@ function Payment() {
       : Math.ceil(bookingTotal * 0.5)
   );
   const remainingAfter = Math.max(0, bookingTotal - amountDueNow);
+  // Nothing to charge now (points / coupon cover it): confirm the booking
+  // without opening the gateway, which cannot take a ₹0 order.
+  const nothingDueNow = hasBookingTotal && amountDueNow <= 0;
 
   // Guard: redirect if no booking data present (user navigated directly)
   React.useEffect(() => {
-    if (!bookingData.bookingType || !bookingTotal) {
+    if (!bookingData.bookingType || !hasBookingTotal) {
       navigate('/customer/booking-type', { replace: true });
     }
-  }, [bookingData.bookingType, bookingTotal, navigate]);
+  }, [bookingData.bookingType, hasBookingTotal, navigate]);
 
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -119,7 +127,13 @@ function Payment() {
   ];
 
   const handlePayNow = async () => {
-    if (!selectedMethod || isProcessing) return;
+    if (isProcessing) return;
+    if (nothingDueNow) {
+      setIsProcessing(true);
+      await createBooking(selectedMethod || 'wallet', null);
+      return;
+    }
+    if (!selectedMethod) return;
 
     setIsProcessing(true);
     await handleRazorpayPayment();
@@ -148,7 +162,9 @@ function Payment() {
         const orderId = response.data.booking.bookingId || response.data.booking._id;
         setSavedOrderId(orderId);
 
-        setModalMsg('Payment successful! Your reservation has been confirmed.');
+        setModalMsg(rzpResponse
+          ? 'Payment successful! Your reservation has been confirmed.'
+          : 'Your reservation has been confirmed.');
         setShowModal(true);
       }
     } catch (err) {
@@ -336,12 +352,12 @@ function Payment() {
         </button>
         <button
           onClick={handlePayNow}
-          disabled={isProcessing || !selectedMethod}
+          disabled={isProcessing || (!selectedMethod && !nothingDueNow)}
           className={`flex-1 font-bold py-4 rounded-[16px] transition-all shadow-lg ${
-            isProcessing || !selectedMethod ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#FE8301] text-white shadow-orange-200'
+            isProcessing || (!selectedMethod && !nothingDueNow) ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#FE8301] text-white shadow-orange-200'
           }`}
         >
-          {isProcessing ? 'Processing...' : 'Pay Now'}
+          {isProcessing ? 'Processing...' : (nothingDueNow ? 'Confirm Booking' : 'Pay Now')}
         </button>
       </div>
 
@@ -351,12 +367,12 @@ function Payment() {
         </button>
         <button
           onClick={handlePayNow}
-          disabled={isProcessing || !selectedMethod}
+          disabled={isProcessing || (!selectedMethod && !nothingDueNow)}
           className={`font-bold text-[14px] py-3.5 px-10 rounded-[16px] w-[160px] text-center transition-all shadow-lg ${
-            isProcessing || !selectedMethod ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#FE8301] text-white shadow-orange-200'
+            isProcessing || (!selectedMethod && !nothingDueNow) ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#FE8301] text-white shadow-orange-200'
           }`}
         >
-          {isProcessing ? 'Processing' : 'Pay Now'}
+          {isProcessing ? 'Processing' : (nothingDueNow ? 'Confirm Booking' : 'Pay Now')}
         </button>
       </div>
     </div>

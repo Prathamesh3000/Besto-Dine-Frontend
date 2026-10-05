@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
-import api from '../utils/api';
+import { QueryClientContext } from '@tanstack/react-query';
+import api, { CUSTOMER_SESSION_EXPIRED_EVENT } from '../utils/api';
+import { toast } from 'react-hot-toast';
+import { getActiveTenantSlug } from '../utils/tenant';
+import { isReservedSlug } from '../utils/reservedSlugs';
 import { disconnectSocket, reconnectWithAuth } from '../utils/socket';
 import { isGuestSessionExpired, clearGuestSession } from '../utils/guestSession';
 import {
@@ -46,6 +50,8 @@ export const SUPERADMIN_ROLES = [USER_ROLES.SUPERADMIN];
 export const ALL_AUTH_ROLES = [...STAFF_ROLES, ...CUSTOMER_ROLES, USER_ROLES.CHEF, USER_ROLES.SUPERADMIN];
 
 export function AuthProvider({ children }) {
+    // Optional: undefined when no QueryClientProvider wraps the tree.
+    const queryClient = useContext(QueryClientContext);
     const [user, setUser] = useState(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [isGuest, setIsGuest] = useState(false);
@@ -383,6 +389,12 @@ export function AuthProvider({ children }) {
             localStorage.removeItem('scanToken');
             localStorage.removeItem('scanSessionStart');
         }
+        // Staff-side logout: drop the whole React Query cache. The admin
+        // cache is tenant data; the next account signing in on this tab
+        // (possibly another restaurant's admin) must start cold.
+        if (aud !== 'customer') {
+            try { queryClient?.clear(); } catch { /* ignore */ }
+        }
         disconnectSocket();
         window.dispatchEvent(new Event('storage_sync'));
         setTimeout(() => sessionStorage.removeItem('intentional_logout'), 2000);
@@ -391,7 +403,7 @@ export function AuthProvider({ children }) {
         if (!opts.fromBroadcast) {
             try { AUTH_CHANNEL.postMessage({ type: 'logout', audience: aud }); } catch { /* ignore */ }
         }
-    }, [setAudience]);
+    }, [setAudience, queryClient]);
 
     // Best-effort server-side logout: revokes this device's refresh token
     // (#15) and closes an auto-opened staff shift. Credentials are captured
@@ -443,6 +455,50 @@ export function AuthProvider({ children }) {
         AUTH_CHANNEL.addEventListener('message', onMsg);
         return () => AUTH_CHANNEL.removeEventListener('message', onMsg);
     }, [hardLogoutLocal]);
+
+    // QA N14 — customer login expired (60-min inactivity or 24h cap; see
+    // api.js announceCustomerSessionExpired). Drop ONLY the login: a
+    // diner who also scanned a table keeps the guest QR session, table
+    // and cart. Explain, then route to the restaurant page (or /login).
+    useEffect(() => {
+        const onExpired = () => {
+            const wasCustomer = userRef.current?.role === 'customer'
+                || (audRef.current || currentAudience()) === 'customer';
+            if (!wasCustomer) return;
+            clearAuth('customer');
+            userRef.current = null;
+            setUser(null);
+            setIsLoggedIn(false);
+            if (audRef.current === 'customer') setAudience(null);
+            disconnectSocket();
+            window.dispatchEvent(new Event('storage_sync'));
+            const notice = 'Your session expired, please log in again';
+            const path = window.location.pathname;
+            const first = path.split('/').filter(Boolean)[0];
+            // Pages that work without a login stay put — the scan page, a
+            // restaurant landing page, the pickers and the login itself.
+            const publicPage = path === '/' || path === '/login' || path === '/register'
+                || path.startsWith('/scan') || path.startsWith('/r/') || path === '/branch-selection'
+                || (first && !isReservedSlug(first));
+            if (publicPage) {
+                toast.error(notice, { id: 'customer-session-expired', duration: 6000 });
+                return;
+            }
+            try { sessionStorage.setItem('bd_customer_session_notice', notice); } catch { /* ignore */ }
+            const slug = getActiveTenantSlug();
+            window.location.assign(slug && !isReservedSlug(slug) ? `/${encodeURIComponent(slug)}` : '/login');
+        };
+        window.addEventListener(CUSTOMER_SESSION_EXPIRED_EVENT, onExpired);
+        // Notice carried across the redirect above.
+        try {
+            const pending = sessionStorage.getItem('bd_customer_session_notice');
+            if (pending) {
+                sessionStorage.removeItem('bd_customer_session_notice');
+                setTimeout(() => toast.error(pending, { id: 'customer-session-expired', duration: 6000 }), 300);
+            }
+        } catch { /* ignore */ }
+        return () => window.removeEventListener(CUSTOMER_SESSION_EXPIRED_EVENT, onExpired);
+    }, [setAudience]);
 
 
     const setGuestMode = () => {

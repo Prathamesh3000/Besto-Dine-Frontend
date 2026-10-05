@@ -8,6 +8,9 @@ import toast from 'react-hot-toast';
 const AddAreaModal = ({ onClose, onSubmit }) => {
     const [areaName, setAreaName] = useState('');
     const [note, setNote] = useState('');
+    // Customer-facing description of this seating option (QA N12) —
+    // shown on the table-booking Review step.
+    const [description, setDescription] = useState('');
     const [existingAreas, setExistingAreas] = useState([]);
     const [editingAreaId, setEditingAreaId] = useState(null);
 
@@ -80,7 +83,8 @@ const AddAreaModal = ({ onClose, onSubmit }) => {
         try {
             const areaData = {
                 name: areaName.trim(),
-                note: note.trim()
+                note: note.trim(),
+                description: description.trim()
             };
 
             // _silent so the axios interceptor doesn't fire its own toast
@@ -91,6 +95,7 @@ const AddAreaModal = ({ onClose, onSubmit }) => {
                 setEditingAreaId(null);
                 setAreaName('');
                 setNote('');
+                setDescription('');
                 setTouched(false);
                 fetchAreas();
             } else {
@@ -114,6 +119,7 @@ const AddAreaModal = ({ onClose, onSubmit }) => {
     const handleEditClick = (area) => {
         setAreaName(area.name);
         setNote(area.note || '');
+        setDescription(area.description || '');
         setEditingAreaId(area._id);
         setError(null);
         setTouched(false);
@@ -249,8 +255,24 @@ const AddAreaModal = ({ onClose, onSubmit }) => {
                                 placeholder="Internal note — what makes this area distinct (capacity, ambience, smoking, etc.)"
                                 value={note}
                                 onChange={(e) => setNote(e.target.value)}
-                                className="w-full h-[150px] p-4 border border-[#D0D5DD] rounded-[10px] focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 text-[14px] text-[#101828] placeholder:text-[#98A2B3] font-manrope resize-none"
+                                className="w-full h-[110px] p-4 border border-[#D0D5DD] rounded-[10px] focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 text-[14px] text-[#101828] placeholder:text-[#98A2B3] font-manrope resize-none"
                             />
+                        </div>
+
+                        {/* Customer-facing description */}
+                        <div>
+                            <label htmlFor="areaDescription" className="block text-[14px] leading-5 font-medium text-[#344054] mb-1.5 font-manrope">
+                                Description for customers <span className="text-[#98A2B3] font-normal">(optional)</span>
+                            </label>
+                            <textarea
+                                id="areaDescription"
+                                maxLength={300}
+                                placeholder="Shown when a customer reviews a table booking — e.g. Air-conditioned seating by the windows, ideal for families."
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                                className="w-full h-[90px] p-4 border border-[#D0D5DD] rounded-[10px] focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 text-[14px] text-[#101828] placeholder:text-[#98A2B3] font-manrope resize-none"
+                            />
+                            <p className="text-[12px] text-[#98A2B3] mt-1 text-right font-manrope">{description.length}/300</p>
                         </div>
                     </div>
 

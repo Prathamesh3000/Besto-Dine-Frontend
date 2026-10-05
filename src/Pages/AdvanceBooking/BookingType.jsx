@@ -7,7 +7,9 @@ import OutdoorImg from '/outdoor-seeting.svg';
 import WindowImg from '/window-seeting.svg';
 import PrivateImg from '/private-seeting.svg';
 import BookingProgressBar from './BookingProgressBar';
-import api, { waiterAPI } from '../../utils/api';
+import { waiterAPI } from '../../utils/api';
+import RequiredMark from '../../Components/Common/RequiredMark';
+import { reportMissingFields } from '../../utils/requiredFields';
 
 const BookingType = () => {
   const navigate = useNavigate();
@@ -28,7 +30,9 @@ const BookingType = () => {
         setAreas(res.data.areas.map(a => ({
           id: a._id,
           title: a.name,
-          subtitle: a.note || 'Available for booking',
+          subtitle: a.description || a.note || 'Available for booking',
+          description: a.description || '',
+          note: a.note || '',
           image: a.name.toLowerCase().includes('outdoor') ? OutdoorImg :
                  a.name.toLowerCase().includes('window') ? WindowImg :
                  a.name.toLowerCase().includes('private') ? PrivateImg : IndoorImg
@@ -59,6 +63,27 @@ const BookingType = () => {
     setSelectedTypes([id]);
   };
 
+  // Both footers (mobile + desktop) continue through here so the review
+  // step always gets the seating name + description (QA N12) — the
+  // mobile button used to drop `selectedTypeNames` entirely.
+  const handleContinue = () => {
+    const chosen = areas.filter(a => selectedTypes.includes(a.id));
+    if (chosen.length === 0) {
+      reportMissingFields([{ label: 'Seating type', id: ['seating-type-options', 'seating-type-options-desktop'] }]);
+      return;
+    }
+    const area = chosen[0];
+    navigate('/customer/book-table-details', {
+      state: {
+        ...location.state,
+        selectedTypes,
+        selectedTypeNames: chosen.map(a => a.title),
+        selectedArea: { id: area.id, name: area.title, description: area.description, note: area.note },
+        bookingType: 'table',
+      },
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[#FDFDFD] font-manrope">
       {/* Mobile Layout */}
@@ -69,7 +94,7 @@ const BookingType = () => {
             <button onClick={() => navigate(-1)} className="p-1 -ml-1">
               <ChevronLeft size={28} className="text-[#1A181B]" strokeWidth={2.5} />
             </button>
-            <h1 className="text-[16px] font-[700] text-[#1A181B]">Select Booking Type</h1>
+            <h1 className="text-[16px] font-[700] text-[#1A181B]">Select Booking Type<RequiredMark /></h1>
           </div>
           <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-100">
             <img
@@ -81,7 +106,7 @@ const BookingType = () => {
         </header>
 
         {/* Mobile Cards */}
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 px-4 sm:px-5 pt-4">
+        <div id="seating-type-options" className="grid grid-cols-2 gap-3 sm:gap-4 px-4 sm:px-5 pt-4">
           {loading ? (
             <div className="col-span-2 flex justify-center py-10">
               <div className="w-8 h-8 border-4 border-[#FE8301] border-t-transparent rounded-full animate-spin"></div>
@@ -128,7 +153,7 @@ const BookingType = () => {
             Previous
           </button>
           <button
-            onClick={() => navigate('/customer/book-table-details', { state: { ...location.state, selectedTypes, bookingType: 'table' } })}
+            onClick={handleContinue}
             className="flex-1 bg-[#FE8301] text-white font-nunito font-semibold text-[14px] py-3.5 rounded-[16px]"
           >
             Continue
@@ -151,9 +176,9 @@ const BookingType = () => {
 
           {/* Main Option Box */}
           <div className="border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 bg-white shadow-[0px_2px_12px_rgba(0,0,0,0.02)]">
-            <h2 className="text-[16px] font-[700] text-[#1A181B] mb-6">Select Seating Type</h2>
+            <h2 className="text-[16px] font-[700] text-[#1A181B] mb-6">Select Seating Type<RequiredMark /></h2>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div id="seating-type-options-desktop" className="grid grid-cols-2 gap-6">
               {loading ? (
                 <div className="col-span-2 flex justify-center py-10">
                    <div className="w-8 h-8 border-4 border-[#FE8301] border-t-transparent rounded-full animate-spin"></div>
@@ -215,10 +240,7 @@ const BookingType = () => {
               Previous
             </button>
             <button
-               onClick={() => {
-                 const selectedTypeNames = areas.filter(a => selectedTypes.includes(a.id)).map(a => a.title);
-                 navigate('/customer/book-table-details', { state: { ...location.state, selectedTypes, selectedTypeNames, bookingType: 'table' } });
-               }}
+               onClick={handleContinue}
               className="bg-[#FE8301] text-white font-nunito font-semibold text-[14px] py-3 px-8 rounded-[16px] w-[140px] text-center"
             >
               Continue

@@ -6,6 +6,7 @@ import { Clock, Info, MapPin, Store, Sparkles, Images, Share2, Building2, Refres
 import { toast } from 'react-hot-toast';
 import { publicAPI } from '../../utils/api';
 import { isReservedSlug } from '../../utils/reservedSlugs';
+import { getPublicAppOrigin } from '../../utils/customerLinks';
 import { enterRestaurant, resolveBranchChoice, landingActionTarget } from '../../utils/enterRestaurant';
 import { resolveImageUrl, sizedImage } from '../../utils/image';
 import { useAuth } from '../../Context/AuthContext';
@@ -175,7 +176,9 @@ const RestaurantLandingPage = () => {
     const closePicker = useCallback(() => setPicker(null), []);
 
     const handleShare = async () => {
-        const url = window.location.href;
+        // Public origin (VITE_PUBLIC_APP_URL) so a share from a localhost
+        // or admin host still hands out a link other devices can open.
+        const url = `${getPublicAppOrigin()}${window.location.pathname}${window.location.search}`;
         try {
             if (navigator.share) {
                 await navigator.share({ title: restaurant?.name, text: landing.tagline || restaurant?.name, url });

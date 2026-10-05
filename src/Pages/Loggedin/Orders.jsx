@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ChevronLeft,
   Search,
-  Mic,
   Star,
   X,
   XCircle,
@@ -22,6 +21,7 @@ import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
 import toast from "react-hot-toast";
 import BottomNav from "../../Components/Loggedin/BottomNav";
+import VoiceSearchButton from "../../Components/Loggedin/VoiceSearchButton";
 import NoOrderImg from "/noordersicon.svg";
 import CancelOrderIcon from "/cancelOrder.svg";
 import { billFromOrder, toTaxConfig } from '../../utils/billing';
@@ -1734,7 +1734,7 @@ function Orders() {
               <X size={16} />
             </button>
           ) : (
-            <Mic size={18} className="text-[#999999] flex-shrink-0" />
+            <VoiceSearchButton size={18} onResult={(text) => setSearchQuery(text)} />
           )}
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import api from '../../utils/api';
-import { adminKeys, getAdminBranchKey } from './queryKeys';
+import { adminKeys, getAdminBranchKey, withAdminTenant } from './queryKeys';
 
 /**
  * Prefetch the data each admin page needs as soon as the user hovers
@@ -22,8 +22,11 @@ export function useAdminPrefetch() {
     const qc = useQueryClient();
 
     const prefetchers = {
+        // Same key useAdminBootstrap (TablesDashboard) reads: the
+        // bootstrap key + the selected branch ('all' when none), which
+        // AdminBranchContext persists to the slot getAdminBranchKey reads.
         '/admin/tables': () => qc.prefetchQuery({
-            queryKey: adminKeys.bootstrap,
+            queryKey: [...adminKeys.bootstrap, getAdminBranchKey()],
             queryFn: () => api.get('/admin/bootstrap').then(r => r.data?.data ?? {}),
             staleTime: 60_000,
         }),
@@ -32,7 +35,7 @@ export function useAdminPrefetch() {
         // caches one branch's data under another branch's key.
         '/admin/orders': () => Promise.all([
             qc.prefetchQuery({
-                queryKey: ['admin', 'orders', 'dine-archive', getAdminBranchKey()],
+                queryKey: withAdminTenant(['admin', 'orders', 'dine-archive', getAdminBranchKey()]),
                 queryFn: async () => {
                     const [live, past] = await Promise.all([
                         api.get('/orders/live'),
@@ -55,7 +58,7 @@ export function useAdminPrefetch() {
         '/admin/dashboard': () => {
             const params = { earningsPeriod: 'daily', bookingTime: 'today', branch: getAdminBranchKey() };
             return qc.prefetchQuery({
-                queryKey: ['admin', 'telemetry', params],
+                queryKey: withAdminTenant(['admin', 'telemetry', params]),
                 queryFn: () => api.get('/telemetry/stats', { params }).then(r => r.data),
                 staleTime: 15_000,
             });

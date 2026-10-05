@@ -18,6 +18,7 @@
  * callers keep writing `adminKeys.tables` / `adminKeys.orders.live`
  * unchanged, and the branch goes LAST so existing prefix invalidations
  * (`['admin']`, `['admin', 'orders']`, `['admin', 'tables']`) still match.
+ * The same trailing object also carries the tenant (see adminScope).
  */
 export function getAdminBranchKey() {
     try {
@@ -35,7 +36,38 @@ export function getAdminBranchKey() {
     }
 }
 
-const k = (...parts) => ['admin', ...parts, { branch: getAdminBranchKey() }];
+/**
+ * The tenant (restaurant) the admin cache belongs to: the signed-in
+ * staff user's tenant, else the active tenant blob (Login.jsx sets it
+ * for staff too). Read from storage at access time like the branch, so
+ * a tenant switch on the same tab — admin of A logs out, admin of B
+ * logs in — can never be served A's cache. null when unknown (the key
+ * then omits it).
+ */
+export function getAdminTenantKey() {
+    const read = (key) => {
+        try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+    };
+    const staffTenant = read('staff_user')?.tenant;
+    const fromStaff = staffTenant && (staffTenant._id || staffTenant.slug);
+    if (fromStaff) return String(fromStaff);
+    const active = read('activeTenant');
+    return active?.slug ? String(active.slug) : null;
+}
+
+/** Trailing scope part of every admin key: branch, plus tenant when known. */
+export function adminScope() {
+    const tenant = getAdminTenantKey();
+    return tenant ? { branch: getAdminBranchKey(), tenant } : { branch: getAdminBranchKey() };
+}
+
+/** Append `{ tenant }` to an ad-hoc admin key when the tenant is known. */
+export function withAdminTenant(key) {
+    const tenant = getAdminTenantKey();
+    return tenant ? [...key, { tenant }] : key;
+}
+
+const k = (...parts) => ['admin', ...parts, adminScope()];
 
 export const adminKeys = {
     all:           ['admin'],

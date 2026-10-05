@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import api from '../../../utils/api';
 import { restaurantLink } from '../../../utils/customerLinks';
+import { sanitizeMobileInput, mobileInputAttrs } from '../../../utils/mobile';
 import { Button, Field, inputClass, ModalShell } from './ui';
 
 /**
@@ -109,6 +110,10 @@ const CreateRestaurantModal = ({ onClose, onCreated, prefill }) => {
         setFieldErrors(fe => (fe[name] ? { ...fe, [name]: undefined } : fe));
         if (type === 'checkbox') {
             setForm(f => ({ ...f, [name]: checked }));
+            return;
+        }
+        if (name === 'contactPhone') {
+            setForm(f => ({ ...f, contactPhone: sanitizeMobileInput(value) }));
             return;
         }
         const upper = name === 'gstin' || name === 'pan' ? value.toUpperCase() : value;
@@ -346,8 +351,8 @@ const CreateRestaurantModal = ({ onClose, onCreated, prefill }) => {
                                     </Field>
                                     <Field label="Owner phone" hint="Optional">
                                         <input
-                                            type="tel" name="contactPhone" value={form.contactPhone} onChange={handleChange}
-                                            placeholder="+91 98765 43210"
+                                            {...mobileInputAttrs} name="contactPhone" value={form.contactPhone} onChange={handleChange}
+                                            placeholder="98765 43210"
                                             className={inputClass}
                                         />
                                     </Field>

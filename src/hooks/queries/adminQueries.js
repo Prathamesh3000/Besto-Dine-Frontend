@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../utils/api';
-import { adminKeys, getAdminBranchKey } from './queryKeys';
+import { adminKeys, adminScope, withAdminTenant } from './queryKeys';
 import useSocketEvent from '../useSocketEvent';
 
 /**
@@ -80,7 +80,9 @@ export function usePastOrders(opts = {}) {
 export function useCategories(opts = {}) {
     return useQuery({
         queryKey: adminKeys.categories,
-        queryFn: () => api.get('/categories').then(r => r.data?.categories ?? r.data ?? []),
+        // GET /categories responds { success, count, data: [...] }; cache
+        // the array, the same shape useAdminPrefetch writes under this key.
+        queryFn: () => api.get('/categories').then(r => r.data?.data ?? r.data?.categories ?? (Array.isArray(r.data) ? r.data : [])),
         staleTime: 5 * 60_000,
         ...opts,
     });
@@ -111,7 +113,7 @@ export function useTelemetry({ earningsPeriod = 'daily', timeFilter = 'today', b
     useSocketEvent('order:updated', invalidateTelemetry);
 
     return useQuery({
-        queryKey: ['admin', 'telemetry', params],
+        queryKey: withAdminTenant(['admin', 'telemetry', params]),
         queryFn: () => api.get('/telemetry/stats', { params }).then(r => r.data),
         staleTime: 15_000,
         refetchInterval: 30_000,
@@ -137,7 +139,7 @@ export function useReports({ from = '', to = '', branch = 'all' } = {}, opts = {
     if (to) params.to = to;
     if (branch && branch !== 'all') params.branch = branch;
     return useQuery({
-        queryKey: ['admin', 'reports', { from, to, branch: branch || 'all' }],
+        queryKey: withAdminTenant(['admin', 'reports', { from, to, branch: branch || 'all' }]),
         queryFn: () => api.get('/telemetry/reports', { params }).then(r => r.data),
         staleTime: 60_000,
         keepPreviousData: true,
@@ -161,7 +163,7 @@ export function useForecast({ branch = 'all', horizon, lookback } = {}, opts = {
     if (horizon) params.horizon = horizon;
     if (lookback) params.lookback = lookback;
     return useQuery({
-        queryKey: ['admin', 'forecast', { branch: branch || 'all', horizon: horizon || 'def', lookback: lookback || 'def' }],
+        queryKey: withAdminTenant(['admin', 'forecast', { branch: branch || 'all', horizon: horizon || 'def', lookback: lookback || 'def' }]),
         queryFn: () => api.get('/telemetry/forecast', { params }).then(r => r.data),
         staleTime: 5 * 60_000,
         keepPreviousData: true,
@@ -183,7 +185,7 @@ export function useForecast({ branch = 'all', horizon, lookback } = {}, opts = {
 export function useAdminDineInArchive({ branch = 'all' } = {}, opts = {}) {
     const branchParam = branch && branch !== 'all' ? { branch } : {};
     return useQuery({
-        queryKey: ['admin', 'orders', 'dine-archive', branch || 'all'],
+        queryKey: withAdminTenant(['admin', 'orders', 'dine-archive', branch || 'all']),
         queryFn: async () => {
             const [live, past] = await Promise.all([
                 api.get('/orders/live', { params: branchParam }),
@@ -229,7 +231,7 @@ export function usePastOrdersPage({
     return useQuery({
         // Active branch too — the api interceptor adds it to the request
         // when `branch` isn't passed explicitly.
-        queryKey: ['admin', 'orders', 'past-page', params, { branch: getAdminBranchKey() }],
+        queryKey: ['admin', 'orders', 'past-page', params, adminScope()],
         queryFn: () => api.get('/orders/past', { params }).then(r => r.data),
         staleTime: 15_000,
         keepPreviousData: true,
@@ -259,7 +261,7 @@ export function useInventoryList({
     if (status && status !== 'all') params.status = status;
     if (sortBy) { params.sortBy = sortBy; params.sortOrder = sortOrder; }
     return useQuery({
-        queryKey: ['admin', 'inventory', 'list', params, { branch: getAdminBranchKey() }],
+        queryKey: ['admin', 'inventory', 'list', params, adminScope()],
         queryFn: async () => {
             const [itemsRes, summaryRes] = await Promise.all([
                 api.get('/inventory', { params }),
@@ -284,7 +286,9 @@ export function useInventoryList({
  */
 export function useBranches(opts = {}) {
     return useQuery({
-        queryKey: ['admin', 'branches'],
+        // Keyed by tenant: the branch list is per restaurant, and a
+        // stale list from another tenant would seed adminActiveBranch.
+        queryKey: withAdminTenant(['admin', 'branches']),
         queryFn: () => api.get('/branches', { _silent: true })
             .then(r => r.data?.data ?? [])
             .catch(() => []),

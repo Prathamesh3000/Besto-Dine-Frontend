@@ -35,6 +35,7 @@ import { lineUnitPrice, lineTotal as cartLineTotal } from "../../utils/cart";
 import { isGuestSessionExpired, clearGuestSession } from "../../utils/guestSession";
 import { rememberOrderIds, getCustomerOrderSession } from "../../utils/customerOrderIds";
 import { toast } from "react-hot-toast";
+import { reportMissingFields } from "../../utils/requiredFields";
 
 // ─── Checkout idempotency key ────────────────────────────────────────────────
 // One key per checkout attempt. It survives a slow-network retry / double
@@ -697,7 +698,13 @@ function Cart() {
   const [pointsToRedeem, setPointsToRedeem] = useState("");
   const [appliedPoints, setAppliedPoints] = useState(0);
   const [availablePoints, setAvailablePoints] = useState(0);
-  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  // QA N6 — which coupon is being applied ({ code, source }), not a
+  // shared boolean: tapping Apply on one coupon card must not turn every
+  // card's button into "Applying…". `source` separates the code input's
+  // Apply button from the coupon cards / T&C sheet.
+  const [applyingCoupon, setApplyingCoupon] = useState(null);
+  // Latest apply wins — a slower earlier response can't overwrite it.
+  const couponRequestRef = useRef(0);
   const [availableCoupons, setAvailableCoupons] = useState([]);
   const [taxConfig, setTaxConfig] = useState({ gstPct: 0, servicePct: 0, additionalCharges: [] });
   const [pairingItems, setPairingItems] = useState([]);
@@ -862,8 +869,8 @@ function Cart() {
   // (which is the bug that made tapping a card and immediately hitting
   // Apply behave like a "double tap" — the input value lagged one
   // render behind the handler).
-  const handleApplyCoupon = async (codeOverride) => {
-    const codeToApply = (codeOverride ?? couponCode).trim();
+  const handleApplyCoupon = async (codeOverride, source = 'input') => {
+    const codeToApply = String(typeof codeOverride === 'string' ? codeOverride : couponCode).trim();
     // Coupon and wallet are independent: coupon reduces the order total
     // (a discount), wallet pays a portion of whatever the customer
     // owes. They stack — apply both freely.
@@ -873,7 +880,9 @@ function Cart() {
       return;
     }
     setCouponError('');
-    setIsApplyingCoupon(true);
+    const requestId = ++couponRequestRef.current;
+    const isLatest = () => requestId === couponRequestRef.current;
+    setApplyingCoupon({ code: codeToApply.toUpperCase(), source });
     // Mirror the code into the input so the user sees what's being
     // applied if they tapped a card.
     if (codeOverride) setCouponCode(codeOverride);
@@ -882,7 +891,10 @@ function Cart() {
       // subtotal for scope='food' / 'beverages' coupons. prepStation is
       // carried through from MenuContext when the item was added; falls
       // back to 'kitchen' (food) on the server when absent.
+      // menuItem lets the server resolve each line's real category kind
+      // (food vs beverages) instead of trusting the prepStation hint.
       const couponItems = cartItems.map(it => ({
+        menuItem: it._id || it.id,
         prepStation: it.prepStation || 'kitchen',
         price: Number(it.unitPrice || it.price) || 0,
         quantity: Number(it.quantity) || 0,
@@ -890,6 +902,7 @@ function Cart() {
       // _silent so we own the failure UI below — the global interceptor
       // would otherwise fire a toast first and we'd double-message.
       const res = await promotionsAPI.applyCoupon(codeToApply, subtotal, { _silent: true }, couponItems);
+      if (!isLatest()) return;
       if (res.data?.success) {
         setAppliedCoupon(res.data);
         setCouponError('');
@@ -899,10 +912,11 @@ function Cart() {
         setCouponError(enrichCouponError(res.data?.message, subtotal));
       }
     } catch (err) {
+      if (!isLatest()) return;
       setAppliedCoupon(null);
       setCouponError(enrichCouponError(err?.response?.data?.message, subtotal));
     } finally {
-      setIsApplyingCoupon(false);
+      if (isLatest()) setApplyingCoupon(null);
     }
   };
 
@@ -1363,14 +1377,16 @@ function Cart() {
     }
 
     if (isTakeaway) {
+      // QA N2 — check every required field up front, mark each one
+      // inline, and name them all in one toast (scrolling to the first)
+      // instead of stopping silently at the first gap.
+      const missing = [];
       if (!selectedTime) {
         setTimeError('Please select a pickup time before proceeding');
-        setTimeout(() => {
-          document.getElementById('pickupTime')?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-        }, 0);
-        return;
+        missing.push({ label: 'Pickup time', id: 'pickupTime' });
+      } else {
+        setTimeError('');
       }
-      setTimeError('');
 
       // Contact number — required for takeaway so the cafe can call the
       // customer about the pickup/delivery. Indian 10-digit mobile; take
@@ -1378,12 +1394,23 @@ function Cart() {
       const phoneDigits = String(contactPhone || '').replace(/\D/g, '').slice(-10);
       if (!/^[6-9]\d{9}$/.test(phoneDigits)) {
         setPhoneError('Enter a valid 10-digit mobile number so we can call about your order');
-        setTimeout(() => {
-          document.getElementById('contactPhone')?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-        }, 0);
-        return;
+        missing.push({ label: 'Contact number', id: 'contactPhoneInput' });
+      } else {
+        setPhoneError('');
       }
-      setPhoneError('');
+
+      if (deliveryActive && quoteState !== "loading" && quoteState !== "error") {
+        const deliveryMissing = [];
+        if (!deliveryAddress.trim()) deliveryMissing.push({ label: 'Delivery address', id: 'deliveryAddress' });
+        if (!measuredDelivery && (selectedSlabIndex == null || !selectedSlab)) {
+          deliveryMissing.push({ label: 'Delivery distance', id: 'deliveryDistance' });
+        }
+        if (deliveryMissing.length) {
+          setDeliveryError(`Please enter your ${deliveryMissing.map(m => m.label.toLowerCase()).join(' and ')}`);
+          missing.push(...deliveryMissing);
+        }
+      }
+      if (reportMissingFields(missing)) return;
 
       const selectedBranch = (() => {
         try { return JSON.parse(localStorage.getItem('selectedBranch') || 'null'); } catch { return null; }
@@ -1420,14 +1447,12 @@ function Cart() {
           toast.error(quoteMessage || 'This address is outside our delivery area');
           return;
         }
-        if (!measuredDelivery && (selectedSlabIndex == null || !selectedSlab)) {
-          setDeliveryError('Please select your delivery distance');
-          toast.error('Please select your delivery distance');
+        if (!deliveryAddress.trim()) {
+          reportMissingFields([{ label: 'Delivery address', id: 'deliveryAddress' }]);
           return;
         }
-        if (!deliveryAddress.trim()) {
-          setDeliveryError('Please enter your delivery address');
-          toast.error('Please enter your delivery address');
+        if (!measuredDelivery && (selectedSlabIndex == null || !selectedSlab)) {
+          reportMissingFields([{ label: 'Delivery distance', id: 'deliveryDistance' }]);
           return;
         }
         if (deliveryConfig.minOrderValue > 0 && subtotal < deliveryConfig.minOrderValue) {
@@ -1992,9 +2017,12 @@ function Cart() {
             <div className={`flex items-center rounded-[10px] border bg-white px-3 ${phoneError ? 'border-red-400' : 'border-[#EEEEEE]'}`}>
               <span className="text-[14px] text-[#645E66] font-varela pr-2 mr-1 border-r border-[#EEEEEE]">+91</span>
               <input
+                id="contactPhoneInput"
                 type="tel"
                 inputMode="numeric"
                 maxLength={10}
+                required
+                aria-required="true"
                 value={contactPhone}
                 onChange={(e) => {
                   const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
@@ -2064,7 +2092,7 @@ function Cart() {
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <label htmlFor="deliveryAddress" className="block text-[13px] font-nunito font-semibold text-[#1A181B]">
-                      Delivery address
+                      Delivery address <span className="text-red-500" aria-hidden="true">*</span>
                     </label>
                     <button
                       type="button"
@@ -2078,6 +2106,8 @@ function Cart() {
                   </div>
                   <textarea
                     id="deliveryAddress"
+                    required
+                    aria-required="true"
                     value={deliveryAddress}
                     onChange={(e) => handleDeliveryAddressChange(e.target.value)}
                     placeholder="House / flat no., building, street, landmark, area, city"
@@ -2109,9 +2139,9 @@ function Cart() {
                 {/* Distance range chips - manual fallback when the distance
                     couldn't be measured automatically. */}
                 {!measuredDelivery && quoteState !== "loading" && quoteState !== "error" && (
-                <div>
+                <div id="deliveryDistance">
                   <label className="block text-[13px] font-nunito font-semibold text-[#1A181B] mb-1.5">
-                    Select your distance
+                    Select your distance <span className="text-red-500" aria-hidden="true">*</span>
                   </label>
                   {quoteMessage && (
                     <p className="text-[11px] font-varela text-[#9A3412] mb-1.5">{quoteMessage}</p>
@@ -2191,12 +2221,12 @@ function Cart() {
                   className={`flex-1 min-w-0 border rounded-[10px] px-3 py-2.5 text-[13px] min-[375px]:text-[14px] leading-[18px] font-varela text-[#333333] placeholder:text-[#0A0A0A80] outline-none ${couponError ? 'border-red-400 focus:border-red-500' : 'border-[#D1D5DC] focus:border-[#FE8301]'} disabled:bg-[#F4F4F5] disabled:cursor-not-allowed`}
                 />
                 <button
-                  onClick={handleApplyCoupon}
-                  disabled={isApplyingCoupon || isGuest}
-                  aria-busy={isApplyingCoupon ? 'true' : 'false'}
+                  onClick={() => handleApplyCoupon()}
+                  disabled={applyingCoupon?.source === 'input' || isGuest}
+                  aria-busy={applyingCoupon?.source === 'input' ? 'true' : 'false'}
                   className="bg-[#FE8301] text-white px-3 min-[375px]:px-4 py-2.5 rounded-[11px] leading-[16px] font-semibold font-nunito text-[14px] min-[375px]:text-[15px] active:scale-95 transition-transform flex-shrink-0 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
                 >
-                  {isApplyingCoupon ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {applyingCoupon?.source === 'input' ? <Loader2 size={14} className="animate-spin" /> : null}
                   Apply
                 </button>
               </div>
@@ -2325,11 +2355,14 @@ function Cart() {
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => handleApplyCoupon(c.code)}
-                                disabled={isApplyingCoupon}
-                                className="bg-[#FE8301] text-white text-[12px] font-nunito font-semibold px-3 py-1.5 rounded-[8px] active:scale-95 transition-transform disabled:opacity-60"
+                                onClick={() => handleApplyCoupon(c.code, 'card')}
+                                disabled={applyingCoupon?.code === String(c.code || '').toUpperCase()}
+                                aria-busy={applyingCoupon?.code === String(c.code || '').toUpperCase() ? 'true' : 'false'}
+                                className="bg-[#FE8301] text-white text-[12px] font-nunito font-semibold px-3 py-1.5 rounded-[8px] active:scale-95 transition-transform disabled:opacity-60 inline-flex items-center gap-1"
                               >
-                                {isApplyingCoupon ? 'Applying…' : 'Apply'}
+                                {applyingCoupon?.code === String(c.code || '').toUpperCase()
+                                  ? <><Loader2 size={12} className="animate-spin" /> Applying…</>
+                                  : 'Apply'}
                               </button>
                             )}
                             <button
@@ -2649,7 +2682,7 @@ function Cart() {
               : isTakeaway
               ? !selectedTime
                 ? "Please Select Pickup Time"
-                : `Proceed to Pay ₹${finalTakeawayTotal.toFixed(0)}`
+                : `Proceed to Pay ₹${finalTakeawayTotal.toFixed(2)}`
               : activeOrdersCount > 0
                 ? `Place New Order · ₹${finalTakeawayTotal.toFixed(2)}`
                 : `Place Order ₹${finalTakeawayTotal.toFixed(2)}`}
@@ -2789,12 +2822,12 @@ function Cart() {
                     onClick={() => {
                       const code = c.code;
                       setTermsCoupon(null);
-                      handleApplyCoupon(code);
+                      handleApplyCoupon(code, 'card');
                     }}
-                    disabled={isApplyingCoupon}
+                    disabled={applyingCoupon?.code === String(c.code || '').toUpperCase()}
                     className="w-full bg-[#FE8301] hover:bg-[#E67700] text-white font-nunito font-semibold py-3 rounded-[12px] text-[14px] transition-colors active:scale-[0.98] disabled:opacity-60"
                   >
-                    {isApplyingCoupon ? 'Applying…' : 'Apply Coupon'}
+                    {applyingCoupon?.code === String(c.code || '').toUpperCase() ? 'Applying…' : 'Apply Coupon'}
                   </button>
                 )}
               </div>

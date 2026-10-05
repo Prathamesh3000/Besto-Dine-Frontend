@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { X, Calendar, Clock, MapPin, Tag, Plus, Minus, ChevronDown, Loader2, Users } from 'lucide-react'
 import api from '../../../utils/api'
 import toast from 'react-hot-toast'
+import { DEFAULT_PARKING_CONFIG, normalizeParkingDetails, describeParkingTime, titleCase } from '../../AdvanceBooking/parkingUtils'
 
 const rupee = (n) => `₹${Math.abs(Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 
@@ -120,7 +121,9 @@ const BookingDrawer = ({ isOpen, onClose, booking }) => {
     // Edit state
     const [editCakes, setEditCakes] = useState([])
     const [editAddons, setEditAddons] = useState([])
-    const [editParking, setEditParking] = useState({ vehicleCount: 0, hours: 0 })
+    // Multi-vehicle parking edit (QA N10): { counts: { [vehicleType]: n }, hours }
+    const [editParking, setEditParking] = useState({ counts: {}, hours: 0 })
+    const [parkingTypes, setParkingTypes] = useState(DEFAULT_PARKING_CONFIG.vehicles)
     const [editDiscount, setEditDiscount] = useState(0)
 
     // New item inputs
@@ -178,13 +181,29 @@ const BookingDrawer = ({ isOpen, onClose, booking }) => {
                     setEditAddons(
                         (b.addons?.otherAddons || []).map(a => ({ _key: `addon-${++addonIdCounter}`, name: a.title, price: a.price || 0 }))
                     )
-                    setEditParking({ vehicleCount: b.parkingDetails?.count || 0, hours: parseInt(b.parkingDetails?.timeDuration) || 0 })
+                    const pk = normalizeParkingDetails(b.parkingDetails)
+                    setEditParking({
+                        counts: Object.fromEntries(pk.vehicles.map(v => [v.vehicleType, Number(v.count) || 0])),
+                        hours: pk.hours,
+                    })
                     setEditDiscount(0)
                 }
             })
             .catch(() => toast.error('Failed to load booking details'))
             .finally(() => setLoading(false))
     }, [isOpen, booking?.id])
+
+    // Vehicle types + rates the tenant offers (same source the server
+    // re-prices from), so staff can add e.g. bikes to a cars-only booking.
+    useEffect(() => {
+        if (!isOpen) return
+        api.get('/booking-info/parking', { _silent: true })
+            .then(res => {
+                const list = res.data?.parking?.vehicles
+                if (Array.isArray(list) && list.length) setParkingTypes(list)
+            })
+            .catch(() => { /* defaults stay */ })
+    }, [isOpen])
 
     if (!isOpen || !booking) return null
 
@@ -217,8 +236,15 @@ const BookingDrawer = ({ isOpen, onClose, booking }) => {
     const otherAddons = b?.addons?.otherAddons || []
 
     // Parking
-    const parking = b?.parkingDetails
-    const hasParking = parking && parking.count > 0 && !parking.isSkipped
+    const parking = normalizeParkingDetails(b?.parkingDetails)
+    const hasParking = parking.active
+    const isHallBooking = b?.bookingType === 'hall'
+    const parkingLabel = (type) => parkingTypes.find(v => v.id === type)?.label || titleCase(type)
+    // Types offered now + any legacy type already on the booking.
+    const editableParkingTypes = [
+        ...parkingTypes.map(v => v.id),
+        ...Object.keys(editParking.counts).filter(t => !parkingTypes.some(v => v.id === t)),
+    ]
 
     // Package (hall booking)
     const hallPackage = b?.package
@@ -251,8 +277,15 @@ const BookingDrawer = ({ isOpen, onClose, booking }) => {
             const payload = {
                 cakes: editCakes.map(c => ({ name: c.name, price: c.price, quantity: c.qty })),
                 addons: editAddons.map(a => ({ title: a.name, price: a.price })),
-                parking: editParking,
                 discount: Math.max(0, editDiscount),
+            }
+            if (!isHallBooking) {
+                payload.parking = {
+                    vehicles: Object.entries(editParking.counts)
+                        .filter(([, n]) => n > 0)
+                        .map(([vehicleType, count]) => ({ vehicleType, count })),
+                    hours: editParking.hours,
+                }
             }
             await api.patch(`/advance-booking/${booking.id}/details`, payload)
             toast.success('Booking updated successfully')
@@ -360,8 +393,10 @@ const BookingDrawer = ({ isOpen, onClose, booking }) => {
                                 <div className="px-5 py-3">
                                     <p className="text-[11px] font-[600] text-[#8D848F] mb-2">Parking</p>
                                     <div className="space-y-1.5">
-                                        <Row label="Vehicle" value={`${parking.count} ${parking.vehicleType || 'Car'}`} />
-                                        <Row label="Duration" value={parking.timeDuration || '—'} />
+                                        {parking.vehicles.map(v => (
+                                            <Row key={v.vehicleType} label={v.label || parkingLabel(v.vehicleType)} value={`${v.count} vehicle${Number(v.count) === 1 ? '' : 's'}`} />
+                                        ))}
+                                        <Row label="Parking Time" value={describeParkingTime(parking)} />
                                     </div>
                                 </div>
                                 <div className="border-t border-[#EEEEEE] mx-5" />
@@ -437,29 +472,35 @@ const BookingDrawer = ({ isOpen, onClose, booking }) => {
                     <CustomerSection {...customerProps} />
                     <div className="border-t border-[#EEEEEE] mx-5" />
 
-                    {/* Parking — editable steppers */}
-                    <div className="px-5 py-3">
-                        <p className="text-[11px] font-[600] text-[#8D848F] mb-2">Parking</p>
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[12px] text-[#8D848F]">Vehicle Count</span>
-                                <Stepper
-                                    value={editParking.vehicleCount}
-                                    onDecrement={() => setEditParking(p => ({ ...p, vehicleCount: Math.max(0, p.vehicleCount - 1) }))}
-                                    onIncrement={() => setEditParking(p => ({ ...p, vehicleCount: p.vehicleCount + 1 }))}
-                                />
+                    {/* Parking — one stepper per vehicle type + hours (table bookings only) */}
+                    {!isHallBooking && (
+                        <>
+                            <div className="px-5 py-3">
+                                <p className="text-[11px] font-[600] text-[#8D848F] mb-2">Parking</p>
+                                <div className="space-y-2">
+                                    {editableParkingTypes.map(type => (
+                                        <div key={type} className="flex items-center justify-between">
+                                            <span className="text-[12px] text-[#8D848F]">{parkingLabel(type)}</span>
+                                            <Stepper
+                                                value={editParking.counts[type] || 0}
+                                                onDecrement={() => setEditParking(p => ({ ...p, counts: { ...p.counts, [type]: Math.max(0, (p.counts[type] || 0) - 1) } }))}
+                                                onIncrement={() => setEditParking(p => ({ ...p, hours: p.hours || 2, counts: { ...p.counts, [type]: Math.min(500, (p.counts[type] || 0) + 1) } }))}
+                                            />
+                                        </div>
+                                    ))}
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[12px] text-[#8D848F]">Parking Hours</span>
+                                        <Stepper
+                                            value={editParking.hours}
+                                            onDecrement={() => setEditParking(p => ({ ...p, hours: Math.max(0, p.hours - 1) }))}
+                                            onIncrement={() => setEditParking(p => ({ ...p, hours: Math.min(24, p.hours + 1) }))}
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[12px] text-[#8D848F]">Parking Hours</span>
-                                <Stepper
-                                    value={editParking.hours}
-                                    onDecrement={() => setEditParking(p => ({ ...p, hours: Math.max(0, p.hours - 1) }))}
-                                    onIncrement={() => setEditParking(p => ({ ...p, hours: p.hours + 1 }))}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                    <div className="border-t border-[#EEEEEE] mx-5" />
+                            <div className="border-t border-[#EEEEEE] mx-5" />
+                        </>
+                    )}
 
                     {/* Cake — editable */}
                     <div className="px-5 py-3">

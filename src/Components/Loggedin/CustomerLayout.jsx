@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Clock } from 'lucide-react';
-import useSocketEvent, { useSocketConnected } from '../../hooks/useSocketEvent';
+import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent';
 import { useAuth } from '../../Context/AuthContext';
 import api from '../../utils/api';
 import { activeRestaurantPath } from '../../utils/tenant';
@@ -9,6 +9,8 @@ import {
     SCAN_TABLE_PATH,
     SCAN_REQUIRED_EVENT,
     needsTableScan,
+    clearDineInTable,
+    requestTableScan,
 } from '../../utils/dineInSession';
 import { getCustomerOrderSession, readRecoveryOrderIds } from '../../utils/customerOrderIds';
 
@@ -142,6 +144,37 @@ const CustomerLayout = () => {
         if (payload.graceMinutes) setGraceMinutes(Number(payload.graceMinutes));
         setExpired(true);
     });
+
+    // ── QA #14: the admin deleted / disabled this table ───────────
+    // Lock ordering the moment it happens instead of letting the diner
+    // build a cart that fails at Place Order. Same hand-off the API
+    // layer uses for a TABLE_UNAVAILABLE response: drop the dead table
+    // binding and route to the scan screen, which explains why.
+    const tableGone = useCallback(() => {
+        clearDineInTable();
+        requestTableScan('table_removed');
+    }, []);
+    useSocketEvent('table:unavailable', (payload = {}) => {
+        const myTableId = currentTableId();
+        if (!myTableId || String(payload.tableId) !== String(myTableId)) return;
+        tableGone();
+    });
+    // A push can be missed (screen off, network drop): re-check when the
+    // socket reconnects or the page becomes visible again.
+    const checkTableStillAvailable = useCallback(() => {
+        const myTableId = currentTableId();
+        if (!myTableId) return;
+        api.get(`/tables/${myTableId}/availability`, { _silent: true, _isBackground: true })
+            .then((res) => { if (res?.data?.available === false) tableGone(); })
+            .catch(() => { /* offline / transient — the next check or Place Order catches it */ });
+    }, [currentTableId, tableGone]);
+    useSocketReconnect(checkTableStillAvailable);
+    useEffect(() => {
+        const onVisible = () => { if (document.visibilityState === 'visible') checkTableStillAvailable(); };
+        checkTableStillAvailable();
+        document.addEventListener('visibilitychange', onVisible);
+        return () => document.removeEventListener('visibilitychange', onVisible);
+    }, [checkTableStillAvailable]);
 
     // ── Path (b): client-side watchdog ────────────────────────────
     // BUG #23 — while the socket is live, the server's session:ended

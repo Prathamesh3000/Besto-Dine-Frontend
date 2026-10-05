@@ -16,9 +16,10 @@ import api from '../../utils/api'
 import { useAdminBranch } from '../../Context/AdminBranchContext'
 import { useAuth } from '../../Context/AuthContext'
 import useSocketEvent from '../../hooks/useSocketEvent'
+import { backendOrigin } from '../../utils/apiOrigin';
 
 // Prefix relative /uploads/ paths with the backend origin
-const BACKEND_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || '';
+const BACKEND_URL = backendOrigin();
 const resolveAvatar = (url) => {
     if (!url) return null; // null = show initials instead
     if (url.startsWith('/uploads/')) return `${BACKEND_URL}${url}`;

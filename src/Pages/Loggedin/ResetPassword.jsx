@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../../utils/api';
-import { scorePassword, STRENGTH_LABELS, STRENGTH_COLORS, MIN_PASSWORD_SCORE, MIN_LENGTH, passwordRuleFailures } from '../../utils/passwordPolicy';
+import { scorePassword, STRENGTH_LABELS, STRENGTH_COLORS, MIN_PASSWORD_SCORE, MIN_LENGTH, MAX_LENGTH, passwordRuleFailures } from '../../utils/passwordPolicy';
 
 /**
  * Landing page for the emailed password-reset link.
@@ -206,10 +206,11 @@ function PasswordRules({ failures }) {
         ['case', 'Upper and lower case letters'],
         ['digit', 'A number'],
         ['special', 'A special character (!@#$…)'],
+        ['maxLength', `At most ${MAX_LENGTH} characters`],
     ];
     return (
         <ul className="mt-2 space-y-1">
-            {RULES.map(([key, label]) => {
+            {RULES.filter(([key]) => key !== 'maxLength' || failures.includes(key)).map(([key, label]) => {
                 const failed = failures.includes(key);
                 return (
                     <li key={key} className={`text-[12px] flex items-center gap-1.5 ${failed ? 'text-[#8D848F]' : 'text-green-600'}`}>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, CheckCircle, Calendar, Clock, Users, Phone, Mail, User, MapPin, UtensilsCrossed, Cake, Sparkles, Car, StickyNote, CreditCard, Wallet, Tag } from 'lucide-react';
+import { normalizeParkingDetails, describeParkingTime, titleCase } from '../../AdvanceBooking/parkingUtils';
 
 const formatCurrency = (amount) => {
     if (typeof amount !== 'number' || isNaN(amount)) return '₹0.00';
@@ -258,17 +259,26 @@ const BookingDetailsModal = ({ isOpen, onClose, booking, eventTypes = [], onAppr
                     )}
 
                     {/* Parking */}
-                    {orig.parkingDetails && !orig.parkingDetails.isSkipped && orig.parkingDetails.count > 0 && (
-                        <SectionCard title="Parking" icon={Car}>
-                            <div className="space-y-2">
-                                <DetailRow label="Vehicle Type" value={
-                                    <span className="capitalize">{orig.parkingDetails.vehicleType}</span>
-                                } />
-                                <DetailRow label="Vehicles" value={orig.parkingDetails.count} />
-                                <DetailRow label="Duration" value={orig.parkingDetails.timeDuration} />
-                            </div>
-                        </SectionCard>
-                    )}
+                    {/* Multi-vehicle (QA N10); old single-type bookings are
+                        normalised to a one-row list. */}
+                    {(() => {
+                        const pk = normalizeParkingDetails(orig.parkingDetails);
+                        if (!pk.active) return null;
+                        return (
+                            <SectionCard title="Parking" icon={Car}>
+                                <div className="space-y-2">
+                                    {pk.vehicles.map((v) => (
+                                        <DetailRow
+                                            key={v.vehicleType}
+                                            label={v.label || titleCase(v.vehicleType)}
+                                            value={`${v.count} vehicle${Number(v.count) === 1 ? '' : 's'}${v.amount != null ? ` · ${formatCurrency(Number(v.amount))}` : ''}`}
+                                        />
+                                    ))}
+                                    <DetailRow label="Parking Time" value={describeParkingTime(pk)} />
+                                </div>
+                            </SectionCard>
+                        );
+                    })()}
 
                     {/* Notes */}
                     {orig.notes && (

@@ -5,6 +5,7 @@ import { useAuth } from '../../Context/AuthContext';
 import api from '../../utils/api';
 import { resolveImageUrl } from '../../utils/image';
 import toast from 'react-hot-toast';
+import { sanitizeMobileInput, mobileError, mobileInputAttrs } from '../../utils/mobile';
 
 const fallbackAvatar = (name) =>
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'Staff')}&background=702083&color=fff&size=192`;
@@ -71,6 +72,8 @@ const WaiterProfile = () => {
     };
 
     const handleSave = async () => {
+        const mobileErr = form.mobile ? mobileError(form.mobile) : '';
+        if (mobileErr) { toast.error(mobileErr); return; }
         setSaving(true);
         try {
             const res = await api.put('/auth/profile', {
@@ -221,9 +224,9 @@ const WaiterProfile = () => {
                         <label className="text-[12px] font-[500] text-[#8D848F] mb-1 block">Phone Number</label>
                         {isEditing ? (
                             <input
-                                type="tel"
+                                {...mobileInputAttrs}
                                 value={form.mobile}
-                                onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+                                onChange={(e) => setForm({ ...form, mobile: sanitizeMobileInput(e.target.value) })}
                                 className="w-full p-3 border border-[#CCCAC8] rounded-[12px] text-[14px] text-[#1A181B] outline-none focus:border-[#702083]"
                             />
                         ) : (

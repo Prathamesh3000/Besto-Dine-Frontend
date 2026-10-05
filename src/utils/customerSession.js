@@ -41,9 +41,11 @@ const PERSONAL_KEYS = [
 ];
 
 // The customer cart lives in CartContext's shared map under the default
-// slot; waiter table slots are staff data and stay put.
+// slot (`_default_`, or `_default_@<tenant>` per restaurant); waiter
+// table slots are staff data and stay put.
 const CART_MAP_KEY = 'cart_by_table';
 const CART_DEFAULT_SLOT = '_default_';
+const isDefaultSlot = (k) => k === CART_DEFAULT_SLOT || k.startsWith(`${CART_DEFAULT_SLOT}@`);
 
 /** Fired after a wipe so providers holding the same data in memory reset it. */
 export const CUSTOMER_DATA_CLEARED_EVENT = 'customer_data_cleared';
@@ -53,8 +55,9 @@ export function clearCustomerPersonalData() {
         PERSONAL_KEYS.forEach((k) => localStorage.removeItem(k));
         localStorage.removeItem(OWNER_KEY);
         const cartMap = JSON.parse(localStorage.getItem(CART_MAP_KEY) || 'null');
-        if (cartMap && typeof cartMap === 'object' && cartMap[CART_DEFAULT_SLOT]) {
-            delete cartMap[CART_DEFAULT_SLOT];
+        const defaults = cartMap && typeof cartMap === 'object' ? Object.keys(cartMap).filter(isDefaultSlot) : [];
+        if (defaults.length) {
+            defaults.forEach((k) => { delete cartMap[k]; });
             localStorage.setItem(CART_MAP_KEY, JSON.stringify(cartMap));
         }
     } catch { /* storage unavailable */ }

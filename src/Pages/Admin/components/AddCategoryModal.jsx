@@ -17,6 +17,10 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
     // show on the kiosk unless admin explicitly unchecks. Legacy
     // categories (field absent on the doc) are treated as visible.
     const [showOnKiosk, setShowOnKiosk] = useState(true);
+    // Decision 6 — Food / Drink per category ('food' | 'beverages', the
+    // same values as a coupon's scope). Beverage coupons discount items
+    // in Drink categories. Default Food; legacy categories have no field.
+    const [kind, setKind] = useState('food');
     const fileInputRef = useRef(null);
 
     // Per-field validation errors — inline below each input.
@@ -151,6 +155,7 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
         // Legacy categories may not have the field at all — treat as
         // visible (kiosk-on) so unchecking is the explicit hide action.
         setShowOnKiosk(cat.showOnKiosk !== false);
+        setKind(cat.kind === 'beverages' ? 'beverages' : 'food');
     };
 
     const cancelEditing = () => {
@@ -158,6 +163,7 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
         setCategoryName('');
         setSelectedImage(null);
         setShowOnKiosk(true);
+        setKind('food');
     };
 
     // ── Save New or Update Existing Category ─────────────────────────────────
@@ -195,17 +201,19 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                     name: trimmedName,
                     image: selectedImage,
                     showOnKiosk,
+                    kind,
                 });
                 if (res.data.success) {
                     toast.success('Category updated successfully!');
                     // Update local state immediately
                     setCategories(prev => prev.map(cat =>
-                        cat._id === editingCategory._id ? { ...cat, name: trimmedName, image: selectedImage, showOnKiosk } : cat
+                        cat._id === editingCategory._id ? { ...cat, name: trimmedName, image: selectedImage, showOnKiosk, kind } : cat
                     ));
                     setEditingCategory(null);
                     setCategoryName('');
                     setSelectedImage(null);
                     setShowOnKiosk(true);
+                    setKind('food');
                     refreshContextCategories(true);
                     onRefresh?.();
                 }
@@ -216,12 +224,14 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                     displayOrder: categories.length + 1,
                     image: selectedImage,
                     showOnKiosk,
+                    kind,
                 });
                 if (res.data.success) {
                     toast.success('Category created successfully!');
                     setCategoryName('');
                     setSelectedImage(null);
                     setShowOnKiosk(true);
+                    setKind('food');
                     await fetchCategoriesWithCount();
                     refreshContextCategories(true);
                     onRefresh?.();
@@ -372,6 +382,37 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                                 <FieldError name="image" />
                             </div>
 
+                            {/* Decision 6 — Food / Drink. Drives coupon scope:
+                                a "Beverages" coupon discounts items in
+                                Drink categories, a "Food" coupon the rest. */}
+                            <fieldset>
+                                <legend className="block text-[14px] font-semibold text-[#1D2939] mb-2">Category Type</legend>
+                                <div role="radiogroup" aria-label="Category type" className="grid grid-cols-2 gap-3">
+                                    {[
+                                        { value: 'food', label: 'Food' },
+                                        { value: 'beverages', label: 'Drink' },
+                                    ].map(opt => (
+                                        <label
+                                            key={opt.value}
+                                            className={`flex items-center gap-2 h-[44px] px-4 rounded-[12px] border cursor-pointer text-[14px] font-semibold transition-colors ${kind === opt.value ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-[#EAECF0] bg-white text-[#475467] hover:border-orange-300'}`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="categoryKind"
+                                                value={opt.value}
+                                                checked={kind === opt.value}
+                                                onChange={() => setKind(opt.value)}
+                                                className="accent-orange-500"
+                                            />
+                                            {opt.label}
+                                        </label>
+                                    ))}
+                                </div>
+                                <p className="mt-1.5 text-[12px] text-[#667085] font-medium leading-snug">
+                                    Food or beverage coupons apply only to items in matching categories.
+                                </p>
+                            </fieldset>
+
                             {/* Kiosk Visibility — checkbox inside the
                                 category form. Off = category and its
                                 items hidden from the self-serve kiosk
@@ -452,6 +493,12 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                                             <div className="text-[15px] text-[#1D2939] font-bold truncate">
                                                 {index + 1}. {item.name} <span className="text-[#98A2B3] font-medium ml-0.5">({item.itemCount || 0})</span>
                                             </div>
+                                            <span
+                                                data-testid={`category-kind-${item._id}`}
+                                                className={`mt-1 mr-2 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${item.kind === 'beverages' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}
+                                            >
+                                                {item.kind === 'beverages' ? 'Drink' : 'Food'}
+                                            </span>
                                             {item.showOnKiosk === false && (
                                                 <div className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#98A2B3]">
                                                     <Monitor size={11} />

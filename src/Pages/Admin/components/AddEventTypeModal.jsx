@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { X, Save, Upload } from 'lucide-react'
+import { backendOrigin } from '../../../utils/apiOrigin';
 
 const AddEventTypeModal = ({ isOpen, onClose, onSave, eventType }) => {
     const [name, setName] = useState('')
@@ -48,7 +49,7 @@ const AddEventTypeModal = ({ isOpen, onClose, onSave, eventType }) => {
     }
 
     // Resolve display icon: new preview > existing server path > nothing
-    const BACKEND_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || ''
+    const BACKEND_URL = backendOrigin()
     const displayIcon = iconPreview
         || (iconUrl && (iconUrl.startsWith('/uploads/') ? `${BACKEND_URL}${iconUrl}` : iconUrl))
         || ''

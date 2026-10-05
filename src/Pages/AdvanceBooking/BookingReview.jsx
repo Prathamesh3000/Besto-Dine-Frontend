@@ -7,6 +7,53 @@ import PartyImg from "/party.svg";
 import { walletAPI, promotionsAPI, settingsAPI } from '../../utils/api';
 import { toast } from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
+import {
+    parkingRowsFromState,
+    parkingHoursFromState,
+    parkingChargeFromState,
+    describeParkingTime,
+    titleCase,
+} from './parkingUtils';
+
+// QA N12 — the review step explains the chosen seating option. The
+// admin's area description (Tables -> Add Area -> "Description for
+// customers") wins; otherwise a sensible line is generated from the
+// area name so the card is never just a bare label.
+const SEATING_HINTS = [
+    [/roof/i, 'Open-air seating on the rooftop.'],
+    [/garden|lawn|patio|terrace/i, 'Open-air seating in the garden / patio area.'],
+    [/outdoor|outside|open/i, 'Open-air seating outside the restaurant.'],
+    [/window/i, 'Tables beside the windows with a view outside.'],
+    [/private|cabin|booth|vip/i, 'A private, more secluded space for your group.'],
+    [/family/i, 'Family seating area, comfortable for groups and kids.'],
+    [/bar|lounge/i, 'Relaxed lounge-style seating near the bar.'],
+    [/smok/i, 'Designated smoking-permitted seating.'],
+    [/\bac\b|air.?con/i, 'Air-conditioned indoor seating.'],
+    [/indoor|inside|main|hall|dining/i, 'Indoor seating inside the main dining area.'],
+];
+// Parse a price that may be a Number or a display string ("₹2,499.50")
+// into a number, KEEPING the decimal point — stripping every non-digit
+// turned 2499.5 into 24995. Missing / unparseable → 0.
+function toPrice(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const n = parseFloat(String(value ?? '').replace(/[^\d.]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+}
+
+// Price of one selected add-on: the duration-adjusted selection price
+// when the customer chose one (a legitimate 0 included), else its list price.
+function addonUnitPrice(addon, selection) {
+    const sel = selection?.price;
+    return toPrice(sel !== undefined && sel !== null && sel !== '' ? sel : addon?.price);
+}
+
+function seatingDescription(area, fallbackName) {
+    const custom = (area?.description || '').trim() || (area?.note || '').trim();
+    if (custom) return custom;
+    const name = area?.name || fallbackName || '';
+    const hit = SEATING_HINTS.find(([re]) => re.test(name));
+    return hit ? hit[1] : `Tables reserved for you in the ${name || 'selected'} area.`;
+}
 
 const BookingReview = () => {
     const navigate = useNavigate();
@@ -41,9 +88,6 @@ const BookingReview = () => {
         selectedFlavor,
         selectedSize,
         isVeg,
-        selectedVehicle,
-        vehicleCount,
-        parkingDuration,
         parkingSkipped,
         selectedAddons,
         selectedAddonDetails,
@@ -193,7 +237,7 @@ const BookingReview = () => {
 
         let hallPrice = 0;
         if (bookingType === 'hall' && selectedHall) {
-            hallPrice = parseInt(String(selectedHall.basePrice || selectedHall.price).replace(/[^\d]/g, '')) || 0;
+            hallPrice = toPrice(selectedHall.basePrice ?? selectedHall.price);
             total += hallPrice;
         }
 
@@ -208,20 +252,21 @@ const BookingReview = () => {
 
         let decorationPrice = 0;
         if (selectedDecor) {
-            decorationPrice = parseInt(String(selectedDecor.basePrice || selectedDecor.price).replace(/[^\d]/g, '')) || 0;
+            decorationPrice = toPrice(selectedDecor.basePrice ?? selectedDecor.price);
             total += decorationPrice;
         }
 
+        // Sum of (rate x count) x hours over every vehicle type - mirrors
+        // Backend/utils/parkingConfig (the server re-prices on create).
         let parkingPrice = 0;
-        if (bookingType !== 'hall' && !parkingSkipped && selectedVehicle) {
-            const parkingRates = location.state?.parkingRates || {};
-            parkingPrice = (parkingRates[selectedVehicle] || 0) * (vehicleCount || 1) * (parkingDuration || 2);
+        if (bookingType !== 'hall' && !parkingSkipped) {
+            parkingPrice = parkingChargeFromState(location.state || {});
             total += parkingPrice;
         }
 
         let packagePrice = 0;
         if (bookingType === 'hall' && selectedPackage) {
-            packagePrice = (selectedPackage.price || 0) * (guests || 1);
+            packagePrice = toPrice(selectedPackage.price) * (guests || 1);
             total += packagePrice;
         }
 
@@ -230,8 +275,7 @@ const BookingReview = () => {
             addonPrice = selectedAddonDetails.reduce((sum, addon) => {
                 // Use duration-adjusted price from addonSelections if available
                 const sel = addonSelections?.[addon.id || addon._id];
-                const price = sel?.price || parseInt(String(addon.price).replace(/[^\d]/g, '')) || 0;
-                return sum + price;
+                return sum + addonUnitPrice(addon, sel);
             }, 0);
             total += addonPrice;
         }
@@ -258,6 +302,13 @@ const BookingReview = () => {
     };
 
     const prices = calculatePrices();
+
+    const parkingRows = parkingRowsFromState(location.state || {});
+    const parkingHours = parkingHoursFromState(location.state || {});
+    const selectedArea = location.state?.selectedArea || null;
+    const selectedTablesInfo = Array.isArray(location.state?.selectedTablesInfo) ? location.state.selectedTablesInfo : [];
+    const seatingCapacity = selectedTablesInfo.reduce((sum, t) => sum + (Number(t.capacity) || 0), 0);
+    const seatingName = selectedArea?.name || (selectedTypeNames?.length > 0 ? selectedTypeNames.join(', ') : '');
 
     // Helper: format price with ₹ and locale
     const fmtPrice = (val) => `₹${(val || 0).toLocaleString('en-IN')}`;
@@ -316,13 +367,29 @@ const BookingReview = () => {
                     {/* LEFT COLUMN — Booking Details */}
                     <div className="lg:col-span-2 space-y-4 lg:space-y-6">
 
-                        {/* Seating Option (Table Flow) */}
+                        {/* Seating Option (Table Flow) - QA N12: what the
+                            chosen option means, its capacity and any charge. */}
                         {bookingType !== 'hall' && selectedTypes && selectedTypes.length > 0 && (
                             <ReviewCard title="Seating Option">
                                 <ReviewRow
                                     icon="fi fi-rr-chair"
                                     label="Selected Type"
-                                    value={selectedTypeNames?.length > 0 ? selectedTypeNames.join(', ') : 'Not selected'}
+                                    value={seatingName || 'Not selected'}
+                                />
+                                <div className="bg-[#FAFAFA] rounded-[12px] px-4 py-3 text-[13px] text-[#645E66] leading-relaxed">
+                                    {seatingDescription(selectedArea, seatingName)}
+                                </div>
+                                {seatingCapacity > 0 && (
+                                    <ReviewRow
+                                        icon="fi fi-rr-users-alt"
+                                        label="Capacity"
+                                        value={`Seats up to ${seatingCapacity} guest${seatingCapacity === 1 ? '' : 's'} at ${selectedTablesInfo.length} table${selectedTablesInfo.length === 1 ? '' : 's'}${guests ? ` · booked for ${guests}` : ''}`}
+                                    />
+                                )}
+                                <ReviewRow
+                                    icon="fi fi-rr-indian-rupee-sign"
+                                    label="Extra Charge"
+                                    value="None - seating is included"
                                 />
                             </ReviewCard>
                         )}
@@ -472,7 +539,7 @@ const BookingReview = () => {
                                 {selectedAddonDetails.map((addon, idx) => {
                                     const selection = addonSelections?.[addon.id || addon._id] || {};
                                     const options = selection.options || [];
-                                    const addonPrice = selection.price || parseInt(String(addon.price).replace(/[^\d]/g, '')) || 0;
+                                    const addonPrice = addonUnitPrice(addon, selection);
 
                                     let detailsText = '';
                                     if (selection.duration) {
@@ -497,8 +564,8 @@ const BookingReview = () => {
                             </ReviewCard>
                         )}
 
-                        {/* Parking */}
-                        {(bookingType !== 'hall' && !parkingSkipped && selectedVehicle) && (
+                        {/* Parking - every vehicle type + when it applies */}
+                        {(bookingType !== 'hall' && !parkingSkipped && parkingRows.length > 0) && (
                             <ReviewCard
                                 title="Parking Booking"
                                 footer={<>
@@ -506,15 +573,26 @@ const BookingReview = () => {
                                     <span className="text-[#007AFF] font-[700] text-[15px]">{fmtPrice(prices.parking)}</span>
                                 </>}
                             >
-                                <ReviewRow
-                                    icon={<div className="w-[18px] h-[18px] rounded-full border border-[#645E66] flex items-center justify-center text-[10px] font-bold text-[#645E66]">P</div>}
-                                    label="Vehicle Count"
-                                    value={`${vehicleCount || 1} ${selectedVehicle ? selectedVehicle.charAt(0).toUpperCase() + selectedVehicle.slice(1) : ''}`}
-                                />
+                                {parkingRows.map((r) => {
+                                    const rate = Number(location.state?.parkingRates?.[r.vehicleType]) || 0;
+                                    const label = location.state?.parkingLabels?.[r.vehicleType] || titleCase(r.vehicleType);
+                                    return (
+                                        <ReviewRow
+                                            key={r.vehicleType}
+                                            icon={<div className="w-[18px] h-[18px] rounded-full border border-[#645E66] flex items-center justify-center text-[10px] font-bold text-[#645E66]">P</div>}
+                                            label={`${r.count} × ${label}`}
+                                            value={`${fmtPrice(rate)}/hr · ${fmtPrice(rate * r.count * parkingHours)}`}
+                                        />
+                                    );
+                                })}
                                 <ReviewRow
                                     icon={<Clock size={18} />}
-                                    label="Parking Hours"
-                                    value={`${parkingDuration || 2} hrs`}
+                                    label="Parking Time"
+                                    value={describeParkingTime({
+                                        mode: location.state?.parkingMode === 'event' ? 'event' : 'custom',
+                                        hours: parkingHours,
+                                        startTime: location.state?.parkingStartTime,
+                                    })}
                                 />
                             </ReviewCard>
                         )}

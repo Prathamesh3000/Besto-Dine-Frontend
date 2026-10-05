@@ -1,7 +1,9 @@
 import React from 'react';
 import { X, Check, Clock, Users, Palette } from 'lucide-react';
+import { backendOrigin } from '../../utils/apiOrigin';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || '';
+// LAN-aware (a phone on http://192.168.x.x must not call its own localhost).
+const BACKEND_URL = backendOrigin();
 const resolveImg = (src) => {
   if (!src) return '';
   if (src.startsWith('/uploads/')) return `${BACKEND_URL}${src}`;

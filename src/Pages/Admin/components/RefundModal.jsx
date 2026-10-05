@@ -37,12 +37,18 @@ const RefundModal = ({ payment, onClose, onRefund, loading = false }) => {
     ]
 
     const maxRefundable = payment.refundableBalance ?? payment.total ?? 0
+    // Nothing left to refund (e.g. already fully refunded) — a "full"
+    // refund would be ₹0, which the server rejects.
+    const nothingRefundable = !(Number(maxRefundable) > 0)
     const refundAmount = refundType === 'full' ? maxRefundable : (parseFloat(partialAmount) || 0)
 
     const validateAmount = (val) => {
         const num = parseFloat(val)
         if (!val || isNaN(num)) { setAmountError('Enter a valid amount'); return false }
         if (num <= 0) { setAmountError('Amount must be greater than 0'); return false }
+        // Whole paise only — the gateway refunds round(amount × 100) paise,
+        // so a sub-paisa amount would book a different figure than it pays.
+        if ((String(val).split('.')[1] || '').length > 2) { setAmountError('Use at most 2 decimal places'); return false }
         if (num > maxRefundable) { setAmountError(`Cannot exceed ₹${maxRefundable.toFixed(2)}`); return false }
         setAmountError('')
         return true
@@ -58,6 +64,7 @@ const RefundModal = ({ payment, onClose, onRefund, loading = false }) => {
     }
 
     const handleSubmit = () => {
+        if (refundType === 'full' && nothingRefundable) return
         if (refundType === 'partial' && !validateAmount(partialAmount)) {
             setTimeout(() => document.getElementById('refund-amount')?.focus(), 0)
             return
@@ -78,7 +85,7 @@ const RefundModal = ({ payment, onClose, onRefund, loading = false }) => {
     }
 
     const canSubmit = refundType === 'full'
-        ? (refundReason !== 'Other' || specifyReason.trim())
+        ? (!nothingRefundable && (refundReason !== 'Other' || specifyReason.trim()))
         : (partialAmount && !amountError && (refundReason !== 'Other' || specifyReason.trim()))
 
     return (
@@ -139,7 +146,9 @@ const RefundModal = ({ payment, onClose, onRefund, loading = false }) => {
                     <div className="flex bg-gray-100 rounded-xl p-1">
                         <button
                             onClick={() => { setRefundType('full'); setAmountError('') }}
-                            className={`flex-1 py-2.5 rounded-lg text-[14px] font-[600] transition-all ${refundType === 'full' ? 'bg-white text-[#1A181B] shadow-sm' : 'text-gray-500'}`}
+                            disabled={nothingRefundable}
+                            title={nothingRefundable ? 'Nothing left to refund' : undefined}
+                            className={`flex-1 py-2.5 rounded-lg text-[14px] font-[600] transition-all disabled:opacity-50 disabled:cursor-not-allowed ${refundType === 'full' ? 'bg-white text-[#1A181B] shadow-sm' : 'text-gray-500'}`}
                         >
                             Full Refund
                         </button>

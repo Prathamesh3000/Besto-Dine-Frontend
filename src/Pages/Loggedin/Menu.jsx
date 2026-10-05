@@ -8,7 +8,8 @@ import BottomNavWaiter from "../../Components/Waiter/BottomNav";
 import SidebarWaiter from "../../Components/Waiter/Sidebar";
 import CartButton from "../../Components/Loggedin/CartButton";
 import { FALLBACK_IMAGE, sizedImage, ALL_CATEGORY_IMAGE, COMBO_CATEGORY_IMAGE } from "../../utils/image";
-import { Search, Mic, Heart, ChevronLeft } from 'lucide-react';
+import { Search, Heart, ChevronLeft } from 'lucide-react';
+import VoiceSearchButton from '../../Components/Loggedin/VoiceSearchButton';
 
 // ── Category Card (customer-facing) ─────────────────────────────────────────
 const CategoryCard = ({ name, img, onClick }) => (
@@ -153,7 +154,7 @@ function Menu() {
                     </button>
                   )}
                   <div className="w-px h-6 bg-[#DDDDDD]" />
-                  <Mic size={20} className="text-[#645E66] shrink-0" aria-hidden="true" />
+                  <VoiceSearchButton size={20} onResult={(text) => setSearchQuery(text)} />
                 </div>
               </div>
             </header>

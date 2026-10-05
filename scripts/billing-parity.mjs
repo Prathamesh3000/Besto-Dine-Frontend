@@ -166,10 +166,15 @@ check('takeaway/delivery/kiosk get no service charge', () => {
     }
     assert.equal(frontend.computeBill({ subtotal: 100, taxConfig: { gstPct: 5, servicePct: 10 }, orderType: 'dine-in' }).total, 115);
 });
-check('taxes on gross, discounts after', () => {
+check('GST on the post-coupon value (subtotal − coupon)', () => {
+    // 5% of (200 − 100) = 5; 200 + 5 − 100 = 105
     const f = frontend.computeBill({ subtotal: 200, taxConfig: { gstPct: 5 }, orderType: 'takeaway', couponDiscount: 100 });
-    assert.equal(f.gst, 10);
-    assert.equal(f.total, 110);
+    assert.equal(f.gst, 5);
+    assert.equal(f.total, 105);
+    // ₹1000 food, 5% GST, ₹100 coupon → GST ₹45, total ₹945
+    const g = frontend.computeBill({ subtotal: 1000, taxConfig: { gstPct: 5 }, orderType: 'takeaway', couponDiscount: 100 });
+    assert.equal(g.gst, 45);
+    assert.equal(g.total, 945);
 });
 check('0.005 rounds like the server', () => {
     const b = backend.computeBill({ subtotal: 1.005, taxConfig: { gstPct: 100 } });
@@ -206,8 +211,20 @@ check('billFromOrder recomputes a legacy order with server rules', () => {
     assert.equal(f.computedTotal, b.total);
     assert.equal(f.total, 314.99);
 });
-check('billFromOrder: appended items make the stored breakdown stale', () => {
-    const sb = backend.computeBill({ subtotal: 100, taxConfig: cfg, orderType: 'dine-in' });
+// Appended items no longer make the stored breakdown stale.
+//
+// OLD rule (removed on purpose): any order with appended items (a later
+// `addedAt`) ignored the stored GST / charges and re-derived the bill
+// from the LIVE tax settings, because appends used to add only the bare
+// item delta to order.total. The backend now re-stamps the whole
+// breakdown on every append (services/orderBillMath
+// .recomputeBillAfterAppend), so the stored figures are authoritative.
+// NEW rule: the stored breakdown is used whenever it reconciles with the
+// stored total (±₹0.05) — appended items or not. Only a breakdown that
+// does NOT add up to order.total falls back to the live tax config.
+check('billFromOrder: appended items keep the stored breakdown when it reconciles', () => {
+    // Server re-stamped the bill on the full 150 after the append.
+    const sb = backend.computeBill({ subtotal: 150, taxConfig: cfg, orderType: 'dine-in' });
     const order = {
         type: 'dine-in',
         items: [
@@ -216,7 +233,28 @@ check('billFromOrder: appended items make the stored breakdown stale', () => {
         ],
         gst: sb.gst, gstPercentage: sb.gstPct, serviceCharge: sb.serviceCharge,
         serviceChargePercentage: sb.serviceChargePct, additionalCharges: sb.additionalCharges,
-        additionalChargesTotal: sb.additionalChargesTotal, total: sb.total + 50,
+        additionalChargesTotal: sb.additionalChargesTotal, total: sb.total,
+    };
+    // Live settings changed since (GST 18 %) — must not leak into the bill.
+    const liveCfg = { ...cfg, gstPct: 18 };
+    const f = frontend.billFromOrder(order, liveCfg);
+    assert.equal(f.fromServer, true);
+    assert.equal(f.gst, sb.gst);
+    assert.equal(f.total, sb.total);
+    assert.equal(f.computedTotal, sb.total);
+});
+check('billFromOrder: a stored breakdown that does not reconcile falls back to the live config', () => {
+    const sb = backend.computeBill({ subtotal: 100, taxConfig: cfg, orderType: 'dine-in' });
+    const order = {
+        type: 'dine-in',
+        items: [
+            { price: 100, quantity: 1, addedAt: '2026-01-01T12:00:00Z' },
+            { price: 50, quantity: 1, addedAt: '2026-01-01T12:20:00Z' },
+        ],
+        // Breakdown for 100, total that is neither 100's nor 150's bill.
+        gst: sb.gst, gstPercentage: sb.gstPct, serviceCharge: sb.serviceCharge,
+        serviceChargePercentage: sb.serviceChargePct, additionalCharges: sb.additionalCharges,
+        additionalChargesTotal: sb.additionalChargesTotal, total: sb.total + 999,
     };
     const f = frontend.billFromOrder(order, cfg);
     const b = backend.computeBill({ subtotal: 150, taxConfig: cfg, orderType: 'dine-in' });

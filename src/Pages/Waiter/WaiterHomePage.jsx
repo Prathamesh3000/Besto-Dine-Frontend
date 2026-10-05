@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Menu, Link, AlertCircle, FileText, Check, X, Loader2, LayoutGrid, MoreVertical, Unlink, BellRing, ShoppingBag } from 'lucide-react';
+import SeatedCount, { seatInfo } from '../../Components/Common/SeatedCount';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../../Components/Waiter/Sidebar';
 import BottomNav from '../../Components/Waiter/BottomNav';
@@ -631,6 +632,13 @@ const WaiterHomePage = () => {
 
                             <h3 className="text-[18px] font-[600] text-[#1A181B]">{table.name}</h3>
                             <p className="text-[11px] font-[500] text-[#645E66]">Capacity: {table.capacity}</p>
+                            {table.status !== 'disabled' && (
+                                <SeatedCount
+                                    {...seatInfo(table, tablesData)}
+                                    size={11}
+                                    className="text-[11px] font-[600] text-[#645E66]"
+                                />
+                            )}
 
                             <div className="mt-[8px] flex items-center justify-between">
                                 {(isOccupied) && (

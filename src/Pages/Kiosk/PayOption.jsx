@@ -31,8 +31,8 @@ function loadRazorpayScript() {
 }
 
 // Build a human-readable "Size: Large; Extras: 2× Cheese Slice, Lettuce"
-// note the kitchen can read off the KOT. Kiosk size + extras are UX-only;
-// the backend does not accept synthetic toppings, so we surface them here.
+// note the kitchen can read off the KOT. Extras are also sent as
+// selectedToppings (so they are charged); the note keeps the KOT readable.
 function buildInstructionsLine(cartLine) {
     const bits = [];
     if (cartLine.size && cartLine.size !== 'Regular') bits.push(`Size: ${cartLine.size}`);
@@ -57,6 +57,12 @@ function toOrderItems(cart) {
             category: line.category || '',
             vegType:  line.isVeg ? 'veg' : 'non-veg',
         };
+        // Add-ons are charged: the server prices each selectedTopping
+        // entry from the menu item's canonical toppings, once per entry,
+        // so an add-on picked N times is sent N times.
+        const toppings = (Array.isArray(line.addons) ? line.addons : []).flatMap(a =>
+            Array.from({ length: Math.max(0, Number(a.qty) || 0) }, () => ({ name: a.name, price: Number(a.price) || 0 })));
+        if (toppings.length > 0) item.selectedToppings = toppings;
         if (instructions) item.instructions = instructions;
         return item;
     });
@@ -103,7 +109,8 @@ export default function PayOption() {
     useEffect(() => {
         settingsAPI.getSettings()
             .then(res => {
-                const name = res?.data?.data?.general?.cafeName;
+                // GET /settings returns the settings object at the top level.
+                const name = res?.data?.general?.cafeName;
                 if (name) setMerchantName(name);
             })
             .catch(() => { /* non-fatal */ });
@@ -131,7 +138,9 @@ export default function PayOption() {
     };
 
     // ─── Cafe order payload ─────────────────────────────────────────────
-    const buildOrderPayload = () => {
+    // `checkout` — the Razorpay checkout result: sent with the create so
+    // the server links the payment to the order as it is written.
+    const buildOrderPayload = (checkout = null) => {
         const orderType = localStorage.getItem(KIOSK_KEYS.ORDER_TYPE) || 'Eat Here';
         // Map kiosk intent → backend order type so the admin Orders
         // dashboard splits kiosk orders correctly across its Dine-in
@@ -164,6 +173,13 @@ export default function PayOption() {
             customerName:          cleanName || 'Kiosk Customer',
             phone:                 cleanPhone || undefined,
             note:                  `Placed via kiosk (${orderType})`,
+            ...(checkout ? {
+                razorpayPayment: {
+                    razorpay_order_id:   checkout.razorpay_order_id,
+                    razorpay_payment_id: checkout.razorpay_payment_id,
+                    razorpay_signature:  checkout.razorpay_signature,
+                },
+            } : {}),
         };
     };
 
@@ -214,7 +230,7 @@ export default function PayOption() {
                     let cafeOrder = null;
                     let cafeTrackingToken = null;
                     try {
-                        const { data: orderRes } = await api.post('/orders', buildOrderPayload());
+                        const { data: orderRes } = await api.post('/orders', buildOrderPayload(response));
                         if (!orderRes?.success) throw new Error('Order creation failed after payment');
                         cafeOrder = orderRes.order;
                         cafeTrackingToken = orderRes.trackingToken || null;

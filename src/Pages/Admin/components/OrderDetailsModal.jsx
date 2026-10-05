@@ -73,7 +73,9 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
       const res = await api.patch(`/orders/${orderId}/status`, {
         paymentStatus: 'Paid',
         paymentMethod: selectedPaymentMethod,
-        amountPaid: order.total
+        // What is due: the bill less the staff manual discount. Marking
+        // Paid never changes order.total on the server.
+        amountPaid: Math.max(0, Math.round(((Number(order.total) || 0) - (Number(order.manualDiscount) || 0)) * 100) / 100)
       });
       if (res.data.success) {
          setPaymentDone(true);

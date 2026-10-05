@@ -5,6 +5,9 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../Context/AuthContext';
 import BookingProgressBar from './BookingProgressBar';
 import { settingsAPI, advanceBookingAPI } from '../../utils/api';
+import RequiredMark from '../../Components/Common/RequiredMark';
+import { reportMissingFields } from '../../utils/requiredFields';
+import { backendOrigin } from '../../utils/apiOrigin';
 
 // Today's date in LOCAL time as YYYY-MM-DD — the format <input type="date">
 // expects. Using `new Date().toISOString().split('T')[0]` returns UTC,
@@ -203,6 +206,7 @@ const BookTableDetails = () => {
   };
 
   const filteredSlots = timeSlots.filter(s => s.type === selectedTimeType);
+  const canContinue = selectedSlot !== null && (bookingType === 'hall' || selectedTableIds.length > 0);
 
   const formatDateLabel = (date) => {
     if (!date) return '';
@@ -242,7 +246,17 @@ const BookTableDetails = () => {
       return;
     }
 
-    const selectedTableNames = tablesList.filter(t => selectedTableIds.includes(t._id)).map(t => t.name);
+    // QA N2 — name every missing required field and jump to the first
+    // one instead of a silently disabled Continue button.
+    const missing = [];
+    if (!(guests >= MIN_GUESTS)) missing.push({ label: 'Number of guests', id: 'guest-count' });
+    if (!selectedDate) missing.push({ label: 'Date', id: 'booking-date' });
+    if (selectedSlot === null) missing.push({ label: 'Time slot', id: 'booking-time' });
+    if (bookingType !== 'hall' && selectedTableIds.length === 0) missing.push({ label: 'Table(s)', id: 'booking-tables' });
+    if (reportMissingFields(missing)) return;
+
+    const chosenTables = tablesList.filter(t => selectedTableIds.includes(t._id));
+    const selectedTableNames = chosenTables.map(t => t.name);
     const selectedEventObj = eventsList.find(e => e.id === selectedEvent);
     const selectedEventName = selectedEventObj ? selectedEventObj.label : null;
 
@@ -261,7 +275,9 @@ const BookTableDetails = () => {
       selectedEvent,
       selectedEventName,
       selectedTableIds,
-      selectedTableNames
+      selectedTableNames,
+      // Seating capacity for the Review step's seating description (QA N12).
+      selectedTablesInfo: chosenTables.map(t => ({ name: t.name, capacity: Number(t.capacity) || 0 }))
     };
     if (bookingType === 'hall') {
       navigate('/customer/hall-booking', { state: nextState });
@@ -309,7 +325,7 @@ const BookTableDetails = () => {
               where they're the faster input. */}
           <div className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:px-8 lg:py-4 flex items-center justify-between gap-4 shadow-[0px_2px_12px_rgba(0,0,0,0.02)]">
             <label htmlFor="guest-count" className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B]">
-              Select number of guests
+              Select number of guests<RequiredMark />
             </label>
             <div className="flex items-center bg-[#F8F9FB] rounded-[14px] p-1 border border-[#F2F4F7]">
               <button
@@ -364,8 +380,8 @@ const BookTableDetails = () => {
             {/* Left Column: Date & Time */}
             <div className="flex flex-col gap-6">
               {/* Date Selector */}
-              <div className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 shadow-[0px_2px_12px_rgba(0,0,0,0.02)]">
-                <h2 className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B] mb-5">Select Date</h2>
+              <div id="booking-date" className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 shadow-[0px_2px_12px_rgba(0,0,0,0.02)]">
+                <h2 className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B] mb-5">Select Date<RequiredMark /></h2>
                 <div className="relative group">
                   <div 
                     onClick={() => {
@@ -410,10 +426,10 @@ const BookTableDetails = () => {
               </div>
 
               {/* Time Selector */}
-              <div className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 shadow-[0px_2px_12px_rgba(0,0,0,0.02)]">
+              <div id="booking-time" className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 shadow-[0px_2px_12px_rgba(0,0,0,0.02)]">
                 {/* Time type toggle – stacks on mobile, row on sm+ */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-                  <h2 className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B]">Select time</h2>
+                  <h2 className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B]">Select time<RequiredMark /></h2>
                   <div className="flex bg-[#F2F4F7] rounded-full p-1 border border-[#F2F4F7] self-start sm:self-auto">
                     <button
                       onClick={() => setSelectedTimeType('Lunch')}
@@ -450,7 +466,7 @@ const BookTableDetails = () => {
                 )}
 
                 {/* Time slot grid – 2 cols mobile, 3 sm, context-aware on lg */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
                   {filteredSlots.map((slot, idx) => {
                     const isSelected = selectedSlot === slot.time;
                     return (
@@ -469,15 +485,14 @@ const BookTableDetails = () => {
                     );
                   })}
                 </div>
-                <button className="text-[#007AFF] text-[14px] font-[800] hover:underline underline-offset-4">View all</button>
               </div>
             </div>
 
             {/* Right Column: Table Layout */}
             {bookingType !== 'hall' && (
-              <div className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 shadow-[0px_2px_12px_rgba(0,0,0,0.02)] flex flex-col h-full">
+              <div id="booking-tables" className="bg-white border border-[#F2F4F7] rounded-[24px] p-6 lg:p-8 shadow-[0px_2px_12px_rgba(0,0,0,0.02)] flex flex-col h-full">
                 <div className="flex flex-col mb-8">
-                  <h2 className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B] mb-6">Table Layout</h2>
+                  <h2 className="text-[16px] lg:text-[18px] font-[700] text-[#1A181B] mb-6">Select Table(s)<RequiredMark /></h2>
                   <div className="flex items-center gap-10">
                     <div className="flex items-center gap-3">
                       <div className="w-4 h-4 rounded-full bg-[#EBEDF0]" />
@@ -575,7 +590,7 @@ const BookTableDetails = () => {
                       {isImagePath ? (
                         <img
                           src={rawIcon.startsWith('/uploads/')
-                            ? `${import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || ''}${rawIcon}`
+                            ? `${backendOrigin()}${rawIcon}`
                             : rawIcon}
                           alt={event.label}
                           className="w-7 h-7 object-contain"
@@ -611,9 +626,9 @@ const BookTableDetails = () => {
           </button>
           <button
             onClick={handleContinue}
-            disabled={selectedSlot === null || (bookingType !== 'hall' && selectedTableIds.length === 0)}
-            className={`flex-1 font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] transition-all ${selectedSlot === null || (bookingType !== 'hall' && selectedTableIds.length === 0)
-              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            aria-disabled={!canContinue}
+            className={`flex-1 font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] transition-all ${!canContinue
+              ? 'bg-[#FE8301]/60 text-white'
               : 'bg-[#FE8301] text-white'
               }`}
           >
@@ -627,9 +642,9 @@ const BookTableDetails = () => {
           </button>
           <button
             onClick={handleContinue}
-            disabled={selectedSlot === null || (bookingType !== 'hall' && selectedTableIds.length === 0)}
-            className={`font-nunito font-semibold text-[14px] py-3 px-8 rounded-[16px] w-[140px] text-center transition-all ${selectedSlot === null || (bookingType !== 'hall' && selectedTableIds.length === 0)
-              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            aria-disabled={!canContinue}
+            className={`font-nunito font-semibold text-[14px] py-3 px-8 rounded-[16px] w-[140px] text-center transition-all ${!canContinue
+              ? 'bg-[#FE8301]/60 text-white'
               : 'bg-[#FE8301] text-white'
               }`}
           >

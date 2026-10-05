@@ -20,6 +20,11 @@ function OTP() {
   const [otp, setOtp] = useState(emptyOtp);
   const [error, setError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  // Synchronous in-flight guard: the auto-submit timer and a tap on
+  // "Verify" can both fire before `isVerifying` re-renders the button
+  // disabled, and a second verify races the first for a single-use code.
+  // Stays set after a success (the page is navigating away).
+  const verifyInFlightRef = useRef(false);
   const [resendTimer, setResendTimer] = useState(30);
   const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null)];
 
@@ -81,6 +86,9 @@ function OTP() {
       return;
     }
 
+    if (verifyInFlightRef.current) return;
+    verifyInFlightRef.current = true;
+    let verified = false;
     setIsVerifying(true);
     setError('');
 
@@ -91,6 +99,7 @@ function OTP() {
       });
 
       if (data.success) {
+        verified = true;
         // Store user data and token (same shape as login/register response)
         // eslint-disable-next-line no-unused-vars
         const { token, refreshToken, success, needsName, ...userData } = data;
@@ -129,6 +138,7 @@ function OTP() {
       const msg = err.response?.data?.message || 'Verification failed. Please try again.';
       setError(msg);
     } finally {
+      if (!verified) verifyInFlightRef.current = false;
       setIsVerifying(false);
     }
   };

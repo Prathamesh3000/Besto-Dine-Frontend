@@ -15,6 +15,7 @@ import { useAuth } from "../../Context/AuthContext";
 import api from "../../utils/api";
 import { resolveImageUrl } from "../../utils/image";
 import toast from "react-hot-toast";
+import { sanitizeMobileInput } from "../../utils/mobile";
 
 const fallbackAvatar = (name) =>
   `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'U')}&background=FE8301&color=fff&size=128`;
@@ -448,9 +449,9 @@ function EditProfile() {
                 type="tel"
                 inputMode="numeric"
                 value={mobile}
-                onChange={(e) => { setMobile(e.target.value.replace(/\D/g, '').slice(0, 10)); clearErr('mobile'); }}
-                maxLength={10}
-                autoComplete="tel"
+                onChange={(e) => { setMobile(sanitizeMobileInput(e.target.value)); clearErr('mobile'); }}
+                pattern="[6-9][0-9]{9}"
+                autoComplete="tel-national"
                 aria-required="true"
                 aria-invalid={errors.mobile ? 'true' : 'false'}
                 aria-describedby={errors.mobile ? 'mobile-err' : undefined}

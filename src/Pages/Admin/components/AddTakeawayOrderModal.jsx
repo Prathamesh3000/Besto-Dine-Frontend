@@ -124,13 +124,19 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
 
     // ── bill calculation ──────────────────────────────────────────────────────
     // Same function (and rounding) the server uses to price the order.
+    // The staff Discount here is a manual discount, not a coupon: it does
+    // not reduce the GST base (GST is on subtotal − coupon). The order is
+    // placed at the full server bill and the discount is sent with the
+    // create call as order.manualDiscount (stamped at creation), so the
+    // stamped GST, the stored total and the discount all reconcile.
     const bill = computeBill({
         subtotal: cartItems.reduce((s, c) => s + (c.menuItem.finalPrice || c.menuItem.basePrice) * c.qty, 0),
         taxConfig,
         orderType: 'takeaway',
-        couponDiscount: discountAmt,
     })
-    const { subtotal, serviceCharge, gst: gstAmount, gstPct, serviceChargePct, total } = bill
+    const { subtotal, serviceCharge, gst: gstAmount, gstPct, serviceChargePct } = bill
+    const manualDiscount = Math.min(Math.max(0, Number(discountAmt) || 0), bill.total)
+    const total = Math.max(0, Math.round((bill.total - manualDiscount) * 100) / 100)
 
     // ── success state ─────────────────────────────────────────────────────────
     const [orderPlaced, setOrderPlaced] = useState(false)
@@ -179,7 +185,11 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
                 quantity: c.qty,
                 ...(c.note?.trim() ? { instructions: c.note.trim() } : {})
             })),
-            total: total > 0 ? total : 0,
+            total: bill.total > 0 ? bill.total : 0,
+            // Staff discount, stamped on the order at creation (POST
+            // /orders accepts manualDiscount from staff: ≥ 0, ≤ total,
+            // paise). It stays outside order.total — no GST effect.
+            ...(manualDiscount > 0 ? { manualDiscount: Math.round(manualDiscount * 100) / 100 } : {}),
             note: orderType === 'admin' ? 'Admin Order' : '',
         }
         onPlaceOrder?.(orderPayload)

@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'react-hot-toast';
 import { Copy, ExternalLink, Download } from 'lucide-react';
+import { isLoopbackOrigin } from '../../utils/customerLinks';
 
 /**
  * ShareLinkPanel — a customer entry link with Copy / Open actions and a
@@ -67,6 +68,12 @@ const ShareLinkPanel = ({ url, qrFileName = 'restaurant-qr', note = null }) => {
                     </button>
                 </div>
                 {note && <p className="text-xs text-gray-500 leading-relaxed">{note}</p>}
+                {isLoopbackOrigin(url) && (
+                    <p role="alert" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                        This link points to localhost — phones and other devices can't open it. Open the admin using your
+                        computer's network address (e.g. http://192.168.x.x:5173) or set VITE_PUBLIC_APP_URL.
+                    </p>
+                )}
             </div>
         </div>
     );

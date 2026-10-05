@@ -6,7 +6,7 @@ import { resolveImageUrl } from "../../utils/image";
 import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
 import toast from "react-hot-toast";
-import { computeBill, toTaxConfig } from "../../utils/billing";
+import { billFromOrder, orderAmountDue, toTaxConfig } from "../../utils/billing";
 
 export default function BillPage() {
     const navigate = useNavigate();
@@ -121,56 +121,40 @@ export default function BillPage() {
         const isLate = Number.isFinite(addedMs) && addedMs - baselineMs > ADDED_LATER_GRACE_MS;
         (isLate ? appendedItems : originalItems).push(formatItem(item, idx, isLate));
     });
-    // Flat list retained for subtotal / discount / tax math — order doesn't matter there.
-    const items = [...originalItems, ...appendedItems];
 
-    const subtotalRaw = items.reduce((acc, item) => acc + item.price * item.qty, 0);
-    // Prefer coupon saved on the order (synced across admin / waiter /
-    // customer) over the local pending `appliedCoupon` state so all
-    // three views always agree once the waiter persists the coupon.
-    const orderCouponCode = order?.couponCode || '';
-    const orderCouponDiscount = Number(order?.couponDiscount) || 0;
-    const effectiveCouponCode = orderCouponCode || appliedCoupon?.code || '';
-    const effectiveCouponDiscount = orderCouponDiscount || Number(appliedCoupon?.discount) || 0;
-    const discount = effectiveCouponDiscount;
-    // Manual discount applied from the admin table drawer (persisted on
-    // the order) — the admin drawer and customer preview both take it off.
-    const manualDiscount = Number(order?.manualDiscount) || 0;
-    // Tip + wallet points are server-side — include them here so this
-    // screen and the customer bill preview sum the same way.
-    const tipAmount = Number(order?.tipAmount) || 0;
-    const pointsRedeemed = Number(order?.pointsRedeemed) || 0;
-    // One computation, shared with the server (Backend/utils/billing.js):
-    // taxes on the gross subtotal, then coupon / manual discount / points
-    // off the taxed figure, rounded to 2dp. This screen used to tax the
-    // post-coupon subtotal, so it disagreed with every other bill view.
-    const bill = computeBill({
-        subtotal: subtotalRaw,
-        taxConfig,
-        orderType: order?.type || 'dine-in',
-        couponDiscount: discount + manualDiscount,
-        pointsRedeemed,
-        tipAmount,
-    });
+    // The coupon shown is the one persisted on the order (synced across
+    // admin / waiter / customer) — only a persisted coupon is part of
+    // order.total, which is what gets settled.
+    const effectiveCouponCode = order?.couponCode || '';
+    // The bill is the order's STORED bill (utils/billing.billFromOrder):
+    // the breakdown and order.total the server stamped when the order was
+    // placed / appended / couponed. It is never re-priced from the
+    // current tax settings — marking Paid cannot change order.total, and
+    // the server rejects an amount below what is due (AMOUNT_TOO_LOW), so
+    // a live re-price would break settlement as soon as an admin edits a
+    // rate. taxConfig is only the fallback for legacy orders with no
+    // stored total / breakdown.
+    const bill = billFromOrder(order, taxConfig);
     const { subtotal, gst, gstPct, serviceCharge: service } = bill;
     const servicePct = bill.serviceChargePct;
+    const discount = bill.couponDiscount;
+    const effectiveCouponDiscount = discount;
+    // Manual discount applied from the admin table drawer (persisted on
+    // the order, outside order.total) — taken off the final figure,
+    // matching the server's due = total − manualDiscount − amountPaid.
+    const manualDiscount = bill.manualDiscount;
+    const tipAmount = bill.tipAmount;
+    const pointsRedeemed = bill.pointsRedeemed;
 
-    // CAP-018 — keep the per-rate breakdown visible (GST X%, Service Y%,
-    // additional charges) so the waiter and customer can both reconcile
-    // the bill against the admin Settings tab. The headline is the sum
-    // of these breakdown lines, NOT a blind read of `order.total`,
-    // because admins do update tax rates / charges and the bill must
-    // reflect what's actually being collected today.
-    //
-    // Already-paid orders are an exception: once the customer has paid,
-    // surface the amount they actually paid (order.amountPaid) so the
-    // waiter doesn't get a refund-vs-due mismatch when rates have shifted.
-    const computedTotal = bill.total;
     const isPaid = order?.paymentStatus === 'Paid';
-    const paidAmount = Number(order?.amountPaid);
-    const total = isPaid && Number.isFinite(paidAmount) && paidAmount > 0
-        ? paidAmount
-        : computedTotal;
+    const paidAmount = Number(order?.amountPaid) || 0;
+    // Bill total after the staff discount.
+    const billTotal = Math.max(0, Math.round((bill.total - manualDiscount) * 100) / 100);
+    // What the waiter collects (sent on as the settle amount): the
+    // stored bill less anything already paid (e.g. a wallet portion).
+    const amountDue = orderAmountDue(order, taxConfig);
+    // Already-paid orders show the amount actually collected.
+    const total = isPaid && paidAmount > 0 ? paidAmount : billTotal;
 
     // Apply coupon by persisting it on the order (PATCH /orders/:id/coupon).
     // The server validates, saves couponCode + couponDiscount on the order,
@@ -182,7 +166,10 @@ export default function BillPage() {
         try {
             const res = await api.patch(`/orders/${order._id}/coupon`, { code: couponCode.trim() });
             if (res.data?.success) {
+                // The bill is read from the stored order, so make sure we
+                // hold the re-priced one.
                 if (res.data.order) setOrder(res.data.order);
+                else refetchOrder();
                 setAppliedCoupon({ code: res.data.coupon?.code || couponCode.trim(), discount: res.data.discount || 0 });
                 toast.success(res.data.message || 'Coupon applied!');
             } else {
@@ -401,15 +388,15 @@ export default function BillPage() {
                             ONLY when their rate is > 0 — a tenant with
                             GST disabled shouldn't see a "GST (0%) ₹0.00"
                             row cluttering the bill. */}
-                        {gstPct > 0 && (
+                        {(gstPct > 0 || gst > 0) && (
                             <div className="flex justify-between text-gray-500">
-                                <span>GST ({gstPct}%)</span>
+                                <span>GST{gstPct > 0 ? ` (${gstPct}%)` : ''}</span>
                                 <span>₹{gst.toFixed(2)}</span>
                             </div>
                         )}
-                        {servicePct > 0 && (
+                        {(servicePct > 0 || service > 0) && (
                             <div className="flex justify-between text-gray-500">
-                                <span>Service Charge ({servicePct}%)</span>
+                                <span>Service Charge{servicePct > 0 ? ` (${servicePct}%)` : ''}</span>
                                 <span>₹{service.toFixed(2)}</span>
                             </div>
                         )}
@@ -441,6 +428,20 @@ export default function BillPage() {
                             <span>Total Payment</span>
                             <span>₹{total.toFixed(2)}</span>
                         </div>
+                        {/* Part already collected (e.g. a wallet portion) —
+                            the remainder is what the Pay Bill button settles. */}
+                        {!isPaid && paidAmount > 0 && (
+                            <>
+                                <div className="flex justify-between text-[#027A48]">
+                                    <span>Already Paid</span>
+                                    <span>-₹{paidAmount.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between font-semibold text-base">
+                                    <span>Amount Due</span>
+                                    <span>₹{amountDue.toFixed(2)}</span>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     {/* CAP-018 — Barcode strip. The original implementation
@@ -508,11 +509,13 @@ export default function BillPage() {
                 ) : (
                     <button
                         onClick={() => navigate('/waiter/payment', {
-                            state: { tableId, tableName, orderId: order._id, orderDisplayId: order.orderId, amount: total }
+                            // Settle amount = stored total − manualDiscount −
+                            // amountPaid (PaymentOption sends it as amountPaid).
+                            state: { tableId, tableName, orderId: order._id, orderDisplayId: order.orderId, amount: amountDue }
                         })}
                         className="w-full bg-[#FF7A00] text-white rounded-[16px] py-[14px] px-[16px] flex items-center justify-center gap-3 text-[14px] font-[600] shadow-xl shadow-orange-100 active:scale-[0.98] transition-all"
                     >
-                        Pay Bill — ₹{total.toFixed(2)}
+                        Pay Bill — ₹{amountDue.toFixed(2)}
                     </button>
                 )}
             </div>

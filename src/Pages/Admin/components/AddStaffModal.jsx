@@ -219,6 +219,7 @@ const Stepper = ({ currentStep }) => {
 // ── Main Modal ────────────────────────────────────────────────────────────────
 import api from '../../../utils/api'
 import { resolveImageUrl } from '../../../utils/image'
+import { sanitizeMobileInput, isValidMobile, mobileError } from '../../../utils/mobile'
 
 // ── Permission catalog ───────────────────────────────────────────────────────
 // Single source of truth for the toggles shown on step 3 of the modal.
@@ -539,7 +540,7 @@ const AddStaffModal = ({ onClose, onSubmit, editData }) => {
         if (!formData.email.trim())                                              e.email = 'Email is required'
         else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email))             e.email = 'Enter a valid email address'
         if (!formData.phone.trim())                                              e.phone = 'Mobile number is required'
-        else if (!/^[0-9]{10}$/.test(formData.phone))                            e.phone = 'Enter a 10-digit number'
+        else if (!isValidMobile(formData.phone))                                 e.phone = mobileError(formData.phone)
         if (!formData.role)                                                     e.role = 'Please select a role'
         // Branch requirement matches the backend rule in
         // staffController.addStaff — every non-admin staff at a multi-
@@ -687,12 +688,12 @@ const AddStaffModal = ({ onClose, onSubmit, editData }) => {
                                         name="phone"
                                         type="tel"
                                         inputMode="numeric"
-                                        maxLength={10}
+                                        pattern="[6-9][0-9]{9}"
                                         required
-                                        autoComplete="tel"
+                                        autoComplete="tel-national"
                                         placeholder="10-digit mobile number"
                                         value={formData.phone}
-                                        onChange={(e) => set('phone', e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                        onChange={(e) => set('phone', sanitizeMobileInput(e.target.value))}
                                         error={errors.phone}
                                     />
                                     <FieldError id="phone-err" message={errors.phone} />

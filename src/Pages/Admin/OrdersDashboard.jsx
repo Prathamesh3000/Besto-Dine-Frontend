@@ -7,6 +7,7 @@ import api from '../../utils/api'
 import { useQueryClient } from '@tanstack/react-query'
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent'
 import { useAdminBranch } from '../../Context/AdminBranchContext'
+import { withAdminTenant } from '../../hooks/queries/queryKeys'
 import toast from 'react-hot-toast'
 import {
   useAdminDineInArchive,
@@ -564,7 +565,7 @@ const OrdersDashboard = () => {
   //     coalesced background refetch;
   //   • bursts of events collapse into ONE refetch 300 ms after they stop.
   const queryClient = useQueryClient()
-  const dineKey = useMemo(() => ['admin', 'orders', 'dine-archive', selectedBranchId || 'all'], [selectedBranchId])
+  const dineKey = useMemo(() => withAdminTenant(['admin', 'orders', 'dine-archive', selectedBranchId || 'all']), [selectedBranchId])
   const refetchTimerRef = useRef(null)
   const pendingPastRef = useRef(false)
   const activeTabRef = useRef(activeTab)
@@ -971,6 +972,9 @@ const OrdersDashboard = () => {
             isBranchLocked={isBranchLocked}
             onPlaceOrder={async (orderPayload) => {
               try {
+                // The staff discount travels in the create body as
+                // manualDiscount (the server stamps it at creation,
+                // outside order.total, no GST effect) — no follow-up PATCH.
                 await api.post('/orders', orderPayload)
                 toast.success('Takeaway order placed successfully!')
                 setShowAddTakeawayModal(false)

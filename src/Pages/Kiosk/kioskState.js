@@ -1,6 +1,8 @@
 import { publicAPI } from '../../utils/api';
 import { getActiveTenant, setActiveTenant } from '../../utils/tenant';
-import { kioskLineKey, upsertLine, changeLineQty, cartSubtotal, countDistinctLines } from '../../utils/cart';
+import { storageKeysFor } from '../../utils/authStorage';
+import { kioskLineKey, upsertLine, changeLineQty, countDistinctLines } from '../../utils/cart';
+import { round2 } from '../../utils/pricing';
 
 // ─── localStorage keys (single source of truth) ─────────────────────────
 export const KIOSK_KEYS = {
@@ -55,8 +57,13 @@ export function clearKioskSession() {
         // Kiosk is a dedicated public terminal — clearing these on
         // every landing matches CLAUDE.md's "kiosk routes are guest-only
         // and shared between many customers" rule.
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        // Every customer auth key api.js reads — including the refresh
+        // token, which customerSessionTick would otherwise use to mint a
+        // fresh access token for the previous customer on this kiosk.
+        const customerKeys = storageKeysFor('customer');
+        localStorage.removeItem(customerKeys.token);
+        localStorage.removeItem(customerKeys.user);
+        localStorage.removeItem(customerKeys.refresh);
         localStorage.removeItem('adminActiveBranch');
         localStorage.removeItem('adminBranchPicked');
         localStorage.removeItem('activeBranchId');
@@ -82,9 +89,25 @@ export function changeKioskLineQty(cart, line, delta) {
     return changeLineQty(cart, kioskLineKey(line), delta, { keyOf: kioskLineKey, qtyField: 'qty' });
 }
 
-/** Pre-tax subtotal (unitPrice × qty per line, rounded to paise). */
+/**
+ * Per-unit add-on money on a kiosk line: each picked add-on's price ×
+ * its count. ProductPopup quotes (unitPrice + this) × qty, so the cart
+ * and the amount charged must include it too.
+ */
+export function kioskAddonsTotal(line) {
+    return round2((Array.isArray(line?.addons) ? line.addons : [])
+        .reduce((sum, a) => sum + (Number(a?.price) || 0) * (Number(a?.qty) || 0), 0));
+}
+
+/** Per-unit price of a kiosk line: size price + its add-ons. */
+export function kioskLineUnitPrice(line) {
+    return round2((Number(line?.unitPrice) || 0) + kioskAddonsTotal(line));
+}
+
+/** Pre-tax subtotal ((unitPrice + add-ons) × qty per line, rounded to paise). */
 export function kioskSubtotal(cart) {
-    return cartSubtotal(cart);
+    return round2((Array.isArray(cart) ? cart : [])
+        .reduce((sum, line) => sum + kioskLineUnitPrice(line) * (Number(line?.qty) || 0), 0));
 }
 
 /** Distinct products in the cart (the badge count), not total quantity. */

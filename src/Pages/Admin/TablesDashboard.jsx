@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload } from 'lucide-react'
+import SeatedCount, { seatInfo } from '../../Components/Common/SeatedCount'
 import AddReservationModal from './components/AddReservationModal'
 import AddAreaModal from './components/AddAreaModal'
 import AddTableModal from './components/AddTableModal'
@@ -15,7 +16,7 @@ import {
 import api from '../../utils/api'
 import useSocketEvent from '../../hooks/useSocketEvent'
 import toast from 'react-hot-toast'
-import { computeBill, toTaxConfig } from '../../utils/billing'
+import { billFromOrders, orderAmountDue, settleAmountForOrders, toTaxConfig } from '../../utils/billing'
 import { useAdminBootstrap } from '../../hooks/queries/useAdminBootstrap'
 import { SkeletonTablesGrid, SkeletonStatGrid } from '../../Components/Common/Skeleton'
 
@@ -280,10 +281,12 @@ const TablesDashboard = () => {
             )
             const results = await Promise.all(orderPromises)
             const allItems = []
+            const mergedOrders = []
             let primaryOrder = null
             results.forEach((res, idx) => {
               if (res.data.success && res.data.order) {
                 if (!primaryOrder) primaryOrder = res.data.order
+                mergedOrders.push(res.data.order)
                 const tableName = processedTablesData.find(t => String(t._id) === String(mergedIds[idx]))?.name || `Table ${idx + 1}`
                 res.data.order.items.forEach(item => {
                   allItems.push({
@@ -318,6 +321,9 @@ const TablesDashboard = () => {
               // Customer-initiated counter-payment request flag —
               // drives the red alert banner at the top of the drawer.
               counterPaymentRequestedAt: primaryOrder.counterPaymentRequestedAt || null,
+              // Full order docs — the bill and the settle amount are
+              // read from their STORED totals (utils/billing).
+              orders: mergedOrders,
             } : null)
           } else {
             // Independent-orders model — pull EVERY unpaid order on
@@ -389,6 +395,9 @@ const TablesDashboard = () => {
                   paymentStatus: o.paymentStatus,
                   createdAt: o.createdAt,
                 })),
+                // Full order docs — the bill and the settle amount are
+                // read from their STORED totals (utils/billing).
+                orders: list,
               })
             } else {
               setOrderItems([])
@@ -431,26 +440,36 @@ const TablesDashboard = () => {
   })
 
   // ── Bill calculations ───────────────────────────────────────────────────
-  // Table orders are dine-in. computeBill (utils/billing — a mirror of
-  // the server's Backend/utils/billing.js) owns the rounding, the
-  // empty-bill guard on flat charges and the service-charge rule, so this
-  // drawer, the waiter bill and the customer bill preview cannot drift.
-  // The manual discount comes off alongside the coupon (after tax), which
-  // is how it was applied before.
-  const subtotalRaw = orderItems.reduce((acc, item) => acc + (item.price * item.quantity) + ((item.addonPrice || 0) * item.quantity), 0)
-  const bill = computeBill({
-    subtotal: subtotalRaw,
-    taxConfig,
-    orderType: 'dine-in',
-    couponDiscount: (Number(activeOrderMeta?.couponDiscount) || 0) + (Number(discount) || 0),
-    pointsRedeemed: activeOrderMeta?.pointsRedeemed || 0,
-    tipAmount: activeOrderMeta?.tipAmount || 0,
-  })
+  // The drawer shows — and settles — the orders' STORED bill
+  // (utils/billing.billFromOrder): the breakdown and order.total the
+  // server stamped at placement / append / coupon. It is never re-priced
+  // from the current tax settings: marking Paid cannot change
+  // order.total and the server rejects an amountPaid below what is due
+  // (total − manualDiscount − amountPaid, AMOUNT_TOO_LOW), so a live
+  // re-price breaks settlement the moment an admin edits a rate.
+  // taxConfig is only the fallback for legacy orders with no stored bill.
+  // The staff manual discount is NOT a coupon and sits outside
+  // order.total, so it comes off the final figure.
+  const activeOrders = activeOrderMeta?.orders || []
+  const bill = billFromOrders(activeOrders, taxConfig)
   const { subtotal, serviceCharge, gst } = bill
   const serviceChargePercent = bill.serviceChargePct
   const gstPercent = bill.gstPct
-  // Final amount payable (never negative).
-  const payableTotal = bill.total
+  const pctLabel = (p) => (p ? ` (${p}%)` : '')
+  // Bill total after the drawer's discount.
+  const billTotal = Math.max(0, Math.round((bill.total - (Number(discount) || 0)) * 100) / 100)
+  // Already collected across the table's orders (e.g. a wallet portion).
+  const alreadyPaid = bill.amountPaid
+  // What "Done" sends as amountPaid: sum of (stored total − amountPaid)
+  // less the drawer's discount (which replaces the stored manual discounts).
+  const payableTotal = settleAmountForOrders(activeOrders, taxConfig, { manualDiscount: Number(discount) || 0 })
+  // Counter-request "Mark Paid" sends no discount, so the server uses the
+  // stored manualDiscount of each order.
+  const counterSettleTotal = settleAmountForOrders(activeOrders, taxConfig)
+  // Edit Bill quantity changes are local only (never saved), so they do
+  // not change the bill — flag it rather than show a figure we won't charge.
+  const localItemsSubtotal = Math.round(orderItems.reduce((acc, item) => acc + (item.price * item.quantity) + ((item.addonPrice || 0) * item.quantity), 0) * 100) / 100
+  const hasUnsavedItemEdits = activeOrders.length > 0 && Math.abs(localItemsSubtotal - subtotal) > 0.01
 
   const removeOrderItem = (itemId) => setOrderItems(prev => prev.filter(item => item.id !== itemId))
   const incrementQuantity = (itemId) => setOrderItems(prev => prev.map(item => item.id === itemId ? { ...item, quantity: item.quantity + 1 } : item))
@@ -499,7 +518,14 @@ const TablesDashboard = () => {
         setOrderItems(data.order.items.map(item => ({
           id: item._id, name: item.name, quantity: item.quantity, price: item.price, addon: null, addonPrice: 0,
         })))
-        setActiveOrderMeta(m => m ? { ...m, savedTotal: data.order.total || m.savedTotal } : m)
+        setActiveOrderMeta(m => m ? {
+          ...m,
+          savedTotal: data.order.total || m.savedTotal,
+          // Swap in the re-priced order so the stored bill includes the item.
+          orders: (m.orders || []).some(o => String(o._id) === String(data.order._id))
+            ? m.orders.map(o => (String(o._id) === String(data.order._id) ? data.order : o))
+            : [...(m.orders || []), data.order],
+        } : m)
       }
       toast.success(`${menuItem.name} added to order`)
     } catch (err) {
@@ -704,10 +730,18 @@ const TablesDashboard = () => {
     }
     setIsSettlingPayment(true)
     try {
+      // Marking Paid never changes order.total on the server (it 400s
+      // with AMOUNT_TOO_LOW if the amount is below what is due), so the
+      // discount is sent explicitly as manualDiscount rather than being
+      // folded into amountPaid. (Multi-round tables: the Discount select
+      // already persisted it on the primary round; the drawer's figure is
+      // the sum across rounds, so it is not re-sent here.)
+      const singleRound = (activeOrderMeta.orderCount || 1) <= 1
       await api.patch(`/orders/${activeOrderMeta._id}/status`, {
         paymentStatus: 'Paid',
         paymentMethod: method,
         amountPaid: Math.round(amount * 100) / 100,
+        ...(singleRound ? { manualDiscount: Number(discount) || 0 } : {}),
       })
       setActiveOrderMeta(m => m ? { ...m, paymentStatus: 'Paid', paymentMethod: method } : m)
       setIsPaymentSuccess(true)
@@ -899,6 +933,17 @@ const TablesDashboard = () => {
               <p className={`text-[12px] leading-[18px] font-[600] font-manrope ${table.status === 'disabled' ? 'text-gray-400' : 'text-[#667085]'}`}>
                 Capacity: {table.capacity}
               </p>
+              {table.status !== 'disabled' && (() => {
+                const seats = seatInfo(table, processedTablesData)
+                return (
+                  <SeatedCount
+                    taken={seats.taken}
+                    capacity={seats.capacity}
+                    size={11}
+                    className="mt-0.5 text-[11px] leading-[16px] font-[600] font-manrope text-[#667085]"
+                  />
+                )
+              })()}
             </div>
           ))}
         </div>
@@ -1056,11 +1101,11 @@ const TablesDashboard = () => {
           <p className="text-[14px] font-[600] text-[#101828] font-manrope">₹{subtotal.toFixed(2)}</p>
         </div>
         <div className="px-4 py-2 flex justify-between items-center">
-          <p className="text-[14px] font-[400] text-[#667085] font-manrope">Service Charge ({serviceChargePercent}%)</p>
+          <p className="text-[14px] font-[400] text-[#667085] font-manrope">Service Charge{pctLabel(serviceChargePercent)}</p>
           <p className="text-[14px] font-[400] text-[#667085] font-manrope">+₹{serviceCharge.toFixed(2)}</p>
         </div>
         <div className="px-4 py-2 flex justify-between items-center">
-          <p className="text-[14px] font-[400] text-[#667085] font-manrope">GST ({gstPercent}%)</p>
+          <p className="text-[14px] font-[400] text-[#667085] font-manrope">GST{pctLabel(gstPercent)}</p>
           <p className="text-[14px] font-[400] text-[#667085] font-manrope">+₹{gst.toFixed(2)}</p>
         </div>
         {bill.additionalCharges.map((charge, idx) => (
@@ -1121,9 +1166,26 @@ const TablesDashboard = () => {
         <div className="px-4 py-3 flex justify-between items-center border-t border-gray-200">
           <p className="text-[14px] font-[600] text-[#101828] font-manrope">Total</p>
           <p className="text-[16px] font-[700] text-[#101828] font-manrope">
-            ₹{payableTotal.toFixed(2)}
+            ₹{billTotal.toFixed(2)}
           </p>
         </div>
+        {alreadyPaid > 0 && activeOrderMeta?.paymentStatus !== 'Paid' && (
+          <>
+            <div className="px-4 py-2 flex justify-between items-center">
+              <p className="text-[14px] font-[400] text-[#027A48] font-manrope">Already Paid</p>
+              <p className="text-[14px] font-[500] text-[#027A48] font-manrope">-₹{alreadyPaid.toFixed(2)}</p>
+            </div>
+            <div className="px-4 py-3 flex justify-between items-center border-t border-gray-200">
+              <p className="text-[14px] font-[600] text-[#101828] font-manrope">Amount Due</p>
+              <p className="text-[16px] font-[700] text-[#101828] font-manrope">₹{payableTotal.toFixed(2)}</p>
+            </div>
+          </>
+        )}
+        {hasUnsavedItemEdits && (
+          <p className="px-4 pb-3 text-[12px] text-[#B54708] font-manrope">
+            Item edits here are not saved to the order — the bill above is the placed order. Use Add Item to change it.
+          </p>
+        )}
       </div>
     </div>
   )
@@ -1298,6 +1360,11 @@ const TablesDashboard = () => {
               <span className="inline-block mt-1 px-2 py-0.5 bg-[#ECFDF3] text-[#027A48] text-[10px] font-[500] rounded-full font-manrope">Registered</span>
             )}
           </div>
+          <SeatedCount
+            {...seatInfo(selectedTable, processedTablesData)}
+            size={14}
+            className="ml-auto self-start text-[12px] font-[600] text-[#344054] font-manrope"
+          />
         </div>
       </div>
       {/* Empty-cart state — shown when the table is occupied (customer
@@ -1428,6 +1495,11 @@ const TablesDashboard = () => {
               <span key={t._id} className="px-2.5 py-1 bg-[#F9F5FF] text-[#9E77ED] text-[12px] font-[600] rounded-lg font-manrope">{t.name}</span>
             ))}
             <span className="text-[12px] text-[#667085] ml-2">Total Capacity: {totalCapacity}</span>
+            <SeatedCount
+              taken={seatInfo(selectedTable, processedTablesData).taken}
+              capacity={totalCapacity}
+              className="text-[12px] font-[600] text-[#344054] font-manrope ml-2"
+            />
           </div>
         </div>
 
@@ -1691,6 +1763,10 @@ const TablesDashboard = () => {
               <span className="text-[14px] font-[500] text-[#344054] font-manrope">Seating Capacity</span>
               <span className="text-[14px] font-[600] text-[#101828] font-manrope">{selectedTable.capacity} Guests</span>
             </div>
+            <div className="mt-2 bg-[#F9FAFB] rounded-[10px] px-4 py-3 flex items-center justify-between">
+              <span className="text-[14px] font-[500] text-[#344054] font-manrope">Diners seated</span>
+              <SeatedCount {...seatInfo(selectedTable, processedTablesData)} size={14} className="text-[14px] font-[600] text-[#101828] font-manrope" />
+            </div>
           </div>
         </div>
       <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
@@ -1765,6 +1841,10 @@ const TablesDashboard = () => {
         <div className="bg-[#F9FAFB] rounded-[10px] px-4 py-3 flex items-center justify-between">
           <span className="text-[14px] font-[500] text-[#344054] font-manrope">Seating Capacity</span>
           <span className="text-[14px] font-[600] text-[#101828] font-manrope">{selectedTable.capacity} Guests</span>
+        </div>
+        <div className="mt-2 bg-[#F9FAFB] rounded-[10px] px-4 py-3 flex items-center justify-between">
+          <span className="text-[14px] font-[500] text-[#344054] font-manrope">Diners seated</span>
+          <SeatedCount {...seatInfo(selectedTable, processedTablesData)} size={14} className="text-[14px] font-[600] text-[#101828] font-manrope" />
         </div>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center px-6">
@@ -1916,7 +1996,7 @@ const TablesDashboard = () => {
                         Counter-payment requested
                       </p>
                       <p className="text-[12px] font-manrope text-[#7A1F1F] mt-0.5">
-                        Customer wants to settle ₹{Math.round(activeOrderMeta.savedTotal || 0)} in cash.
+                        Customer wants to settle ₹{counterSettleTotal.toFixed(2)} in cash.
                         Send a waiter with the bill slip, collect cash, then mark paid below.
                       </p>
                     </div>
@@ -1945,8 +2025,11 @@ const TablesDashboard = () => {
                           // savedTotal divided evenly only as a
                           // safety net, which won't actually be hit
                           // in practice.
+                          // Settle with the order's STORED due
+                          // (total − manualDiscount − amountPaid).
+                          const full = activeOrderMeta?.orders?.find(o => String(o._id) === String(oid))
                           const meta = activeOrderMeta?.allOrders?.find(o => String(o._id) === String(oid))
-                          const amt = Number(meta?.total) || 0
+                          const amt = full ? orderAmountDue(full, taxConfig) : (Number(meta?.total) || 0)
                           await api.patch(`/orders/${oid}/status`, {
                             paymentStatus: 'Paid',
                             paymentMethod: 'cash',
@@ -1963,8 +2046,8 @@ const TablesDashboard = () => {
                   >
                     <CheckCircle size={16} />
                     {(activeOrderMeta?.orderCount || 1) > 1
-                      ? `Mark ${activeOrderMeta.orderCount} orders Paid · Cash · ₹${Math.round(activeOrderMeta.savedTotal || 0)}`
-                      : `Mark Paid · Cash · ₹${Math.round(activeOrderMeta.savedTotal || 0)}`}
+                      ? `Mark ${activeOrderMeta.orderCount} orders Paid · Cash · ₹${counterSettleTotal.toFixed(2)}`
+                      : `Mark Paid · Cash · ₹${counterSettleTotal.toFixed(2)}`}
                   </button>
                 </div>
               </div>

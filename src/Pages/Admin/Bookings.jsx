@@ -50,6 +50,7 @@ const navItems = [
 import { useEffect } from 'react'
 import { toast } from 'react-hot-toast'
 import api from '../../utils/api'
+import { backendOrigin } from '../../utils/apiOrigin';
 
 const Bookings = () => {
     const [activeTab, setActiveTab] = useState('Bookings')
@@ -988,7 +989,7 @@ const Bookings = () => {
                                 //   - server upload path ('/uploads/foo.png') → <img> against backend
                                 //   - external URL ('https://...') → <img> as-is
                                 //   - empty / unknown → fall back to 🎂
-                                const BACKEND_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || '';
+                                const BACKEND_URL = backendOrigin();
                                 const rawIcon = event.icon || '';
                                 const isImagePath = rawIcon.startsWith('/') || rawIcon.startsWith('http');
                                 const accent = event.color || '#A855F7';

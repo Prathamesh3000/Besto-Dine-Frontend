@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
+import { getQrBaseOverride, setQrBaseOverride, getPublicAppOrigin, isLoopbackOrigin, normalizeBaseUrl, tableScanLink } from '../../../utils/customerLinks';
 import { createPortal } from 'react-dom';
-import { X, Download, Printer, CheckSquare, Square, Loader2, RefreshCw } from 'lucide-react';
+import { X, Download, Printer, CheckSquare, Square, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -19,10 +20,43 @@ import toast from 'react-hot-toast';
  * @param {Function} props.onClose - Callback to close the modal
  * @param {Object|null} props.table - Single table object for single mode (null for bulk mode)
  * @param {Array} props.allTables - Array of all tables for bulk mode
- * @param {string} props.baseUrl - Base URL for QR code generation (defaults to window.location.origin)
+ * @param {string} props.baseUrl - Base URL for QR code generation (defaults to the per-browser
+ *   override, else VITE_PUBLIC_APP_URL, else the current origin — see utils/customerLinks)
  * @param {Function} props.onTableUpdate - Callback to refresh parent data if token is regenerated
  */
-const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl = window.location.origin, onTableUpdate }) => {
+const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: baseUrlProp, onTableUpdate }) => {
+    // QR base URL: explicit prop > admin's saved override > public app origin.
+    // A code pointing at localhost cannot be opened by a phone, so the
+    // admin can override it here (remembered per browser) before printing.
+    const [savedOverride, setSavedOverride] = useState(() => getQrBaseOverride());
+    const baseUrl = baseUrlProp || savedOverride || getPublicAppOrigin();
+    const [baseDraft, setBaseDraft] = useState(baseUrl);
+    const [baseError, setBaseError] = useState('');
+    const [showBaseEditor, setShowBaseEditor] = useState(() => isLoopbackOrigin(baseUrl));
+    const pointsAtLocalhost = isLoopbackOrigin(baseUrl);
+
+    const applyBaseOverride = (e) => {
+        e?.preventDefault?.();
+        const normalized = normalizeBaseUrl(baseDraft);
+        if (!normalized) {
+            setBaseError('Enter a full http:// or https:// address, e.g. http://192.168.1.24:5173');
+            return;
+        }
+        setBaseError('');
+        const isDefault = normalized === getPublicAppOrigin();
+        setQrBaseOverride(isDefault ? null : normalized);
+        setSavedOverride(isDefault ? null : normalized);
+        setBaseDraft(normalized);
+        toast.success('QR base URL updated');
+    };
+
+    const resetBaseOverride = () => {
+        setQrBaseOverride(null);
+        setSavedOverride(null);
+        setBaseDraft(getPublicAppOrigin());
+        setBaseError('');
+    };
+
     // Determine if we're in single table mode or bulk mode
     const isBulkMode = !table;
 
@@ -42,11 +76,24 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl = wi
      * @returns {string} The full URL to encode in the QR code
      */
     const getQRCodeUrl = (tableInfo) => {
-        if (!tableInfo) return '';
-        // Use qrToken from backend schema, fallback to ID for backward compatibility
-        const identifier = tableInfo.qrToken || tableInfo._id || tableInfo.id;
-        return `${baseUrl}/scan/${identifier}`;
+        if (!tableInfo?.qrToken) return '';
+        return tableScanLink(tableInfo.qrToken, baseUrl);
     };
+
+    /**
+     * The scan route accepts ONLY `tb-<12 hex>` (tableController
+     * .QR_TOKEN_REGEX) and 404s on anything else.
+     *
+     * This used to fall back to `tableInfo._id` "for backward
+     * compatibility", but there is no compatible case: an ObjectId has
+     * never been a valid scan token. And because qrToken is
+     * `select: false` on the schema, the admin list never carried it —
+     * so the fallback fired every time and EVERY printed QR scanned
+     * straight to "Invalid or expired QR code". A QR that cannot work
+     * is worse than no QR, because nobody finds out until it's stuck to
+     * a table. Surface the problem here instead.
+     */
+    const isValidQrToken = (tableInfo) => /^tb-[a-f0-9]{12}$/.test(tableInfo?.qrToken || '');
 
     /**
      * Toggles selection of a table in bulk mode
@@ -324,6 +371,62 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl = wi
 
                 {/* Content Area */}
                 <div className="flex-1 overflow-y-auto p-6">
+                    {/* QR base URL — warn when codes would point at localhost */}
+                    {pointsAtLocalhost && (
+                        <div role="alert" className="mb-4 flex gap-3 rounded-[12px] border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-900">
+                            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                            <p>
+                                <span className="font-[700]">QR codes point to localhost — phones can't open this.</span>{' '}
+                                Open the admin using your computer's network address (e.g. http://192.168.x.x:5173)
+                                or set VITE_PUBLIC_APP_URL. You can also set the QR base URL below for printing.
+                            </p>
+                        </div>
+                    )}
+                    <div className="mb-5 rounded-[12px] border border-[#EAECF0] bg-[#F9FAFB] p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[12px] text-[#667085]">
+                                QR codes open: <span className="font-mono text-[#101828] break-all">{baseUrl}</span>
+                                {savedOverride && !baseUrlProp && <span className="ml-1 text-[#FE8301]">(custom)</span>}
+                            </p>
+                            {!baseUrlProp && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBaseEditor((v) => !v)}
+                                    className="text-[12px] font-[600] text-[#FE8301] hover:underline cursor-pointer"
+                                >
+                                    {showBaseEditor ? 'Hide' : 'Change'}
+                                </button>
+                            )}
+                        </div>
+                        {showBaseEditor && !baseUrlProp && (
+                            <form onSubmit={applyBaseOverride} className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-start">
+                                <div className="flex-1">
+                                    <label htmlFor="qr-base-url" className="sr-only">QR base URL</label>
+                                    <input
+                                        id="qr-base-url"
+                                        type="url"
+                                        inputMode="url"
+                                        value={baseDraft}
+                                        onChange={(e) => { setBaseDraft(e.target.value); setBaseError(''); }}
+                                        placeholder="http://192.168.1.24:5173"
+                                        aria-invalid={!!baseError}
+                                        className={`w-full rounded-[8px] border px-3 py-2 text-[13px] font-mono outline-none focus:border-[#FE8301] ${baseError ? 'border-red-400' : 'border-[#D0D5DD]'}`}
+                                    />
+                                    {baseError && <p className="mt-1 text-[12px] text-red-600">{baseError}</p>}
+                                </div>
+                                <div className="flex gap-2">
+                                    <button type="submit" className="rounded-[8px] bg-[#FE8301] px-3 py-2 text-[13px] font-[600] text-white cursor-pointer">
+                                        Use for QR
+                                    </button>
+                                    {savedOverride && (
+                                        <button type="button" onClick={resetBaseOverride} className="rounded-[8px] border border-[#D0D5DD] px-3 py-2 text-[13px] text-[#344054] cursor-pointer">
+                                            Reset
+                                        </button>
+                                    )}
+                                </div>
+                            </form>
+                        )}
+                    </div>
                     {isBulkMode ? (
                         /* Bulk Mode - Table Selection Grid */
                         <>
@@ -369,15 +472,24 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl = wi
                                                 )}
                                             </div>
 
-                                            {/* Mini QR Preview */}
+                                            {/* Mini QR Preview — same guard as
+                                                single mode: a token-less table
+                                                shows a warning, not a QR that
+                                                would scan to a 404. */}
                                             <div className="flex justify-center mb-3">
-                                                <QRCodeSVG
-                                                    value={getQRCodeUrl(t)}
-                                                    size={80}
-                                                    level="M"
-                                                    bgColor="#FFFFFF"
-                                                    fgColor="#101828"
-                                                />
+                                                {isValidQrToken(t) ? (
+                                                    <QRCodeSVG
+                                                        value={getQRCodeUrl(t)}
+                                                        size={80}
+                                                        level="M"
+                                                        bgColor="#FFFFFF"
+                                                        fgColor="#101828"
+                                                    />
+                                                ) : (
+                                                    <div className="w-[80px] h-[80px] rounded-[8px] border border-dashed border-red-300 bg-red-50/50 flex items-center justify-center text-center px-1">
+                                                        <span className="text-[10px] text-red-600 leading-tight">No token</span>
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {/* Table Info */}
@@ -395,16 +507,37 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl = wi
                     ) : (
                         /* Single Mode - Large QR Display */
                         <div className="flex flex-col items-center">
-                            {/* QR Code Display */}
+                            {/* QR Code Display.
+                                Renders ONLY with a valid tb-<12hex>
+                                token. Drawing a code from a bad token
+                                produces a label that scans to "Invalid
+                                or expired QR code" — and nobody finds
+                                out until it's printed and stuck to a
+                                table. Better to refuse here. */}
                             <div className="bg-white p-8 rounded-[16px] border-2 border-dashed border-[#D0D5DD] mb-6">
-                                <QRCodeSVG
-                                    value={getQRCodeUrl(table)}
-                                    size={250}
-                                    level="H"
-                                    bgColor="#FFFFFF"
-                                    fgColor="#101828"
-                                    includeMargin={true}
-                                />
+                                {isValidQrToken(table) ? (
+                                    <QRCodeSVG
+                                        value={getQRCodeUrl(table)}
+                                        size={250}
+                                        level="H"
+                                        bgColor="#FFFFFF"
+                                        fgColor="#101828"
+                                        includeMargin={true}
+                                    />
+                                ) : (
+                                    <div className="w-[250px] h-[250px] flex flex-col items-center justify-center text-center gap-3 px-4">
+                                        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+                                            <span className="text-red-500 text-[22px] leading-none">!</span>
+                                        </div>
+                                        <p className="text-[14px] font-[600] text-[#101828]">
+                                            No scan token for this table
+                                        </p>
+                                        <p className="text-[12px] text-[#667085] leading-relaxed">
+                                            Tap <span className="font-[600]">Regenerate token</span> below to
+                                            issue one, then print the QR.
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Table Information */}
@@ -426,7 +559,7 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl = wi
                             <div className="w-full max-w-[400px] p-3 bg-[#F9FAFB] rounded-[10px] mb-4">
                                 <p className="text-[12px] text-[#667085] mb-1 font-manrope">Secure Menu Scan link:</p>
                                 <p className="text-[13px] text-[#101828] font-mono break-all">
-                                    {getQRCodeUrl(table)}
+                                    {getQRCodeUrl(table) || '— no token issued —'}
                                 </p>
                             </div>
                         </div>

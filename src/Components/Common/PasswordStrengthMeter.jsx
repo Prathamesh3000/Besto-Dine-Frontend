@@ -1,7 +1,7 @@
 import React from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import {
-    scorePassword, passwordRuleFailures, STRENGTH_LABELS, STRENGTH_COLORS, MIN_LENGTH, STRONG_LENGTH,
+    scorePassword, passwordRuleFailures, STRENGTH_LABELS, STRENGTH_COLORS, MIN_LENGTH, MAX_LENGTH, STRONG_LENGTH,
 } from '../../utils/passwordPolicy';
 
 /* Labels for the live password-requirement checklist. Keys match
@@ -11,6 +11,8 @@ const PASSWORD_RULES = [
     ['case', 'Upper and lower case letters'],
     ['digit', 'A number'],
     ['special', 'A special character (!@#$…)'],
+    // Only listed while it fails — almost nobody gets near the cap.
+    ['maxLength', `At most ${MAX_LENGTH} characters`],
 ];
 
 /**
@@ -57,7 +59,7 @@ export default function PasswordStrengthMeter({ password = '', id = 'password-st
             )}
             {failures.length > 0 && (
                 <ul className="mt-2 space-y-1">
-                    {PASSWORD_RULES.map(([key, label]) => {
+                    {PASSWORD_RULES.filter(([key]) => key !== 'maxLength' || failures.includes(key)).map(([key, label]) => {
                         const failed = failures.includes(key);
                         return (
                             <li

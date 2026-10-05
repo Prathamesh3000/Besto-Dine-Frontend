@@ -48,6 +48,14 @@ export function HealthProvider({ children }) {
 
     const syncTimerRef = useRef(null)
 
+    // The profile's allergies have been loaded (/auth/me or the signed-in
+    // user object). Until then the sync below must not run: the local
+    // list is not the profile's, and PUTting it (often []) would erase
+    // the customer's saved allergies. lastSynced holds the value the
+    // profile is known to have, so loading it doesn't echo a PUT back.
+    const [profileLoaded, setProfileLoaded] = useState(false)
+    const [lastSynced, setLastSynced] = useState(null)
+
     // Load preferences from localStorage on mount, then try backend
     useEffect(() => {
         const savedPrefs = localStorage.getItem('healthPreferences')
@@ -78,10 +86,17 @@ export function HealthProvider({ children }) {
         const token = getToken()
         if (token && !isKioskRoute) {
             api.get('/auth/me', { _isBackground: true }).then(res => {
-                if (res.data?.allergy) {
-                    setAllergies(res.data.allergy.split(',').map(s => s.trim()).filter(Boolean))
+                if (!res?.data) return
+                if (res.data.allergy) {
+                    const loaded = res.data.allergy.split(',').map(s => s.trim()).filter(Boolean)
+                    setLastSynced(loaded.join(', '))
+                    setAllergies(loaded)
+                } else {
+                    setLastSynced('')
+                    setAllergies([])
                 }
-            }).catch(() => {})
+                setProfileLoaded(true)
+            }).catch(() => { /* not loaded — the sync stays off */ })
         }
     }, [])
 
@@ -112,7 +127,11 @@ export function HealthProvider({ children }) {
             setHealthMode(false)
             setSpiceLevel('medium')
             setDietPreference(dietPreferenceFromProfile(user?.dietaryPreference) || DEFAULT_DIET)
-            setAllergies(String(user?.allergy || '').split(',').map(s => s.trim()).filter(Boolean))
+            const loaded = String(user?.allergy || '').split(',').map(s => s.trim()).filter(Boolean)
+            setAllergies(loaded)
+            // The new account's own profile value — loaded, nothing to sync.
+            setLastSynced(loaded.join(', '))
+            setProfileLoaded(Boolean(userId))
         }
     }
 
@@ -129,15 +148,16 @@ export function HealthProvider({ children }) {
     // Debounced sync of allergy data to backend when logged in
     useEffect(() => {
         const token = getToken()
-        if (!token) return
+        if (!token || !profileLoaded) return
+        const allergy = allergies.join(', ')
+        if (allergy === lastSynced) return
         if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
         syncTimerRef.current = setTimeout(() => {
-            api.put('/auth/profile', {
-                allergy: allergies.join(', ')
-            }, { _isBackground: true }).catch(() => {})
+            setLastSynced(allergy)
+            api.put('/auth/profile', { allergy }, { _isBackground: true }).catch(() => {})
         }, 2000)
         return () => clearTimeout(syncTimerRef.current)
-    }, [allergies])
+    }, [allergies, profileLoaded, lastSynced])
 
     const toggleHealthMode = useCallback(() => {
         setHealthMode(prev => !prev)

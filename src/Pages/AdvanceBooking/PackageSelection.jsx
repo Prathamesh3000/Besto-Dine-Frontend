@@ -6,6 +6,8 @@ import PartyImg from "/party.svg";
 import { ChevronLeft, Check } from "lucide-react";
 import { useAuth } from '../../Context/AuthContext';
 import api from '../../utils/api';
+import { reportMissingFields } from '../../utils/requiredFields';
+import { backendOrigin } from '../../utils/apiOrigin';
 
 const PackageSelection = () => {
   const navigate = useNavigate();
@@ -67,7 +69,7 @@ const PackageSelection = () => {
               description: p.description,
               minPeople: p.minPeople || 50,
               maxPeople: p.maxPeople || 500,
-              image: p.image?.startsWith('/uploads/') ? `${import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || ''}${p.image}` : (p.image || ''),
+              image: p.image?.startsWith('/uploads/') ? `${backendOrigin()}${p.image}` : (p.image || ''),
               details
             };
           }));
@@ -91,6 +93,16 @@ const PackageSelection = () => {
   useEffect(() => {
     fetchPackages();
   }, [fetchPackages]);
+
+  // QA N2 — Continue names the missing package (Skip continues without one).
+  const handleContinue = () => {
+    if (!selectedPackage) {
+      reportMissingFields([{ label: 'Menu package', id: 'package-options' }]);
+      return;
+    }
+    const packageData = { id: selectedPackage.id, name: selectedPackage.name, price: selectedPackage.price };
+    navigate('/customer/cake-details', { state: { ...location.state, selectedPackageId: selectedPackage.id, selectedPackage: packageData } });
+  };
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] xl:bg-[#FFFFFF] dark:bg-gray-900 transition-colors duration-200 font-sans relative flex flex-col items-center">
@@ -134,7 +146,7 @@ const PackageSelection = () => {
         {/* Desktop Card Container */}
         <div className="block lg:block lg:bg-[#FFFFFF] lg:rounded-[16px] lg:px-[16px] lg:shadow-sm">
           <main className="lg:pb-0 flex flex-col gap-4 lg:gap-6">
-            <div className="grid grid-cols-1 gap-6 pb-24 lg:pb-0">
+            <div id="package-options" className="grid grid-cols-1 gap-6 pb-24 lg:pb-0">
               {loading ? (
                 <div className="flex justify-center p-12">Loading packages...</div>
               ) : fetchError ? (
@@ -177,15 +189,10 @@ const PackageSelection = () => {
                 Previous
               </button>
               <button
-                disabled={!selectedPackage}
-                onClick={() => {
-                  const packageData = selectedPackage
-                    ? { id: selectedPackage.id, name: selectedPackage.name, price: selectedPackage.price }
-                    : null;
-                  navigate('/customer/cake-details', { state: { ...location.state, selectedPackageId: selectedPackage?.id, selectedPackage: packageData } });
-                }}
+                aria-disabled={!selectedPackage}
+                onClick={handleContinue}
                 className={`flex-1 font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] transition-all ${
-                  selectedPackage ? 'bg-[#FE8301] text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  selectedPackage ? 'bg-[#FE8301] text-white' : 'bg-[#FE8301]/60 text-white'
                 }`}
               >
                 Continue
@@ -198,15 +205,10 @@ const PackageSelection = () => {
                 Previous
               </button>
               <button
-                disabled={!selectedPackage}
-                onClick={() => {
-                  const packageData = selectedPackage
-                    ? { id: selectedPackage.id, name: selectedPackage.name, price: selectedPackage.price }
-                    : null;
-                  navigate('/customer/cake-details', { state: { ...location.state, selectedPackageId: selectedPackage?.id, selectedPackage: packageData } });
-                }}
+                aria-disabled={!selectedPackage}
+                onClick={handleContinue}
                 className={`font-nunito font-semibold text-[14px] py-3 px-8 rounded-[16px] w-[140px] text-center transition-all ${
-                  selectedPackage ? 'bg-[#FE8301] text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  selectedPackage ? 'bg-[#FE8301] text-white' : 'bg-[#FE8301]/60 text-white'
                 }`}
               >
                 Continue

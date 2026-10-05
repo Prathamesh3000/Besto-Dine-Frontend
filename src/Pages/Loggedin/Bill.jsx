@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Mic, LogOut } from 'lucide-react';
+import { Search, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../Context/AuthContext';
 import api from '../../utils/api';
 import { activeRestaurantPath } from '../../utils/tenant';
 import BottomNav from '../../Components/Loggedin/BottomNav';
+import VoiceSearchButton from '../../Components/Loggedin/VoiceSearchButton';
 import useSocketEvent from '../../hooks/useSocketEvent';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import useCustomerSession from '../../hooks/useCustomerSession';
@@ -276,8 +277,19 @@ function Bill() {
     navigate(`/bill/${billId}`);
   };
 
+  // Search (typed or voice) — the box used to be decorative. Matches
+  // item names, status, payment method, amount and date.
+  const query = searchQuery.trim().toLowerCase();
+  const visibleBills = query
+    ? bills.filter((bill) => [
+        ...(bill.items || []).map((i) => i.name || i.title),
+        bill.status, bill.paymentMethod, bill.date, bill.time,
+        bill.amount != null ? String(bill.amount) : '',
+      ].some((v) => String(v || '').toLowerCase().includes(query)))
+    : bills;
+
   // Group bills by date
-  const groupedBills = bills.reduce((acc, bill) => {
+  const groupedBills = visibleBills.reduce((acc, bill) => {
     if (!acc[bill.date]) {
       acc[bill.date] = [];
     }
@@ -319,12 +331,13 @@ function Bill() {
             <input
               type="text"
               placeholder="Search...."
+              aria-label="Search bills"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="flex-1 bg-transparent border-none outline-none text-gray-700 placeholder:text-gray-400 text-sm"
             />
             <div className="h-5 w-[1px] bg-gray-300-600"></div>
-            <Mic className=" text-[#666666] flex-shrink-0 cursor-pointer hover:text-gray-600 transition-colors" size={20} />
+            <VoiceSearchButton size={20} onResult={(text) => setSearchQuery(text)} />
           </div>
         </div>
       </header>
@@ -386,8 +399,10 @@ function Bill() {
             <div className="w-24 h-24 sm:w-32 sm:h-32 bg-gray-100 rounded-full flex items-center justify-center mb-4">
               <Search size={36} className="sm:size-48 text-gray-300" />
             </div>
-            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">No bills yet</h2>
-            <p className="text-gray-500 text-sm sm:text-base">Your bill will appear here after you place an order</p>
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">{query && bills.length > 0 ? 'No matching bills' : 'No bills yet'}</h2>
+            <p className="text-gray-500 text-sm sm:text-base">
+              {query && bills.length > 0 ? `Nothing matches "${searchQuery.trim()}".` : 'Your bill will appear here after you place an order'}
+            </p>
           </div>
         )}
       </main>

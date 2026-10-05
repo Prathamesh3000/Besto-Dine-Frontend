@@ -15,10 +15,10 @@ import { clearDineInLock } from './dineInSession';
 
 /**
  * Tenant-bound session state that must not survive a move to a
- * different restaurant. The cart is the load-bearing one: it lives in a
- * single flat `cart` key rather than being namespaced per tenant, so
- * carrying it across would smuggle tenant A's menuItem IDs into a
- * tenant B order — which the backend rejects as a cross-tenant ID.
+ * different restaurant. The live cart (CartContext's `cart_by_table`)
+ * is namespaced per tenant, so it needs no sweep here; only the legacy
+ * flat `cart` key is dropped — carrying it across would smuggle tenant
+ * A's menuItem IDs into a tenant B order.
  *
  * Deliberately does NOT touch `user` / `token` / `isGuest`: a customer
  * identity is global across tenants, so switching restaurants must not

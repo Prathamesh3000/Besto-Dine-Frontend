@@ -12,6 +12,8 @@ import { getActiveBranch, subscribeActiveTenant, getActiveTenantSlug } from "../
 import { resolveImageUrl } from "../../utils/image";
 import { getSocket } from "../../utils/socket";
 import VoiceModal from "./VoiceModal";
+import { getVoiceSupport } from "./voiceSupport";
+import { toast } from "react-hot-toast";
 import useCustomerSession from '../../hooks/useCustomerSession';
 
 // ─── Tenant branding cache ───────────────────────────────────────────────────
@@ -205,6 +207,9 @@ function Header({
   const [logoUrl, setLogoUrl] = useState("");
   const [generalAddress, setGeneralAddress] = useState("");
   const [showVoiceModal, setShowVoiceModal] = useState(false);
+  // Voice search needs SpeechRecognition AND a secure context (https or
+  // localhost) — a phone on http://192.168.x.x can't use the mic.
+  const [voiceSupport] = useState(getVoiceSupport);
   const searchInputRef = useRef(null);
 
   const navigate = useNavigate();
@@ -433,9 +438,23 @@ function Header({
             <div className="block w-px h-5 bg-[#E2E2E8] shrink-0"></div>
             <button
               type="button"
-              aria-label="Search by voice"
-              className="flex items-center justify-center w-9 h-9 rounded-full text-[#645E66] flex-shrink-0 hover:bg-[#E9E9EE] hover:text-[#1A181B] transition-colors ml-1"
-              onClick={(e) => { e.stopPropagation(); setShowVoiceModal(true); }}
+              aria-label={voiceSupport.supported ? "Search by voice" : `Voice search unavailable: ${voiceSupport.reasonText}`}
+              aria-disabled={!voiceSupport.supported}
+              title={voiceSupport.supported ? "Search by voice" : voiceSupport.reasonText}
+              className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 transition-colors ml-1 ${
+                voiceSupport.supported
+                  ? "text-[#645E66] hover:bg-[#E9E9EE] hover:text-[#1A181B]"
+                  : "text-[#C4C0C5] cursor-not-allowed"
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!voiceSupport.supported) {
+                  // Touch screens have no hover tooltip — explain on tap.
+                  toast(voiceSupport.reasonText, { id: "voice-unavailable", icon: "🎤" });
+                  return;
+                }
+                setShowVoiceModal(true);
+              }}
             >
               <Mic size={20} />
             </button>
@@ -509,11 +528,13 @@ function Header({
       <VoiceModal
         onClose={() => setShowVoiceModal(false)}
         onResult={(text) => {
-          onSearchChange(text);
           if (isSearchPage) {
-            // Trigger search directly
+            // Fill the search box and run the search for the spoken text.
+            onSearchChange(text);
             onSearchKeyDown({ key: 'Enter', target: { value: text } });
           } else {
+            // Other pages: open /search with the query prefilled (it
+            // searches on mount).
             navigate('/search', { state: { query: text } });
           }
         }}

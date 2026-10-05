@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShoppingCart, Plus, Minus, ChevronRight } from 'lucide-react';
 import ProductPopup from './Components/ProductPopup';
 import { useMenu } from '../../Context/MenuContext';
-import { KIOSK_KEYS, readCart, writeCart, clearKioskSession, addKioskLine, changeKioskLineQty, kioskSubtotal, kioskItemCount } from './kioskState';
+import { KIOSK_KEYS, readCart, writeCart, clearKioskSession, addKioskLine, changeKioskLineQty, kioskSubtotal, kioskItemCount, kioskLineUnitPrice } from './kioskState';
 import { imageForItem, imageForRecommendation, KIOSK_GENERIC_ITEM_IMG } from './kioskImages';
 import { useKioskIdleReset } from './useKioskIdleReset';
 import { useKioskTaxConfig, computeKioskTotals, kioskBackendOrderType } from './useKioskTaxConfig';
@@ -172,7 +172,7 @@ export default function Cart() {
                                 </div>
 
                                 <div className="flex justify-between items-center mt-[13px]">
-                                    <span className="text-[20px] leading-[26px] font-nunito font-bold text-[#1A181B]">₹{item.unitPrice}</span>
+                                    <span className="text-[20px] leading-[26px] font-nunito font-bold text-[#1A181B]">₹{kioskLineUnitPrice(item)}</span>
 
                                     <div className="flex items-center gap-4 bg-transparent">
                                         <button

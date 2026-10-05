@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Menu, Loader2, AlertTriangle, Clock, Users, LayoutGrid, UserPlus, ArrowUpRight, X, Check } from 'lucide-react';
+import SeatedCount from '../../Components/Common/SeatedCount';
 import Sidebar from '../../Components/Waiter/Sidebar';
 import BottomNav from '../../Components/Waiter/BottomNav';
 import WaiterEmptyState from '../../Components/Waiter/WaiterEmptyState';
@@ -355,7 +356,7 @@ const CaptainFloor = () => {
                                                                 <p className="text-lg font-extrabold text-[#1A181B] leading-tight truncate" title={t.name}>{t.name}</p>
                                                                 {t.delayed
                                                                     ? <AlertTriangle size={16} className="text-[#FF3B30] shrink-0 mt-0.5" strokeWidth={2.5} />
-                                                                    : <span className="text-[10px] font-bold text-gray-400 shrink-0 mt-1 inline-flex items-center gap-0.5"><Users size={11} />{t.capacity}</span>}
+                                                                    : <SeatedCount taken={t.seatsTaken || 0} capacity={t.seatCapacity || t.capacity} size={11} className="text-[10px] font-bold text-gray-400 shrink-0 mt-1" />}
                                                             </div>
                                                             <div className="flex items-center gap-1.5 flex-wrap">
                                                                 <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${st.chip}`}>

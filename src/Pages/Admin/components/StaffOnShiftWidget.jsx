@@ -1,5 +1,6 @@
 import React from 'react'
 import { Clock, Users } from 'lucide-react'
+import { backendOrigin } from '../../../utils/apiOrigin';
 
 const roleStyles = {
     manager: 'bg-[#AD09D4]/10 text-[#AD09D4] border-[#AD09D4]/30',
@@ -35,7 +36,7 @@ const StaffOnShiftWidget = ({ staff = [] }) => {
             </div>
             <div className="space-y-3 max-h-[280px] overflow-y-auto custom-scrollbar">
                 {staff.map((s) => {
-                    const BACKEND_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || ''
+                    const BACKEND_URL = backendOrigin()
                     const avatarUrl = s.avatar
                         ? (s.avatar.startsWith('/uploads/') ? `${BACKEND_URL}${s.avatar}` : s.avatar)
                         : `https://ui-avatars.com/api/?name=${encodeURIComponent(s.name || 'S')}&background=FE8301&color=fff&size=32`

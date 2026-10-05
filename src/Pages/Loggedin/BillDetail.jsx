@@ -141,6 +141,7 @@ function BillDetail() {
         serviceChargePercentage: source.serviceChargePercentage,
         additionalCharges: source.additionalCharges || [],
         additionalChargesTotal: source.additionalChargesTotal,
+        couponCode: source.couponCode || '',
         couponDiscount: source.couponDiscount,
         manualDiscount: source.manualDiscount,
         pointsRedeemed: source.pointsRedeemed,
@@ -195,17 +196,15 @@ function BillDetail() {
   const cafeName = cafeIdentity.name || settings?.general?.cafeName || 'Cafe';
   const logoUrl = resolveImageUrl(cafeIdentity.logoUrl || settings?.general?.logoUrl);
 
-  // Bill ledger. When the order carries a server-stamped breakdown that
-  // reconciles with its stored total, that is what is shown (and paid).
-  // Otherwise — a legacy order, or items appended after placement, which
-  // the server does not re-tax in the stored breakdown — the ledger is
-  // recomputed via computeBill (server rounding, dine-in-only service
-  // charge) from the current Taxes & Charges, as before.
+  // Bill ledger. The amount shown (and paid) is ALWAYS the order's
+  // stored total — what the server charged at placement (re-stamped on
+  // append). The breakdown rows are the server-stamped ones when the
+  // order carries them and they reconcile; for orders without a stamp
+  // (legacy, or an API response that omits the stamped fields) the rows
+  // are recomputed via computeBill from the current Taxes & Charges.
   const derivedBill = useMemo(() => {
     if (!bill) return null;
     const computed = billFromOrder(
-      // items carry addedAt, which tells billFromOrder whether rounds
-      // were appended after the server stamped the breakdown.
       { ...bill.stored, type: bill.orderType, items: bill.items },
       taxConfig,
       // bill.subtotal is the invoice's subtotal or the item sum.
@@ -214,7 +213,8 @@ function BillDetail() {
     return {
       ...bill,
       ...computed,
-      total: computed.fromServer ? computed.total : computed.computedTotal,
+      // storedTotal when the order has one, else the computed total.
+      total: computed.total,
     };
   }, [bill, taxConfig]);
 
@@ -424,6 +424,21 @@ function BillDetail() {
                 </span>
               </div>
             ))}
+            {/* Adjustments already inside the stored total — listed so the
+                rows add up to it. */}
+            {[
+              derivedBill.couponDiscount > 0 && { key: 'coupon', label: `Coupon${bill.stored?.couponCode ? ` (${bill.stored.couponCode})` : ''}`, amount: -derivedBill.couponDiscount },
+              derivedBill.pointsRedeemed > 0 && { key: 'points', label: 'Wallet points', amount: -derivedBill.pointsRedeemed },
+              derivedBill.tipAmount > 0 && { key: 'tip', label: 'Tip', amount: derivedBill.tipAmount },
+              derivedBill.deliveryFee > 0 && { key: 'delivery', label: 'Delivery fee', amount: derivedBill.deliveryFee },
+            ].filter(Boolean).map((row) => (
+              <div key={row.key} className="flex justify-between items-center text-[13px]">
+                <span className={`varela-rounded ${row.amount < 0 ? 'text-[#00A63E]' : 'text-[#645E66]'}`}>{row.label}</span>
+                <span className={`varela-rounded font-medium tabular-nums ${row.amount < 0 ? 'text-[#00A63E]' : 'text-[#645E66]'}`}>
+                  {row.amount < 0 ? `-₹${(-row.amount).toFixed(2)}` : `₹${row.amount.toFixed(2)}`}
+                </span>
+              </div>
+            ))}
             <div className="flex justify-between items-center pt-3 mt-1 border-t border-[#F2F2F2]">
               <span className="text-[15px] nunito font-semibold text-[#101828]">
                 Total Payment
@@ -432,6 +447,24 @@ function BillDetail() {
                 ₹{derivedBill.total.toFixed(2)}
               </span>
             </div>
+            {/* Staff (manual) discount: NOT part of the order total — the
+                server takes it off when the bill is settled at the counter. */}
+            {derivedBill.manualDiscount > 0 && (
+              <>
+                <div className="flex justify-between items-center text-[13px]">
+                  <span className="text-[#00A63E] varela-rounded">Staff discount</span>
+                  <span className="text-[#00A63E] varela-rounded font-medium tabular-nums">
+                    -₹{derivedBill.manualDiscount.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[13px]">
+                  <span className="text-[#645E66] varela-rounded">After discount</span>
+                  <span className="text-[#645E66] varela-rounded font-medium tabular-nums">
+                    ₹{Math.max(0, derivedBill.total - derivedBill.manualDiscount).toFixed(2)}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Green Dashed Divider */}
@@ -481,7 +514,7 @@ function BillDetail() {
             }
             className="w-full bg-[#FE8301] hover:bg-[#E57500] text-white font-bold nunito py-4 rounded-[20px] shadow-lg shadow-orange-500/30 transition-colors text-[16px]"
           >
-            Pay Bill ₹{derivedBill.total.toFixed(0)}
+            Pay Bill ₹{derivedBill.total.toFixed(2)}
           </button>
         )}
       </div>

@@ -187,7 +187,9 @@ function Payment() {
     }
     settingsAPI.getSettings()
       .then(res => {
-        if (res.data?.data?.general?.cafeName) setMerchantName(res.data.data.general.cafeName);
+        // GET /settings returns the settings object at the top level.
+        const name = res?.data?.general?.cafeName;
+        if (name) setMerchantName(name);
       })
       .catch(() => {});
   }, [isLoggedIn]);
@@ -307,14 +309,24 @@ function Payment() {
     },
   ];
 
-  // Create the cafe order on backend (for takeaway deferred flow)
-  const createCafeOrder = async (paymentMethod) => {
+  // Create the cafe order on backend (for takeaway deferred flow).
+  // `checkout` is the Razorpay checkout result of a pay-first order: it
+  // is sent with the create so the server links the payment to the order
+  // the moment the order exists (it can then no longer be orphan-refunded).
+  const createCafeOrder = async (paymentMethod, checkout = null) => {
     const idemKey = idemKeyRef.current || generateIdempotencyKey();
     idemKeyRef.current = idemKey;
     const { data } = await api.post('/orders', {
       ...orderPayload,
       clientIdempotencyKey: idemKey,
       paymentMethod,
+      ...(checkout ? {
+        razorpayPayment: {
+          razorpay_order_id: checkout.razorpay_order_id,
+          razorpay_payment_id: checkout.razorpay_payment_id,
+          razorpay_signature: checkout.razorpay_signature,
+        },
+      } : {}),
     }, { headers: { 'Idempotency-Key': idemKey } });
     if (!data.success) throw new Error('Failed to create order');
 
@@ -382,7 +394,15 @@ function Payment() {
         return;
       }
 
-      // Step 2: Open Razorpay checkout
+      // Step 2: Open Razorpay checkout.
+      //
+      // DEV-ONLY: when the backend is running the mock gateway it sets
+      // `mock: true`. Razorpay's hosted checkout would reject a
+      // synthetic order_id, so skip it and hand the handler the same
+      // shape a real successful payment produces. Everything after this
+      // point — order creation, verification, the bill — runs its
+      // normal path, which is the whole point: the mock replaces the
+      // gateway, not the flow being tested.
       const options = {
         key: data.key,
         amount: data.razorpayOrder.amount,
@@ -398,7 +418,7 @@ function Payment() {
             // This is the step that can fail server-side on a stock check
             // or total-tamper check; the catch below auto-refunds.
             if (isTakeawayDeferred) {
-              const createdOrder = await createCafeOrder('online');
+              const createdOrder = await createCafeOrder('online', response);
               cafeOrderId = createdOrder.orderId;
               createdOrderJustNow = true;
             }
@@ -465,6 +485,16 @@ function Payment() {
         },
       };
 
+      if (data.mock) {
+        toast('Mock payment — no money will be charged', { icon: '🧪', duration: 4000 });
+        await options.handler({
+          razorpay_order_id: data.razorpayOrder.id,
+          razorpay_payment_id: `pay_mock_${Date.now().toString(16)}`,
+          razorpay_signature: 'mock_signature_not_verified',
+        });
+        return;
+      }
+
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (response) => {
         toast.error(`Payment failed: ${response.error.description}`);
@@ -528,7 +558,7 @@ function Payment() {
         console.warn('Wallet payment finalize failed (non-fatal):', finalizeErr);
       }
 
-      toast.success(`Paid ₹${Number(walletAmount).toFixed(0)} from wallet.`, { id: 'pay-wallet-success', duration: 4000 });
+      toast.success(`Paid ₹${Number(walletAmount).toFixed(2)} from wallet.`, { id: 'pay-wallet-success', duration: 4000 });
       navigateAfterPayment(cafeOrderId);
     } catch (err) {
       console.error('Wallet payment error:', err);
@@ -615,10 +645,10 @@ function Payment() {
   const ctaLabel = !selectedMethod
     ? 'Choose a payment method'
     : selectedMethod === 'online'
-      ? `Pay ₹${Number(totalAmount).toFixed(0)} via Razorpay`
+      ? `Pay ₹${Number(totalAmount).toFixed(2)} via Razorpay`
       : selectedMethod === 'wallet'
-        ? `Pay ₹${Number(totalAmount).toFixed(0)} from Wallet`
-        : `Send Request to Counter · ₹${Number(totalAmount).toFixed(0)}`;
+        ? `Pay ₹${Number(totalAmount).toFixed(2)} from Wallet`
+        : `Send Request to Counter · ₹${Number(totalAmount).toFixed(2)}`;
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] pb-32">

@@ -655,6 +655,13 @@ const SubscriptionInner = () => {
                                 <p className="text-xs text-rose-600 mt-0.5">
                                     Your recurring payment has been halted by Razorpay. Please update your payment method or contact support.
                                 </p>
+                                {sub.scheduledSuspendAt && (
+                                    <p className="text-xs font-semibold text-rose-700 mt-1">
+                                        Your account will be paused on{' '}
+                                        {new Date(sub.scheduledSuspendAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                                        {' '}unless the payment is completed.
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}

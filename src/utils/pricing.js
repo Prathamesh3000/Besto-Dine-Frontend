@@ -34,6 +34,21 @@ function num(v) {
 }
 
 /**
+ * True when the item's offer has an end date that has passed. The stored
+ * finalPrice is computed at save time without looking at the end date,
+ * so an expired offer must be ignored here — exactly like the server's
+ * utils/priceResolver.resolvePrice (finalPrice → basePrice, offer 0).
+ * Otherwise the cart would show the stale discounted price and checkout
+ * would fail the server's total check.
+ */
+export function isOfferExpired(item, now = new Date()) {
+    if (!item || item.isCombo || !item.offerExpiryDate) return false;
+    const ends = new Date(item.offerExpiryDate);
+    if (Number.isNaN(ends.getTime())) return false;
+    return ends <= now;
+}
+
+/**
  * The price a customer pays for one unit of `item`, before size and
  * topping modifiers.
  *
@@ -52,6 +67,8 @@ export function resolveUnitPrice(item) {
     if (item.isCombo) {
         return num(item.price) ?? num(item.finalPrice) ?? num(item.basePrice) ?? 0;
     }
+    // Expired offer → the undiscounted base price (server parity).
+    if (isOfferExpired(item) && num(item.basePrice) !== null) return num(item.basePrice);
     return num(item.finalPrice) ?? num(item.basePrice) ?? num(item.price) ?? 0;
 }
 
@@ -61,7 +78,7 @@ export function resolveUnitPrice(item) {
  * so an item without an offer doesn't show "₹200 ₹200".
  */
 export function resolveStrikePrice(item) {
-    if (!item || item.isCombo) return null;
+    if (!item || item.isCombo || isOfferExpired(item)) return null;
     const base = num(item.basePrice);
     const final = num(item.finalPrice);
     if (base === null || final === null) return null;
@@ -74,7 +91,7 @@ export function resolveStrikePrice(item) {
  * shapes that only carry the two prices still discount correctly.
  */
 export function resolveOfferPercent(item) {
-    if (!item || item.isCombo) return 0;
+    if (!item || item.isCombo || isOfferExpired(item)) return 0;
     const explicit = num(item.offerPercentage);
     if (explicit !== null && explicit > 0) return explicit;
     const base = num(item.basePrice);

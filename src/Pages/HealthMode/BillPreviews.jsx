@@ -240,12 +240,28 @@ const TakeawayBillPreview = ({ state }) => {
   // wallet portion is debited AFTER the order is created via the dedicated
   // wallet pay endpoint (which requires order._id), and verify-payment
   // detects the prior wallet payment and ADDS the Razorpay capture to it.
-  const createCafeOrder = async (paymentMethod) => {
+  //
+  // `checkout` (Razorpay handler response) is sent as `razorpayPayment`
+  // so the server claims the capture at creation — only the three ids,
+  // never the rest of the checkout object. When the wallet pays part of
+  // the bill, `walletAmountPaid` tells the server the capture only has
+  // to cover (total − walletAmountPaid); the server validates the wallet
+  // balance, and the wallet is still debited afterwards via
+  // walletAPI.payWithWallet.
+  const createCafeOrder = async (paymentMethod, { checkout, walletAmountPaid } = {}) => {
     const { data } = await api.post("/orders", {
       ...orderPayload,
       pointsRedeemed: 0,
       total: grandTotal,
       paymentMethod,
+      ...(checkout ? {
+        razorpayPayment: {
+          razorpay_order_id: checkout.razorpay_order_id,
+          razorpay_payment_id: checkout.razorpay_payment_id,
+          razorpay_signature: checkout.razorpay_signature,
+        },
+      } : {}),
+      ...(walletAmountPaid > 0 ? { walletAmountPaid } : {}),
     });
     if (!data.success) throw new Error("Failed to create order");
 
@@ -355,7 +371,10 @@ const TakeawayBillPreview = ({ state }) => {
             // the wallet (the /wallet/pay endpoint requires orderId so it
             // can compute the payable delta server-side and tie the
             // wallet transaction to the order).
-            const createdOrder = await createCafeOrder("online");
+            const createdOrder = await createCafeOrder("online", {
+              checkout: response,
+              walletAmountPaid: walletAmount,
+            });
             const cafeOrderId = createdOrder.orderId;
 
             // Step 2 — debit the wallet portion (if any). Sequence
@@ -1037,17 +1056,19 @@ const DineInBillPreview = () => {
   // The table's running bill (rounds can be appended after placement),
   // so it is priced live — through utils/billing, the mirror of the
   // server's Backend/utils/billing.js, so rounding matches the waiter
-  // bill and the admin drawer. Manual discount comes off with the coupon.
+  // bill and the admin drawer. GST is on (subtotal − coupon); the staff
+  // manual discount is not a coupon (no GST effect — the server keeps it
+  // outside order.total), so it comes off the final figure.
   const bill = computeBill({
     subtotal: subtotalRaw,
     taxConfig,
     orderType: "dine-in",
-    couponDiscount: couponDiscount + manualDiscount,
+    couponDiscount,
     pointsRedeemed,
     tipAmount,
   });
   const { subtotal, gst, gstPct, serviceCharge, serviceChargePct, additionalCharges: activeChargesDI } = bill;
-  const total = bill.total;
+  const total = Math.max(0, Math.round((bill.total - manualDiscount) * 100) / 100);
 
   const displayOrderId =
     pendingOrders.length > 0

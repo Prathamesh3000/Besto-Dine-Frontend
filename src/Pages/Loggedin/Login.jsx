@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Eye, EyeOff, Phone, Mail, Lock, User, AlertCircle, ArrowLeft, CheckCircle2, Gift, Wallet, Heart, History, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../../Context/AuthContext';
+import { sanitizeMobileInput, mobileError, isValidMobile } from '../../utils/mobile';
 import api, { publicAPI } from '../../utils/api';
 import { getActiveTenantSlug, activeRestaurantPath } from '../../utils/tenant';
 import { resolveImageUrl } from '../../utils/image';
@@ -220,7 +221,7 @@ function Login() {
     const validateRegisterStep2 = () => {
         const e = {};
         if (!formData.mobile.trim()) e.mobile = 'Mobile number is required';
-        else if (!/^\d{10}$/.test(formData.mobile.trim().replace(/\D/g, ''))) e.mobile = 'Enter a valid 10-digit number';
+        else if (!isValidMobile(formData.mobile.trim())) e.mobile = mobileError(formData.mobile.trim());
         if (!acceptTerms) e.terms = 'Please accept the terms to continue';
         return e;
     };
@@ -639,7 +640,7 @@ function Login() {
                                                     id="otpPhone" type="tel" inputMode="numeric"
                                                     autoComplete="tel-national"
                                                     value={otpPhone}
-                                                    onChange={(e) => setOtpPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                                    onChange={(e) => setOtpPhone(sanitizeMobileInput(e.target.value))}
                                                     placeholder="98765 43210"
                                                     aria-label="10-digit mobile number"
                                                     className={`flex-1 ${inputOk.replace('pl-11', 'pl-4')} tabular-nums`}
@@ -949,9 +950,11 @@ function Login() {
                                                         autoComplete="tel-national"
                                                         value={formData.mobile}
                                                         onChange={(e) => {
-                                                            const v = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                                            const v = sanitizeMobileInput(e.target.value);
                                                             setFormData(prev => ({ ...prev, mobile: v }));
-                                                            if (errors.mobile) setErrors(prev => ({ ...prev, mobile: '' }));
+                                                            // Live feedback once 10 digits are in; clear otherwise.
+                                                            const liveErr = v.length === 10 ? mobileError(v) : '';
+                                                            if (errors.mobile || liveErr) setErrors(prev => ({ ...prev, mobile: liveErr }));
                                                         }}
                                                         aria-invalid={!!errors.mobile}
                                                         aria-describedby={errors.mobile ? 'mobile-error' : undefined}

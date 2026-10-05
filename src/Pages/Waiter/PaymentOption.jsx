@@ -120,7 +120,9 @@ const PaymentOption = () => {
             });
         } catch (err) {
             console.error('Cash payment error:', err);
-            toast.error('Failed to record payment.');
+            // AMOUNT_TOO_LOW: marking Paid cannot reduce the bill — the
+            // server says to use the Discount option; show its message.
+            toast.error(err?.response?.data?.message || 'Failed to record payment.');
         } finally {
             setIsProcessing(false);
         }

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react'
 import { X, Plus, Trash2, Upload, ChevronUp, ChevronDown } from 'lucide-react'
 import api from '../../../utils/api'
 import AddAddonModal from './AddAddonModal'
+import { backendOrigin } from '../../../utils/apiOrigin';
 
 // Backend host — strip the trailing /api so /uploads paths resolve to
 // the static-file mount instead of an undefined route. Reused by the
 // add-on icon resolver below.
-const BACKEND_URL = (import.meta.env.VITE_API_URL || '').replace(/\/api.*$/, '')
+const BACKEND_URL = backendOrigin()
 
 /**
  * Resolve an add-on icon to its display source.

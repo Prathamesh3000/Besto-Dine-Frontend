@@ -76,10 +76,14 @@ export function toTaxConfig(taxes) {
  * Returns every intermediate the UI renders, so a caller never
  * recomputes a line it wants to display.
  *
- * Note the ordering: taxes are levied on the gross subtotal, then
- * discounts come off the taxed figure. That matches what the server
- * does today; changing it is a pricing decision, not a refactor, so it
- * is deliberately preserved here.
+ * Note the ordering: GST is levied on the DISCOUNTED value —
+ * (subtotal − couponDiscount), floored at 0. Service charge and
+ * additional charges stay on the gross subtotal. Loyalty points are a
+ * payment method, so they do NOT reduce the GST base. Then
+ *   total = subtotal + gst + serviceCharge + additionalCharges
+ *           − coupon − points + tip + delivery   (≥ 0)
+ * e.g. ₹1000 food, 5% GST, ₹100 coupon → GST ₹45 → total ₹945.
+ * Identical to the server (Backend/utils/billing.js) — change together.
  */
 export function computeBill({
     subtotal = 0,
@@ -99,7 +103,9 @@ export function computeBill({
     const serviceApplies = SERVICE_CHARGE_TYPES.has(type);
     const servicePct = serviceApplies ? num(taxConfig.servicePct) : 0;
 
-    const gst = round2(sub * (gstPct / 100));
+    // GST base = subtotal after the coupon (never negative).
+    const gstBase = Math.max(0, round2(sub - num(couponDiscount)));
+    const gst = round2(gstBase * (gstPct / 100));
     const serviceCharge = round2(sub * (servicePct / 100));
 
     // An empty cart attracts no flat charges — otherwise a packaging
@@ -163,12 +169,12 @@ export function computeSubtotal(items = []) {
  * those stored figures — re-deriving them from the *current* settings
  * is how editing the GST rate used to rewrite historical bills.
  *
- * The stored breakdown is used only when it reconciles with the stored
- * total (subtotal + charges − discounts + tip + delivery ≈ total) and
- * no items were appended after placement (the append endpoint adds the
- * bare item price to `total` without re-stamping the tax breakdown, so
- * the stamp no longer describes the bill). Legacy orders that predate
- * the breakdown fields carry none. In those cases the breakdown is
+ * The stored breakdown is used whenever it reconciles with the stored
+ * total (subtotal + charges − discounts + tip + delivery ≈ total). The
+ * append endpoint re-stamps the breakdown when items are added after
+ * placement, so an appended order reconciles like any other. Legacy
+ * orders that predate the breakdown fields carry none, and a stamp that
+ * does not reconcile no longer describes the bill. In those cases the breakdown is
  * recomputed through computeBill with `fallbackTaxConfig`, so even the
  * fallback uses the server's rounding and service-charge rule.
  *
@@ -183,17 +189,6 @@ export function computeSubtotal(items = []) {
  * @param fallbackTaxConfig  toTaxConfig() output, used only when the stored breakdown can't be
  * @param items              Optional line list to price instead of order.items
  */
-/** Items appended after placement carry a later `addedAt` (see the
- *  server's appendItems); a minute of grace absorbs creation jitter. */
-const APPENDED_GRACE_MS = 60 * 1000;
-function hasAppendedItems(items) {
-    const times = (items || [])
-        .map((i) => (i?.addedAt ? new Date(i.addedAt).getTime() : NaN))
-        .filter(Number.isFinite);
-    if (times.length < 2) return false;
-    return Math.max(...times) - Math.min(...times) > APPENDED_GRACE_MS;
-}
-
 export function billFromOrder(order, fallbackTaxConfig = null, items = null) {
     const o = order || {};
     const subtotal = computeSubtotal(items || o.items || []);
@@ -231,8 +226,7 @@ export function billFromOrder(order, fallbackTaxConfig = null, items = null) {
             - couponDiscount - num(o.pointsRedeemed) + num(o.tipAmount) + num(adjustments.deliveryFee),
         );
         const computedTotal = sum < 0 ? 0 : sum;
-        const reconciles = (storedTotal === null || Math.abs(computedTotal - storedTotal) <= 0.05)
-            && !hasAppendedItems(o.items);
+        const reconciles = storedTotal === null || Math.abs(computedTotal - storedTotal) <= 0.05;
         if (reconciles || !fallbackTaxConfig) {
             const base = computeBill({ subtotal, ...adjustments });
             return {
@@ -267,5 +261,91 @@ export function billFromOrder(order, fallbackTaxConfig = null, items = null) {
         storedTotal,
         computedTotal: derived.total,
         total: storedTotal ?? derived.total,
+    };
+}
+
+/**
+ * What staff must collect to settle a placed order — the server's own
+ * "due" (Backend/services/orderStatusService.js):
+ *
+ *   due = order.total − manualDiscount − amountPaid   (≥ 0, paise)
+ *
+ * The total is the STORED bill (billFromOrder), never a re-price from
+ * the current tax settings: marking Paid cannot change order.total and
+ * the server rejects anything below due with AMOUNT_TOO_LOW, so settling
+ * from live rates breaks the moment an admin edits a tax rate.
+ *
+ * @param order              Order doc
+ * @param fallbackTaxConfig  only for legacy orders carrying no total
+ * @param opts.manualDiscount override the order's stored manualDiscount
+ *                            (a discount being sent with the settle call)
+ */
+export function orderAmountDue(order, fallbackTaxConfig = null, { manualDiscount } = {}) {
+    const o = order || {};
+    const { total } = billFromOrder(o, fallbackTaxConfig);
+    const discount = manualDiscount !== undefined && manualDiscount !== null
+        ? num(manualDiscount)
+        : num(o.manualDiscount);
+    return round2(Math.max(0, num(total) - Math.max(0, discount) - Math.max(0, num(o.amountPaid))));
+}
+
+/**
+ * Settle amount for a table carrying one or more unpaid orders: the sum
+ * of each order's stored due. `opts.manualDiscount`, when given, is the
+ * table-level staff discount that REPLACES the sum of the orders' stored
+ * manual discounts (the drawer's Discount control).
+ */
+export function settleAmountForOrders(orders = [], fallbackTaxConfig = null, { manualDiscount } = {}) {
+    const list = (orders || []).filter(Boolean);
+    if (manualDiscount === undefined || manualDiscount === null) {
+        return round2(list.reduce((s, o) => s + orderAmountDue(o, fallbackTaxConfig), 0));
+    }
+    const gross = list.reduce(
+        (s, o) => s + orderAmountDue(o, fallbackTaxConfig, { manualDiscount: 0 }),
+        0,
+    );
+    return round2(Math.max(0, gross - Math.max(0, num(manualDiscount))));
+}
+
+/**
+ * The stored bill of several placed orders (a table's rounds) summed
+ * into one billFromOrder-shaped breakdown for display. Rates are
+ * reported only when every order was billed at the same rate (null
+ * otherwise, so a label never claims a rate one round did not use).
+ *
+ * Adds `amountPaid` (already collected across the orders).
+ */
+export function billFromOrders(orders = [], fallbackTaxConfig = null) {
+    const bills = (orders || []).filter(Boolean).map((o) => ({ o, b: billFromOrder(o, fallbackTaxConfig) }));
+    const sum = (pick) => round2(bills.reduce((s, x) => s + num(pick(x)), 0));
+    const sameRate = (pick) => {
+        const rates = [...new Set(bills.map((x) => num(pick(x.b))).filter((r) => r > 0))];
+        if (rates.length === 0) return 0;
+        return rates.length === 1 ? rates[0] : null;
+    };
+    const charges = new Map();
+    for (const { b } of bills) {
+        for (const c of b.additionalCharges || []) {
+            const key = `${c.name}|${c.type}|${c.value}`;
+            const prev = charges.get(key);
+            charges.set(key, prev ? { ...prev, amount: round2(prev.amount + c.amount) } : { ...c });
+        }
+    }
+    return {
+        subtotal: sum((x) => x.b.subtotal),
+        gst: sum((x) => x.b.gst),
+        gstPct: sameRate((b) => b.gstPct),
+        serviceCharge: sum((x) => x.b.serviceCharge),
+        serviceChargePct: sameRate((b) => b.serviceChargePct),
+        additionalCharges: [...charges.values()],
+        additionalChargesTotal: sum((x) => x.b.additionalChargesTotal),
+        couponDiscount: sum((x) => x.b.couponDiscount),
+        pointsRedeemed: sum((x) => x.b.pointsRedeemed),
+        tipAmount: sum((x) => x.b.tipAmount),
+        deliveryFee: sum((x) => x.b.deliveryFee),
+        manualDiscount: sum((x) => x.b.manualDiscount),
+        amountPaid: sum((x) => x.o.amountPaid),
+        fromServer: bills.length > 0 && bills.every((x) => x.b.fromServer),
+        total: sum((x) => x.b.total),
     };
 }

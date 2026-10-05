@@ -6,6 +6,7 @@ import { useAuth } from '../../Context/AuthContext';
 import HallDetailModal from './HallDetailModal';
 import BookingProgressBar from './BookingProgressBar';
 import api from '../../utils/api';
+import { reportMissingFields } from '../../utils/requiredFields';
 
 const HallBooking = () => {
     const navigate = useNavigate();
@@ -77,6 +78,17 @@ const HallBooking = () => {
     useEffect(() => {
         fetchHalls();
     }, [fetchHalls]);
+
+    // QA N2 — "Reserve Hall" names the missing hall instead of being a
+    // silently disabled button.
+    const handleReserve = () => {
+        if (!selectedHall) {
+            reportMissingFields([{ label: 'Hall', id: 'hall-options' }]);
+            return;
+        }
+        if (capacityIssue) return;
+        navigate('/customer/package-selection', { state: { ...location.state, selectedHallId, selectedHall } });
+    };
 
     const handleHallClick = (hall) => {
         const hallId = hall.id || hall._id;
@@ -198,7 +210,7 @@ const HallBooking = () => {
                                 <p className="text-[12px] text-[#8D848F]">This restaurant hasn't listed any halls yet.</p>
                             </div>
                         ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div id="hall-options" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                              {halls.map((hall) => {
                                 const fits = hallFits(hall);
                                 const min = Number(hall.minPeople || 0);
@@ -316,15 +328,11 @@ const HallBooking = () => {
                             Previous
                         </button>
                         <button
-                          disabled={!selectedHallId || capacityIssue}
-                          onClick={() => {
-                            if (selectedHallId && !capacityIssue) {
-                                const selectedHall = halls.find(h => h._id === selectedHallId);
-                                navigate('/customer/package-selection', { state: { ...location.state, selectedHallId, selectedHall } });
-                            }
-                          }}
+                          disabled={!!selectedHallId && capacityIssue}
+                          aria-disabled={!selectedHallId || capacityIssue}
+                          onClick={handleReserve}
                           className={`flex-1 font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] transition-all ${
-                            selectedHallId && !capacityIssue ? 'bg-[#FE8301] text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            selectedHallId && !capacityIssue ? 'bg-[#FE8301] text-white' : capacityIssue ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#FE8301]/60 text-white'
                           }`}
                         >
                             Reserve Hall
@@ -339,15 +347,11 @@ const HallBooking = () => {
                             Previous
                         </button>
                         <button
-                          disabled={!selectedHallId || capacityIssue}
-                          onClick={() => {
-                            if (selectedHallId && !capacityIssue) {
-                                const selectedHall = halls.find(h => (h.id === selectedHallId || h._id === selectedHallId));
-                                navigate('/customer/package-selection', { state: { ...location.state, selectedHallId, selectedHall } });
-                            }
-                          }}
+                          disabled={!!selectedHallId && capacityIssue}
+                          aria-disabled={!selectedHallId || capacityIssue}
+                          onClick={handleReserve}
                           className={`font-nunito font-semibold text-[14px] py-3 px-8 rounded-[16px] w-[160px] text-center transition-all ${
-                            selectedHallId && !capacityIssue ? 'bg-[#FE8301] text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            selectedHallId && !capacityIssue ? 'bg-[#FE8301] text-white' : capacityIssue ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#FE8301]/60 text-white'
                           }`}
                         >
                             Reserve Hall

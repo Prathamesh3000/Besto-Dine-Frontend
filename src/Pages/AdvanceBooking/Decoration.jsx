@@ -1,23 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
-import { useAuth } from '../../Context/AuthContext';
 import BookingProgressBar from './BookingProgressBar';
 import DecorationDetailModal from './DecorationDetailModal';
 import api from '../../utils/api';
+import { resolveImageUrl, sizedImage } from '../../utils/image';
+import { reportMissingFields } from '../../utils/requiredFields';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL?.replace(/\/api.*$/, '') || '';
-const resolveImg = (src) => {
-    if (!src) return '';
-    if (src.startsWith('/uploads/')) return `${BACKEND_URL}${src}`;
-    return src;
-};
+// QA N8 — same treatment as CakeDetails: the category filter / select
+// used to re-render every package card (inline callbacks, unmemoised
+// list) and every card loaded its full-size photo eagerly. Cards are now
+// memoised with stable callbacks, the filtered list is memoised and
+// images are card-sized, lazy and async-decoded.
+const CARD_IMG_PX = 280;
 
 const Decoration = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user } = useAuth();
-
     const [packages, setPackages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [fetchError, setFetchError] = useState(null);
@@ -37,7 +36,7 @@ const Decoration = () => {
                         id: d._id || d.id,
                         title: d.name,
                         description: d.description || '',
-                        image: resolveImg(d.images?.[0]) || '',
+                        image: sizedImage(resolveImageUrl(d.images?.[0]) || '', { w: CARD_IMG_PX }) || '',
                         tags: [d.category, d.isCustomizable ? 'Customisable' : null].filter(Boolean),
                         price: `₹${(d.basePrice || 0).toLocaleString('en-IN')}`,
                         basePrice: d.basePrice || 0,
@@ -69,9 +68,22 @@ const Decoration = () => {
         fetchDecor();
     }, [fetchDecor]);
 
-    const filtered = activeCategory === 'All'
+    const filtered = useMemo(() => (activeCategory === 'All'
         ? packages
-        : packages.filter(p => p.category === activeCategory);
+        : packages.filter(p => p.category === activeCategory)), [packages, activeCategory]);
+
+    const handleSelect = useCallback((id) => setSelectedDecorId(id), []);
+    const handleViewDetails = useCallback((pkg) => setPreviewDecor(pkg), []);
+
+    // QA N2 — Continue explains what's missing (Skip continues without decor).
+    const handleContinue = () => {
+        const selectedDecor = packages.find(p => p.id === selectedDecorId);
+        if (!selectedDecor) {
+            reportMissingFields([{ label: 'Decoration package', id: 'decoration-packages' }]);
+            return;
+        }
+        navigate('/customer/add-ons', { state: { ...location.state, selectedDecorId, selectedDecor } });
+    };
 
     return (
         <div className="min-h-screen bg-[#FDFDFD] transition-colors duration-200 font-sans flex flex-col items-center">
@@ -131,7 +143,7 @@ const Decoration = () => {
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-6">
+                        <div id="decoration-packages" className="flex flex-col gap-6">
                             {loading ? (
                                 <div className="text-center py-10">Loading packages...</div>
                             ) : fetchError ? (
@@ -148,8 +160,8 @@ const Decoration = () => {
                                         key={pkg.id}
                                         pkg={pkg}
                                         isSelected={selectedDecorId === pkg.id}
-                                        onSelect={() => setSelectedDecorId(pkg.id)}
-                                        onViewDetails={() => setPreviewDecor(pkg)}
+                                        onSelect={handleSelect}
+                                        onViewDetails={handleViewDetails}
                                     />
                                 ))
                             )}
@@ -166,13 +178,10 @@ const Decoration = () => {
                         Previous
                     </button>
                     <button
-                        disabled={!selectedDecorId}
-                        onClick={() => {
-                            const selectedDecor = packages.find(p => p.id === selectedDecorId);
-                            navigate('/customer/add-ons', { state: { ...location.state, selectedDecorId, selectedDecor } });
-                        }}
+                        aria-disabled={!selectedDecorId}
+                        onClick={handleContinue}
                          className={`font-bold text-[14px] py-3 px-10 rounded-[16px] w-[160px] transition-all ${
-                          selectedDecorId ? 'bg-[#FE8301] text-white shadow-lg shadow-orange-200' : 'bg-gray-300 text-white cursor-not-allowed'
+                          selectedDecorId ? 'bg-[#FE8301] text-white shadow-lg shadow-orange-200' : 'bg-[#FE8301]/60 text-white'
                         }`}
                     >
                         Continue
@@ -182,13 +191,10 @@ const Decoration = () => {
                 {/* Mobile Footer */}
                 <div className="fixed lg:hidden bottom-0 left-0 right-0 p-4 bg-white border-t flex gap-4 z-50">
                     <button onClick={() => navigate(-1)} className="flex-1 bg-[#F5F5F5] font-bold py-4 rounded-[16px]">Previous</button>
-                    <button 
-                        disabled={!selectedDecorId}
-                        onClick={() => {
-                            const selectedDecor = packages.find(p => p.id === selectedDecorId);
-                            navigate('/customer/add-ons', { state: { ...location.state, selectedDecorId, selectedDecor } });
-                        }}
-                        className={`flex-1 font-bold py-4 rounded-[16px] ${selectedDecorId ? 'bg-[#FE8301] text-white' : 'bg-gray-200 text-gray-400'}`}
+                    <button
+                        aria-disabled={!selectedDecorId}
+                        onClick={handleContinue}
+                        className={`flex-1 font-bold py-4 rounded-[16px] ${selectedDecorId ? 'bg-[#FE8301] text-white' : 'bg-[#FE8301]/60 text-white'}`}
                     >
                         Continue
                     </button>
@@ -208,7 +214,7 @@ const Decoration = () => {
     );
 };
 
-const PackageCard = ({ pkg, isSelected, onSelect, onViewDetails }) => {
+const PackageCard = memo(function PackageCard({ pkg, isSelected, onSelect, onViewDetails }) {
     return (
         <div className={`flex flex-col lg:flex-row gap-6 p-4 lg:p-6 rounded-[24px] border-2 transition-all ${
             isSelected ? 'border-[#FE8301] bg-[#FFF9F2]' : 'border-[#F2F4F7] bg-white'
@@ -216,7 +222,16 @@ const PackageCard = ({ pkg, isSelected, onSelect, onViewDetails }) => {
             {/* Image Section */}
             <div className="w-full lg:w-[280px] h-[200px] lg:h-[180px] rounded-[20px] overflow-hidden shrink-0 bg-gray-100">
                 {pkg.image ? (
-                    <img src={pkg.image} alt={pkg.title} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                    <img
+                        src={pkg.image}
+                        alt={pkg.title}
+                        width={CARD_IMG_PX}
+                        height={180}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                    />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-4xl">🎨</div>
                 )}
@@ -247,8 +262,8 @@ const PackageCard = ({ pkg, isSelected, onSelect, onViewDetails }) => {
                     </div>
 
                     <div className="flex gap-3">
-                        <button 
-                            onClick={onSelect}
+                        <button
+                            onClick={() => onSelect(pkg.id)}
                             className={`px-6 py-3 rounded-[12px] font-bold text-[14px] transition-all ${
                                 isSelected ? 'bg-orange-600 text-white' : 'bg-[#FE8301] text-white shadow-md'
                             }`}
@@ -256,7 +271,7 @@ const PackageCard = ({ pkg, isSelected, onSelect, onViewDetails }) => {
                             {isSelected ? 'Selected' : 'Select Package'}
                         </button>
                         <button
-                            onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
+                            onClick={(e) => { e.stopPropagation(); onViewDetails?.(pkg); }}
                             className="px-6 py-3 bg-[#F2F2F2] text-[#645E66] font-bold text-[14px] rounded-[12px] hover:bg-gray-200"
                         >
                             View Details
@@ -266,7 +281,7 @@ const PackageCard = ({ pkg, isSelected, onSelect, onViewDetails }) => {
             </div>
         </div>
     );
-};
+});
 
 export default Decoration;
 
