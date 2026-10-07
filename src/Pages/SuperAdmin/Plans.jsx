@@ -13,6 +13,7 @@ import {
     Sparkles,
     CheckCircle2,
     Receipt,
+    Send,
 } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
@@ -41,6 +42,8 @@ const Plans = () => {
     const [showForm, setShowForm] = useState(false);
     const [editingPlan, setEditingPlan] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
+    // Push-to-restaurants confirm: { plan, impact } once the impact loaded.
+    const [pushTarget, setPushTarget] = useState(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -84,10 +87,41 @@ const Plans = () => {
     const openCreate = () => { setEditingPlan(null);  setShowForm(true); };
     const openEdit   = (plan) => { setEditingPlan(plan); setShowForm(true); };
 
-    const handleSaved = () => {
+    // Editing a plan never changes restaurants already on it — they keep
+    // the copy of modules/limits they signed up with. This loads how many
+    // would change and asks before pushing. `quiet` = skip when nobody
+    // would change (used right after a save).
+    const askPush = async (plan, { quiet = false } = {}) => {
+        try {
+            const res = await api.get(`/superadmin/plans/${plan._id}/tenant-impact`);
+            const impact = res.data?.data;
+            if (!impact) return;
+            if (impact.outOfSyncCount === 0 && impact.pendingUpgrades === 0 && impact.scheduledDowngrades === 0) {
+                if (!quiet) toast.success(`All ${impact.assignedCount} restaurant(s) on ${plan.name} already have its current modules.`);
+                return;
+            }
+            setPushTarget({ plan, impact });
+        } catch (err) {
+            if (!quiet) toast.error(err.response?.data?.message || 'Failed to check restaurants on this plan');
+        }
+    };
+
+    const doPush = async (plan) => {
+        try {
+            const res = await api.post(`/superadmin/plans/${plan._id}/push`, { confirm: true });
+            const d = res.data?.data || {};
+            toast.success(`Updated ${d.updated ?? 0} restaurant(s) on ${plan.name}`);
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to push plan');
+        }
+    };
+
+    const handleSaved = (saved) => {
+        const wasEdit = !!editingPlan;
         setShowForm(false);
         setEditingPlan(null);
         load();
+        if (wasEdit && saved?._id) askPush(saved, { quiet: true });
     };
 
     return (
@@ -95,7 +129,7 @@ const Plans = () => {
             <PageHeader
                 eyebrow="Pricing"
                 title="Subscription Plans"
-                description="Defines what each tenant tier may access. Editing a plan does not retroactively change tenants — re-assigning the plan does."
+                description="Defines which modules each plan unlocks. Editing a plan does not change restaurants already on it until you push the plan to them."
                 actions={
                     isFullSuperAdmin && (
                         <Button variant="brand" icon={Plus} onClick={openCreate}>
@@ -146,6 +180,7 @@ const Plans = () => {
                             onEdit={() => openEdit(p)}
                             onToggle={() => togglePlan(p)}
                             onDelete={() => setDeleteTarget(p)}
+                            onPush={() => askPush(p)}
                         />
                     ))}
                 </div>
@@ -158,6 +193,20 @@ const Plans = () => {
                     onSaved={handleSaved}
                 />
             )}
+
+            <ConfirmModal
+                open={!!pushTarget}
+                title={`Push "${pushTarget?.plan?.name}" to its restaurants?`}
+                description={pushTarget ? (
+                    `${pushTarget.impact.outOfSyncCount} of ${pushTarget.impact.assignedCount} restaurant(s) on this plan have an older copy of its modules and limits`
+                    + (pushTarget.impact.pendingUpgrades || pushTarget.impact.scheduledDowngrades
+                        ? ` (plus ${pushTarget.impact.pendingUpgrades + pushTarget.impact.scheduledDowngrades} pending plan change(s))` : '')
+                    + '. They will get exactly what the plan includes now — modules removed from the plan stop working for them. Their agreed price, per-restaurant overrides and add-ons are not changed.'
+                ) : ''}
+                confirmLabel="Push to restaurants"
+                onClose={() => setPushTarget(null)}
+                onConfirm={() => { const t = pushTarget; setPushTarget(null); if (t) doPush(t.plan); }}
+            />
 
             <ConfirmModal
                 open={!!deleteTarget}
@@ -190,9 +239,14 @@ const FEATURE_LABELS = {
     dataExport: 'Data export',
     webhooks: 'Webhooks',
     kiosk: 'Self-order kiosk',
+    campaigns: 'Campaigns',
+    accountingExport: 'Tally export',
+    aggregatorOrders: 'Zomato / Swiggy',
+    eInvoice: 'e-Invoice',
+    whiteLabelBranding: 'Own branding',
 };
 
-const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete }) => {
+const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPush }) => {
     const enabledFeatures = Object.entries(p.features || {})
         .filter(([k, v]) => v === true && FEATURE_LABELS[k]);
     const visibleFeatures = enabledFeatures.slice(0, 5);
@@ -287,6 +341,14 @@ const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete }) => 
                     >
                         {p.isActive ? 'Archive' : 'Restore'}
                     </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Send}
+                        onClick={onPush}
+                        aria-label={`Push ${p.name} to its restaurants`}
+                        title="Push this plan's current modules & limits to restaurants on it"
+                    />
                     <Button
                         variant="danger"
                         size="sm"

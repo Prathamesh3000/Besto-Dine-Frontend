@@ -36,6 +36,7 @@ import {
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import ShareLinkPanel from '../../Components/Common/ShareLinkPanel';
+import RestaurantModulesPanel from './components/RestaurantModulesPanel';
 import { restaurantLink } from '../../utils/customerLinks';
 import {
     Card,
@@ -1228,6 +1229,9 @@ const RestaurantDetail = () => {
                     )}
                 </SectionCard>
             )}
+
+            {/* ── Modules — plan + paid add-ons + per-restaurant overrides ── */}
+            <RestaurantModulesPanel restaurant={data} canEdit={isFullSuperAdmin} onChanged={load} />
 
             </>
             )}

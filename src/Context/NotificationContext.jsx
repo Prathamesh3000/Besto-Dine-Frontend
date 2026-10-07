@@ -406,9 +406,14 @@ export const NotificationProvider = ({ children }) => {
             }
         };
 
-        const handleOrderUpdated = () => {
+        const handleOrderUpdated = (payload) => {
             invalidateNotifications();
             scheduleInvalidate(['liveOrders']);
+            // Once anyone settles the bill, drop the sticky "Cash payment
+            // requested" popup on every other staff screen too.
+            if (payload?.orderId && /^paid$/i.test(String(payload?.paymentStatus || ''))) {
+                toast.dismiss(`counter-payment-${payload.orderId}`);
+            }
         };
 
         const handleRequestNew = (data) => {
@@ -485,6 +490,17 @@ export const NotificationProvider = ({ children }) => {
                         type="button"
                         onClick={() => {
                             toast.dismiss(t.id);
+                            // Admins / managers settle from their own Tables
+                            // screen (the table drawer has a one-tap "Mark
+                            // Paid · Cash" for counter requests). Sending them
+                            // to /waiter/payment dropped them into the waiter
+                            // app, which then landed on the waiter dashboard.
+                            if (role === 'admin' || role === 'manager') {
+                                navigate('/admin/tables', {
+                                    state: { highlightTable: payload?.tableId || tableName },
+                                });
+                                return;
+                            }
                             navigate('/waiter/payment', {
                                 state: {
                                     orderId,

@@ -3,6 +3,8 @@ import { X, Download, TrendingUp, Sparkles, Lightbulb, AlertTriangle, Info } fro
 import LineChart from './charts/LineChart'
 import { computeYTicks } from './charts/chartUtils'
 import { useReports, useForecast } from '../../../hooks/queries/adminQueries'
+import { useAuth } from '../../../Context/AuthContext'
+import { BASIC_REPORT_MAX_DAYS } from '../../../utils/featureLabels'
 
 // ── Date helpers (local calendar, no UTC drift). Ranges are sent as plain
 // YYYY-MM-DD strings; the backend re-anchors them to the report timezone.
@@ -168,7 +170,22 @@ const BreakdownList = ({ title, rows, valueKey = 'earnings', labelKey = 'label',
     )
 }
 
+// Inclusive day count of a { from, to } pair of YYYY-MM-DD strings.
+const spanDays = ({ from, to }) => Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1
+const shiftYmd = (s, days) => {
+    const d = new Date(Date.parse(s) + days * 86400000)
+    return d.toISOString().slice(0, 10)
+}
+
 const BusinessReportModal = ({ isOpen, onClose, branchId }) => {
+    // Plan levels of the revenueAnalytics module: Basic = reports up to
+    // BASIC_REPORT_MAX_DAYS, Standard = any range, Advanced = + forecast.
+    // The backend enforces the same limits; this just avoids dead clicks.
+    const { featureTier, hasTier, tenant } = useAuth()
+    const canReport = hasTier('revenueAnalytics', 'basic')
+    const basicOnly = featureTier('revenueAnalytics') === 'basic'
+    const canForecast = hasTier('revenueAnalytics', 'advanced')
+
     const presets = useMemo(() => buildReportPresets(), [])
     const [preset, setPreset] = useState('month')
     const [range, setRange] = useState(presets.find(p => p.key === 'month').range)
@@ -177,13 +194,13 @@ const BusinessReportModal = ({ isOpen, onClose, branchId }) => {
     // Only fetch while the modal is open (saves a query when it's closed).
     const { data: report, isFetching } = useReports(
         { from: range.from, to: range.to, branch: branchId },
-        { enabled: isOpen }
+        { enabled: isOpen && canReport }
     )
 
     // Forecast is branch-scoped but independent of the selected range — it
     // always learns from the most recent history, so it's fetched once per
     // open (not on every preset change).
-    const { data: forecast } = useForecast({ branch: branchId }, { enabled: isOpen })
+    const { data: forecast } = useForecast({ branch: branchId }, { enabled: isOpen && canForecast })
 
     // Close on Escape.
     useEffect(() => {
@@ -195,13 +212,23 @@ const BusinessReportModal = ({ isOpen, onClose, branchId }) => {
 
     if (!isOpen) return null
 
-    const applyPreset = (p) => { setPreset(p.key); setRange(p.range); setShowCustom(false) }
+    const presetLocked = (p) => basicOnly && spanDays(p.range) > BASIC_REPORT_MAX_DAYS
+    const applyPreset = (p) => {
+        if (presetLocked(p)) return
+        setPreset(p.key); setRange(p.range); setShowCustom(false)
+    }
     const onCustomDate = (field, value) => {
         if (!value) return
         setPreset('custom')
         setRange(prev => {
             const next = { ...prev, [field]: value }
             if (next.from > next.to) { if (field === 'from') next.to = value; else next.from = value }
+            // Basic plan: keep the window within the allowed length by
+            // moving the other end.
+            if (basicOnly && spanDays(next) > BASIC_REPORT_MAX_DAYS) {
+                if (field === 'from') next.to = shiftYmd(next.from, BASIC_REPORT_MAX_DAYS - 1)
+                else next.from = shiftYmd(next.to, -(BASIC_REPORT_MAX_DAYS - 1))
+            }
             return next
         })
     }
@@ -390,11 +417,14 @@ const BusinessReportModal = ({ isOpen, onClose, branchId }) => {
                             <button
                                 key={p.key}
                                 onClick={() => applyPreset(p)}
+                                disabled={presetLocked(p)}
+                                title={presetLocked(p) ? `Your plan's reports cover up to ${BASIC_REPORT_MAX_DAYS} days. Upgrade for longer ranges.` : undefined}
                                 className={`px-3.5 py-1.5 rounded-lg text-[13px] font-[600] border transition-all whitespace-nowrap ${
-                                    preset === p.key ? 'bg-[#7E22CE] text-white border-[#7E22CE] shadow-sm' : 'bg-white text-[#374151] border-gray-200 hover:bg-gray-50'
+                                    presetLocked(p) ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+                                    : preset === p.key ? 'bg-[#7E22CE] text-white border-[#7E22CE] shadow-sm' : 'bg-white text-[#374151] border-gray-200 hover:bg-gray-50'
                                 }`}
                             >
-                                {p.label}
+                                {p.label}{presetLocked(p) ? ' 🔒' : ''}
                             </button>
                         ))}
                         <button
@@ -420,6 +450,18 @@ const BusinessReportModal = ({ isOpen, onClose, branchId }) => {
 
                 {/* Scrollable body */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                    {!canReport && (
+                        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 text-[14px] text-amber-800" data-testid="report-locked">
+                            Revenue reports aren&apos;t included in {tenant?.planName || 'your current plan'}.{' '}
+                            <a href="/admin/subscription" className="font-[700] underline">View plans</a>
+                        </div>
+                    )}
+                    {canReport && basicOnly && (
+                        <p className="text-[12px] text-gray-500" data-testid="report-basic-note">
+                            Your plan includes reports of up to {BASIC_REPORT_MAX_DAYS} days at a time and no forecast.{' '}
+                            <a href="/admin/subscription" className="font-[700] text-[#7E22CE] underline">Upgrade</a> for full history and forecasting.
+                        </p>
+                    )}
                     {/* KPIs */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <Kpi label="Total Earnings" value={formatRupee(totals.earnings)} sub={trend ? `${pctLabel(trend.earningsChangePct)} vs prev` : null} />
@@ -523,6 +565,12 @@ const BusinessReportModal = ({ isOpen, onClose, branchId }) => {
                         so the owner reads "what happened" first, then "what's
                         coming next"). Transparent model: weekday-deseasonalised
                         trend, with a back-tested accuracy figure. */}
+                    {canReport && !basicOnly && !canForecast && (
+                        <div className="bg-white rounded-2xl border border-dashed border-[#EAECF0] p-5 text-[13px] text-gray-500" data-testid="forecast-locked">
+                            <span className="font-[700] text-[#111827]">Business Forecast</span> is part of Advanced analytics.{' '}
+                            <a href="/admin/subscription" className="font-[700] text-[#7E22CE] underline">Upgrade</a> to see projected earnings.
+                        </div>
+                    )}
                     {fc && (
                         <div className="bg-white rounded-2xl border border-[#EAECF0] p-5">
                             <div className="flex flex-wrap justify-between items-start gap-3 mb-4">

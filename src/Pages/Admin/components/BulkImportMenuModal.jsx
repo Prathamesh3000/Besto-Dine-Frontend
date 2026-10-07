@@ -53,6 +53,8 @@ const BulkImportMenuModal = ({ onClose, onComplete }) => {
                 onComplete?.()
             } else if (res.data?.errorCount > 0) {
                 toast.error('No items imported — see error list')
+            } else if (res.data?.skippedCount > 0) {
+                toast(`Nothing new — all ${res.data.skippedCount} rows already exist`, { icon: 'ℹ️' })
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Import failed')
@@ -141,6 +143,11 @@ const BulkImportMenuModal = ({ onClose, onComplete }) => {
                                 <span className="font-manrope font-bold text-[14px] text-[#1A181B]">
                                     {result.created} created
                                 </span>
+                                {result.skippedCount > 0 && (
+                                    <span className="ml-2 text-[13px] text-[#6B7280] font-manrope" title="Rows whose dish already exists in that category">
+                                        {result.skippedCount} skipped (already exist)
+                                    </span>
+                                )}
                                 {result.errorCount > 0 && (
                                     <span className="ml-2 inline-flex items-center gap-1 text-[13px] text-red-600 font-manrope">
                                         <AlertTriangle size={14} />

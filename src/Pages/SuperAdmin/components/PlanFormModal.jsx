@@ -34,6 +34,7 @@ const FEATURE_FIELDS = [
     { key: 'advanceBookingHall',  label: 'Advance Booking — Hall',     group: 'Advanced' },
     { key: 'walletLoyalty',       label: 'Wallet & Loyalty Points',    group: 'Advanced' },
     { key: 'couponPromotions',    label: 'Coupon & Promotion Engine',  group: 'Advanced' },
+    { key: 'campaigns',           label: 'WhatsApp / SMS Campaigns',   group: 'Advanced' },
     { key: 'inventory',           label: 'Inventory Management',       group: 'Advanced' },
     { key: 'crm',                 label: 'CRM (Customer Mgmt)',        group: 'Advanced' },
     { key: 'tipManagement',       label: 'Tip Management',             group: 'Advanced' },
@@ -42,7 +43,11 @@ const FEATURE_FIELDS = [
     { key: 'paymentGateway',      label: 'Payment Gateway (Razorpay)', group: 'Management' },
     { key: 'kiosk',               label: 'Self-Order Kiosk',           group: 'Management' },
     { key: 'dataExport',          label: 'Data Export (CSV)',          group: 'Technical' },
+    { key: 'accountingExport',    label: 'Tally / Accounting Export',  group: 'Technical' },
+    { key: 'aggregatorOrders',    label: 'Zomato / Swiggy Orders',     group: 'Technical' },
+    { key: 'eInvoice',            label: 'GST e-Invoice (IRN)',        group: 'Technical' },
     { key: 'webhooks',            label: 'Webhook Integrations',       group: 'Technical' },
+    { key: 'whiteLabelBranding',  label: 'Own Branding (white-label)', group: 'Technical' },
 ];
 
 const REVENUE_ANALYTICS_TIERS = [

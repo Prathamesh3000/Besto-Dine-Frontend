@@ -462,9 +462,26 @@ describe('role / permission / feature helpers', () => {
     ['plan "advanced"', 'kds', { features: { kds: 'advanced' } }, true],
     ['plan false', 'kds', { features: { kds: false } }, false],
     ['plan missing', 'kds', { features: {} }, false],
+    ['active paid add-on', 'kiosk', { features: { kiosk: false }, addons: ['kiosk'] }, true],
+    ['override false beats an add-on', 'kiosk', { features: {}, addons: ['kiosk'], featureOverrides: { kiosk: false } }, false],
+    ['tier "none" is off', 'revenueAnalytics', { features: { revenueAnalytics: 'none' } }, false],
   ])('hasFeature: %s', async (_l, key, tenant, expected) => {
     await as({ role: 'admin', ...(tenant ? { tenant } : {}) })
     expect(auth.hasFeature(key)).toBe(expected)
+  })
+
+  test('featureTier / hasTier resolve plan levels, add-ons and overrides', async () => {
+    await as({ role: 'admin', tenant: { features: { revenueAnalytics: 'standard', crm: true, kiosk: false } } })
+    expect(auth.featureTier('revenueAnalytics')).toBe('standard')
+    expect(auth.featureTier('crm')).toBe('advanced')
+    expect(auth.featureTier('kiosk')).toBe('none')
+    expect(auth.hasTier('revenueAnalytics', 'basic')).toBe(true)
+    expect(auth.hasTier('revenueAnalytics', 'advanced')).toBe(false)
+  })
+
+  test('featureTier: override true lifts a tiered module to the top level', async () => {
+    await as({ role: 'admin', tenant: { features: { revenueAnalytics: 'basic' }, featureOverrides: { revenueAnalytics: true } } })
+    expect(auth.hasTier('revenueAnalytics', 'advanced')).toBe(true)
   })
 
   test('superadmin bypasses feature gates; full level detected', async () => {

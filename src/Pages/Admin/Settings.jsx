@@ -9,6 +9,7 @@ import { toast } from 'react-hot-toast'
 import { SkeletonStatGrid, SkeletonRows } from '../../Components/Common/Skeleton'
 import { useAuth } from '../../Context/AuthContext'
 import LandingPageSettings from './components/LandingPageSettings'
+import PrinterSettings from './components/PrinterSettings'
 import ParkingSettingsCard from './components/ParkingSettingsCard'
 
 // First human-readable message from a failed settings save. The API
@@ -49,7 +50,7 @@ const Settings = () => {
     // Landing Page is tenant-level (one public page per restaurant at
     // /<slug>); branch-pinned admins see it read-only (the backend
     // refuses their saves with INHERITED_FROM_MAIN).
-    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page']
+    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers']
 
     // Loading state
     const [loading, setLoading] = useState(true)
@@ -133,6 +134,9 @@ const Settings = () => {
     // Landing Page tab — the saved `landingPage` section, handed to
     // LandingPageSettings as its initial value.
     const [landingPage, setLandingPage] = useState({})
+    // Thermal printers for this branch (Settings.printers) — see
+    // components/PrinterSettings.jsx; saved via PATCH /settings/printers.
+    const [printers, setPrinters] = useState({})
 
     const [walletConfig, setWalletConfig] = useState({
         enableWallet: true,
@@ -224,6 +228,7 @@ const Settings = () => {
             if (s.reservation) setReservationConfig(s.reservation)
             if (s.wallet) setWalletConfig(prev => ({ ...prev, ...s.wallet }))
             setLandingPage(s.landingPage || {})
+            setPrinters(s.printers || {})
         } catch (error) {
             console.error('Settings fetch error:', error)
         } finally {
@@ -625,7 +630,7 @@ const Settings = () => {
                 </div>
                 {/* The Landing Page tab saves on its own (PATCH /settings/landingPage);
                     "Save All" doesn't include it, so hide it there. */}
-                {activeTab !== 'Landing Page' && (
+                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && (
                 <button
                     disabled={isSaving}
                     onClick={() => {
@@ -1093,6 +1098,16 @@ const Settings = () => {
                     readOnly={isBranchPinned}
                     isSaving={isSaving}
                     onSave={(data) => saveSectionSettings('landingPage', data)}
+                />
+            )}
+
+            {/* Content - Printers Tab (per branch; saves on its own via
+                PATCH /settings/printers, so "Save All" skips it too) */}
+            {activeTab === 'Printers' && (
+                <PrinterSettings
+                    initial={printers}
+                    isSaving={isSaving}
+                    onSave={(data) => saveSectionSettings('printers', data)}
                 />
             )}
 

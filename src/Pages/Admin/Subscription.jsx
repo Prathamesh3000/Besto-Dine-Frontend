@@ -23,6 +23,7 @@ const FEATURE_LABELS = {
     advanceBookingHall:  { label: 'Hall / Event Bookings',   icon: null },
     walletLoyalty:       { label: 'Wallet & Loyalty',        icon: null },
     couponPromotions:    { label: 'Coupons & Promotions',    icon: null },
+    campaigns:           { label: 'WhatsApp / SMS Campaigns', icon: null },
     inventory:           { label: 'Inventory Management',    icon: null },
     crm:                 { label: 'Customer CRM',            icon: null },
     tipManagement:       { label: 'Tip Management',          icon: null },
@@ -32,6 +33,11 @@ const FEATURE_LABELS = {
     customBranding:      { label: 'Custom Branding',         icon: null },
     dataExport:          { label: 'Data Export',              icon: null },
     webhooks:            { label: 'Webhooks / Integrations', icon: null },
+    kiosk:               { label: 'Self-Order Kiosk',        icon: null },
+    accountingExport:    { label: 'Tally / Accounting Export', icon: null },
+    aggregatorOrders:    { label: 'Zomato / Swiggy Orders',  icon: null },
+    eInvoice:            { label: 'GST e-Invoice',           icon: null },
+    whiteLabelBranding:  { label: 'Own Branding',            icon: null },
     revenueAnalytics:    { label: 'Revenue Analytics',       icon: null },
 };
 
@@ -478,17 +484,25 @@ const SubscriptionInner = () => {
     const status = BILLING_STATUS[statusKey] || BILLING_STATUS.active;
     const trial = sub.status === 'trial' ? trialInfo(sub.trialEndDate) : null;
 
+    // Paid add-ons currently in force (modules bought on top of the plan).
+    const activeAddons = useMemo(() => current?.addons || [], [current]);
+
     const currentFeatures = useMemo(() => {
         if (!sub.features) return [];
+        const addonKeys = new Set(activeAddons.map(a => a.key));
         return Object.entries(sub.features)
-            .map(([key, val]) => ({
-                key,
-                enabled: val === true || (typeof val === 'string' && val !== 'none'),
-                value: val,
-                ...(FEATURE_LABELS[key] || { label: key.replace(/([A-Z])/g, ' $1').trim() }),
-            }))
+            .map(([key, val]) => {
+                const inPlan = val === true || (typeof val === 'string' && val !== 'none');
+                return {
+                    key,
+                    enabled: inPlan || addonKeys.has(key),
+                    viaAddon: !inPlan && addonKeys.has(key),
+                    value: val,
+                    ...(FEATURE_LABELS[key] || { label: key.replace(/([A-Z])/g, ' $1').trim() }),
+                };
+            })
             .sort((a, b) => (b.enabled ? 1 : 0) - (a.enabled ? 1 : 0));
-    }, [sub.features]);
+    }, [sub.features, activeAddons]);
 
     const currentLimits = useMemo(() => {
         if (!sub.limits) return [];
@@ -686,7 +700,7 @@ const SubscriptionInner = () => {
                         <div className="mt-5">
                             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5">Your Features</p>
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1.5">
-                                {currentFeatures.map(({ key, enabled, value, label }) => (
+                                {currentFeatures.map(({ key, enabled, viaAddon, value, label }) => (
                                     <div key={key} className="flex items-center gap-2 py-1">
                                         {enabled ? (
                                             <Check size={14} className="text-emerald-500 shrink-0" />
@@ -698,10 +712,28 @@ const SubscriptionInner = () => {
                                             {typeof value === 'string' && value !== 'none' && value !== 'true' && (
                                                 <span className="ml-1 text-[10px] font-semibold text-[#FE8301] uppercase">({value})</span>
                                             )}
+                                            {viaAddon && (
+                                                <span className="ml-1 text-[10px] font-semibold text-[#FE8301] uppercase">(add-on)</span>
+                                            )}
                                         </span>
                                     </div>
                                 ))}
                             </div>
+                        </div>
+                    )}
+
+                    {/* Paid add-ons — single modules bought on top of the plan. */}
+                    {activeAddons.length > 0 && (
+                        <div className="mt-5" data-testid="tenant-addons">
+                            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5">Your Add-ons</p>
+                            <ul className="flex flex-wrap gap-2">
+                                {activeAddons.map(a => (
+                                    <li key={a._id || a.key} className="inline-flex items-center gap-2 rounded-lg border border-orange-100 bg-orange-50/50 px-3 py-1.5 text-xs">
+                                        <span className="font-semibold text-slate-700">{FEATURE_LABELS[a.key]?.label || a.key}</span>
+                                        <span className="text-slate-500">₹{a.price || 0}/mo{a.endDate ? ` · until ${fmtDate(a.endDate)}` : ''}</span>
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
                     )}
                 </div>

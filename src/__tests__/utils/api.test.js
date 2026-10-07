@@ -428,7 +428,7 @@ describe('response interceptor — errors and toasts', () => {
     const { default: api } = await loadApi()
     on('get', '/inventory', (c) => reply(c, 403, { code: 'FEATURE_LOCKED', feature: 'inventory', currentPlan: 'basic', message: 'nope' }))
     await expect(api.get('/inventory', { _skipAdminBranchParam: true })).rejects.toBeTruthy()
-    expect(upgradeSpy).toHaveBeenCalledWith({ feature: 'inventory', currentPlan: 'basic', message: 'nope' })
+    expect(upgradeSpy).toHaveBeenCalledWith({ feature: 'inventory', currentPlan: 'basic', message: 'nope', requiredTier: undefined, role })
     expect(toastError).not.toHaveBeenCalled()
   })
 
@@ -462,8 +462,17 @@ describe('response interceptor — errors and toasts', () => {
     const { default: api } = await loadApi()
     on('get', url, (c) => reply(c, 403, { code: 'FEATURE_LOCKED', feature, currentPlan: 'basic', message: 'Upgrade required' }))
     await expect(api.get(url, { _skipAdminBranchParam: true })).rejects.toBeTruthy()
-    expect(upgradeSpy).toHaveBeenCalledWith({ feature, currentPlan: 'basic', message: 'Upgrade required' })
+    expect(upgradeSpy).toHaveBeenCalledWith({ feature, currentPlan: 'basic', message: 'Upgrade required', requiredTier: undefined, role: 'admin' })
     expect(toastError).not.toHaveBeenCalled()
+  })
+
+  test('tier-locked FEATURE_LOCKED passes the required level to the upgrade prompt', async () => {
+    localStorage.setItem('staff_user', JSON.stringify({ role: 'admin' }))
+    go('/admin/dashboard')
+    const { default: api } = await loadApi()
+    on('get', '/telemetry/forecast', (c) => reply(c, 403, { code: 'FEATURE_LOCKED', feature: 'revenueAnalytics', requiredTier: 'advanced', currentPlan: 'Gold', message: 'x' }))
+    await expect(api.get('/telemetry/forecast', { _skipAdminBranchParam: true })).rejects.toBeTruthy()
+    expect(upgradeSpy).toHaveBeenCalledWith(expect.objectContaining({ feature: 'revenueAnalytics', requiredTier: 'advanced', role: 'admin' }))
   })
 
   test('TENANT_REQUIRED off a recovery page clears the stale tenant (takeaway → branch picker)', async () => {

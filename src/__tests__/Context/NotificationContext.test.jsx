@@ -328,6 +328,71 @@ describe('interactive bits', () => {
     expect(loc.state).toEqual({ orderId: 'O1', orderDisplayId: 'O1', amount: 420.4, tableName: '5', fromCounterRequest: true })
   })
 
+  // Regression (QA 2026-10): an admin who settled a customer's cash
+  // request from the popup was dropped into the waiter app (/waiter/payment
+  // → waiter dashboard). Admins and managers now open the table's drawer
+  // in their own Tables screen, which has the one-tap "Mark Paid · Cash".
+  test.each(['admin', 'manager'])('the counter-payment Settle button keeps a %s in the admin app (/admin/tables, table drawer)', async (role) => {
+    const { render, screen, fireEvent } = await import('@testing-library/react')
+    const { Routes, Route, useLocation } = await import('react-router-dom')
+    as(role)
+    setActiveTenant({ slug: 'spice' })
+    let loc
+    function Spy() { loc = useLocation(); return null }
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <NotificationProvider><Routes><Route path="*" element={<Spy />} /></Routes></NotificationProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    act(() => h.socket.serverEmit('counter-payment:requested', { table: 'Table 5', tableId: 'tbl-5', amount: 420, orderId: 'O1' }))
+    const renderToast = toast.custom.mock.calls[0][0]
+    render(<>{renderToast({ id: 't1', visible: true })}</>)
+    fireEvent.click(screen.getByText('Settle Cash for Table 5'))
+    expect(loc.pathname).toBe('/admin/tables')
+    expect(loc.state).toEqual({ highlightTable: 'tbl-5' })
+  })
+
+  test('without a tableId (older backend) the admin is sent to the table by name', async () => {
+    const { render, screen, fireEvent } = await import('@testing-library/react')
+    const { Routes, Route, useLocation } = await import('react-router-dom')
+    as('admin')
+    setActiveTenant({ slug: 'spice' })
+    let loc
+    function Spy() { loc = useLocation(); return null }
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <NotificationProvider><Routes><Route path="*" element={<Spy />} /></Routes></NotificationProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    act(() => h.socket.serverEmit('counter-payment:requested', { table: 'Table 5', amount: 420, orderId: 'O1' }))
+    const renderToast = toast.custom.mock.calls[0][0]
+    render(<>{renderToast({ id: 't1', visible: true })}</>)
+    fireEvent.click(screen.getByText('Settle Cash for Table 5'))
+    expect(loc.pathname).toBe('/admin/tables')
+    expect(loc.state).toEqual({ highlightTable: '5' })
+  })
+
+  test('once the order is paid, the sticky cash popup is dismissed on every staff screen', async () => {
+    const { render } = await import('@testing-library/react')
+    as('admin')
+    setActiveTenant({ slug: 'spice' })
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <NotificationProvider><div /></NotificationProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+    act(() => h.socket.serverEmit('order:updated', { orderId: 'O1', status: 'served', paymentStatus: 'Pending' }))
+    expect(toast.dismiss).not.toHaveBeenCalledWith('counter-payment-O1')
+    act(() => h.socket.serverEmit('order:updated', { orderId: 'O1', status: 'served', paymentStatus: 'Paid' }))
+    expect(toast.dismiss).toHaveBeenCalledWith('counter-payment-O1')
+  })
+
   test.each(['chef', 'waiter', 'customer', 'admin', 'superadmin'])('after a user interaction, a new notification plays the %s sound (throttled)', async (role) => {
     const osc = { type: '', frequency: { setValueAtTime: vi.fn() }, connect: vi.fn(), start: vi.fn(), stop: vi.fn() }
     const gain = { gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() }, connect: vi.fn() }

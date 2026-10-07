@@ -13,7 +13,7 @@ import {
   statusColors, statusTextColors, hoverShadows, statusBadgeStyle,
   drawerHeaderBg, drawerTitleColor, statusLabel, LEGEND_ITEMS, InitialsAvatar
 } from './utils/tableStyles.jsx'
-import api from '../../utils/api'
+import api, { printAPI } from '../../utils/api'
 import useSocketEvent from '../../hooks/useSocketEvent'
 import toast from 'react-hot-toast'
 import { billFromOrders, orderAmountDue, settleAmountForOrders, toTaxConfig } from '../../utils/billing'
@@ -422,6 +422,30 @@ const TablesDashboard = () => {
     fetchTableOrderData()
   }, [selectedTable?._id, selectedTable?.id, selectedTable?.status, drawerRefreshKey])
 
+  // The open drawer's table was freed by someone else (customer paid
+  // online / from the wallet, a waiter settled it, the last order was
+  // cancelled). The drawer content already follows the live status, but
+  // the Edit Bill / payment views take precedence over it — leave them so
+  // the admin isn't left settling a bill that no longer exists. Our own
+  // settle shows the success screen instead (isPaymentSuccess).
+  const lastDrawerStatusRef = useRef({ id: null, status: null })
+  useEffect(() => {
+    const id = selectedTable?._id ? String(selectedTable._id) : null
+    const status = selectedTable?.underlyingStatus || selectedTable?.status || null
+    const prev = lastDrawerStatusRef.current
+    lastDrawerStatusRef.current = { id, status }
+    if (!id || prev.id !== id) return
+    const wasSeated = prev.status === 'occupied' || prev.status === 'merged'
+    if (!wasSeated || status !== 'free') return
+    if (isPaymentSuccess || isSettlingPayment) return
+    if (isPaymentView || isEditingBill) {
+      setIsPaymentView(false)
+      setIsEditingBill(false)
+      setSelectedPaymentMethod(null)
+      toast.success('Bill settled — table is now free')
+    }
+  }, [selectedTable, isPaymentSuccess, isSettlingPayment, isPaymentView, isEditingBill])
+
   // Live-sync the drawer when an `order:updated` fires for THIS table's
   // active order — covers coupons applied from the waiter bill, items
   // appended by another staff, payments landing via Razorpay webhooks,
@@ -601,6 +625,28 @@ const TablesDashboard = () => {
     }
   }
 
+  // One-click bill on the branch's counter thermal printer (Settings →
+  // Printers). The browser print path (bill receipt page) stays as the
+  // fallback for branches without a printer / agent.
+  const [billPrinting, setBillPrinting] = useState(false)
+  const handlePrintBill = async () => {
+    if (!activeOrderMeta?._id || billPrinting) return
+    setBillPrinting(true)
+    try {
+      const res = await printAPI.printBill(activeOrderMeta._id)
+      toast.success(res.data?.message || 'Bill sent to the counter printer')
+    } catch (err) {
+      const code = err.response?.data?.code
+      if (code === 'NO_COUNTER_PRINTER' || code === 'PRINTING_DISABLED') {
+        toast.error(`${err.response.data.message} Add one under Settings → Printers.`)
+      } else {
+        toast.error(err.response?.data?.message || 'Could not print the bill')
+      }
+    } finally {
+      setBillPrinting(false)
+    }
+  }
+
   const handleReprintKOT = async () => {
     if (!activeOrderMeta?._id || kotSubmitting) return
     setKotSubmitting(true)
@@ -710,8 +756,10 @@ const TablesDashboard = () => {
   // the server never saw the payment, the order stayed Pending, and a
   // merged group stayed merged forever. Now we PATCH
   // /orders/:id/status with paymentStatus: 'Paid', which on the backend:
-  //   1. promotes a still-preparing order to 'served' (bill-paid = done),
-  //   2. frees the table, and
+  //   1. promotes a preparing/ready order to 'served' (a 'new' order
+  //      stays on the KDS until cooked),
+  //   2. frees the table at once once every order on it is paid
+  //      (kitchen status doesn't matter), and
   //   3. unmerges the group (see freeTableOrUnmergeGroup in
   //      Backend/utils/tableMerge.js) so every sibling goes back to 'free'.
   // Frontend then just refetches the grid and shows the success screen.
@@ -1438,6 +1486,15 @@ const TablesDashboard = () => {
             >
               {kotSubmitting && <Loader2 size={16} className="animate-spin" />}
               {kotSubmitting ? 'Sending…' : 'KOT'}
+            </button>
+            <button
+              onClick={handlePrintBill}
+              disabled={!activeOrderMeta?._id || billPrinting}
+              title={activeOrderMeta?._id ? 'Print the bill on the counter thermal printer' : 'No active order on this table'}
+              className="w-full py-2.5 border border-[#702083] text-[#702083] rounded-[10px] font-[600] text-[14px] font-manrope hover:bg-[#F7EEF9] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {billPrinting && <Loader2 size={16} className="animate-spin" />}
+              {billPrinting ? 'Printing…' : 'Print bill'}
             </button>
             {/* Close bill & free — for the abandoned-table case: the
                 previous guest left without settling. Writes off the open

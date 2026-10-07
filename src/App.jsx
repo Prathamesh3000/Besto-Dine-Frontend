@@ -8,7 +8,10 @@ import { HealthProvider } from './Context/Loggedin/HealthContext';
 import { MenuProvider, useMenu } from './Context/MenuContext';
 import { NotificationProvider } from './Context/NotificationContext';
 import ProtectedRoute from './Components/ProtectedRoute';
+import RequireFeature from './Components/RequireFeature';
 import { STAFF_ROLES, CAPTAIN_ROLES, CUSTOMER_ROLES, ADMIN_ROLES, CHEF_ROLES, SUPERADMIN_ROLES } from './Context/AuthContext';
+// Roles the waiterDashboard plan gate applies to (admins also use /waiter/*).
+const WAITER_APP_ROLES = ['waiter', 'captain'];
 import { Toaster } from 'react-hot-toast';
 import { UpgradePromptHost } from './Components/Common/UpgradePrompt';
 import { isServerDown, subscribeServerStatus, isOffline, subscribeOnlineStatus } from './utils/serverStatus';
@@ -369,29 +372,32 @@ function App() {
                 <Route path="/unauthorized" element={<Unauthorized />} />
 
                 {/* ── Waiter Routes (waiter + captain + admin) ───────────── */}
+                {/* Plan gate: the waiter / captain app is the
+                    `waiterDashboard` module (backend: staffAppGate).
+                    Admins using these screens aren't affected. */}
                 {/* Shared (Waiter & Captain) */}
                 <Route path="/waiter/home"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><WaiterHomePage /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><WaiterHomePage /></RequireFeature></ProtectedRoute>} />
                 {/* Captain Floor Overview — head-waiter command screen
                     (view all tables/sessions, waiter workload, delayed
                     orders, assign/reassign waiters, escalate to admin).
                     Captain-only (CAPTAIN_ROLES blocks plain waiters). */}
                 <Route path="/waiter/floor"
-                  element={<ProtectedRoute requiredRole={CAPTAIN_ROLES}><CaptainFloor /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={CAPTAIN_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><CaptainFloor /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/requests"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><CustomerRequests /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><CustomerRequests /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/orders"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><WaiterOrders /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><WaiterOrders /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/tips"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><TipHistory /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><TipHistory /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/profile"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><WaiterProfile /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><WaiterProfile /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/order-history"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><OrderHistory /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><OrderHistory /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/shift-status"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><ShiftStatus /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><ShiftStatus /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/notifications"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><WaiterNotifications /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><WaiterNotifications /></RequireFeature></ProtectedRoute>} />
 
                 {/* Waiter workflow — drill into a table, browse the menu,
                     edit the cart. Open to every staff role (waiter +
@@ -399,13 +405,13 @@ function App() {
                     used to dead-end here for waiters because these were
                     gated to CAPTAIN_ROLES. */}
                 <Route path="/waiter/details"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><TableDetails /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><TableDetails /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/menu"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><Menu /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><Menu /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/category/:id"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><Home /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><Home /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/cart"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><CartPage /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><CartPage /></RequireFeature></ProtectedRoute>} />
 
                 {/* Billing + payment collection. Opened to STAFF_ROLES
                     (waiter + captain + admin + manager) so the waiter who
@@ -416,25 +422,26 @@ function App() {
                     authorization remains captain/admin-only (gated
                     separately by permission, not this route). */}
                 <Route path="/waiter/bill"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><BillPage /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><BillPage /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/payment"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><PaymentOption amount={879} tableNo="no.4" /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><PaymentOption amount={879} tableNo="no.4" /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/qr-payment"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><QRPayment amount={879} tableNo="no.4" /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><QRPayment amount={879} tableNo="no.4" /></RequireFeature></ProtectedRoute>} />
 
                 {/* ── Chef Routes ─────────────────────────────────────────── */}
+                {/* Plan gate: the chef app is the `kitchenDisplay` module. */}
                 <Route path="/chef/dashboard"
-                  element={<ProtectedRoute requiredRole={CHEF_ROLES}><ChefDashboard /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={CHEF_ROLES}><RequireFeature feature="kitchenDisplay"><ChefDashboard /></RequireFeature></ProtectedRoute>} />
                 {/* Recipe building — visible only when the chef has the
                     `manageRecipe` permission (link surfaced in the KDS header
                     + enforced by the recipeAccess guard on the backend). */}
                 <Route path="/chef/recipes"
-                  element={<ProtectedRoute requiredRole={CHEF_ROLES}><ChefRecipes /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={CHEF_ROLES}><RequireFeature feature="kitchenDisplay"><ChefRecipes /></RequireFeature></ProtectedRoute>} />
                 {/* Stock view + adjust — visible only when the chef has the
                     `manageStock` permission (link surfaced in the KDS header
                     + enforced by the stockAccess guard on the backend). */}
                 <Route path="/chef/stock"
-                  element={<ProtectedRoute requiredRole={CHEF_ROLES}><ChefStock /></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={CHEF_ROLES}><RequireFeature feature="kitchenDisplay"><ChefStock /></RequireFeature></ProtectedRoute>} />
 
                 {/* ── Super Admin Portal (platform operators) ──────────── */}
                 <Route
@@ -473,14 +480,14 @@ function App() {
                   {/* Legacy redirect — /admin/refunds → Payments page,
                       Refunds section pre-selected via ?section=refunds. */}
                   <Route path="refunds" element={<Navigate to="/admin/payments?section=refunds" replace />} />
-                  <Route path="wallet" element={<WalletDashboard />} />
-                  <Route path="offers" element={<Offers />} />
-                  <Route path="offers/redemption" element={<OfferRedemption />} />
-                  <Route path="offers/performance" element={<OfferPerformance />} />
+                  <Route path="wallet" element={<RequireFeature feature="walletLoyalty"><WalletDashboard /></RequireFeature>} />
+                  <Route path="offers" element={<RequireFeature feature="couponPromotions"><Offers /></RequireFeature>} />
+                  <Route path="offers/redemption" element={<RequireFeature feature="couponPromotions"><OfferRedemption /></RequireFeature>} />
+                  <Route path="offers/performance" element={<RequireFeature feature="couponPromotions"><OfferPerformance /></RequireFeature>} />
                   <Route path="staff" element={<StaffDashboard />} />
-                  <Route path="crm" element={<CRMDashboard />} />
-                  <Route path="inventory" element={<Inventory />} />
-                  <Route path="bookings" element={<Bookings />} />
+                  <Route path="crm" element={<RequireFeature feature="crm"><CRMDashboard /></RequireFeature>} />
+                  <Route path="inventory" element={<RequireFeature feature="inventory"><Inventory /></RequireFeature>} />
+                  <Route path="bookings" element={<RequireFeature feature="advanceBookingTable"><Bookings /></RequireFeature>} />
                   <Route path="settings" element={<Settings />} />
                   {/* Phase 5 step 4 — tenant self-service billing page.
                       Protected by adminOnly on the backend; the sidebar
@@ -488,7 +495,7 @@ function App() {
                   <Route path="subscription" element={<Subscription />} />
                   {/* Phase 6 step 1 — branch CRUD. Backend gates by
                       adminOnly + featureGate('multiBranch'). */}
-                  <Route path="branches" element={<Branches />} />
+                  <Route path="branches" element={<RequireFeature feature="multiBranch"><Branches /></RequireFeature>} />
                 </Route>
 
                 {/* ── Kiosk Self-Order Flow (standalone, no layout, no auth) ── */}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Lock, Mail } from 'lucide-react';
 import { subscribeUpgradePrompt } from '../../utils/upgradePromptBus';
-import { FEATURE_LABELS } from '../../utils/featureLabels';
+import { FEATURE_LABELS, TIER_LABELS } from '../../utils/featureLabels';
 
 /**
  * UpgradePrompt — modal shown when a staff user hits a FEATURE_LOCKED
@@ -49,7 +49,12 @@ export function UpgradePromptHost() {
 
     if (!state) return null;
 
-    const featureLabel = FEATURE_LABELS[state.feature] || state.feature || 'this feature';
+    const baseLabel = FEATURE_LABELS[state.feature] || state.feature || 'this feature';
+    // Tiered modules (revenue analytics) name the level that's missing.
+    const featureLabel = state.requiredTier
+        ? `${baseLabel} (${TIER_LABELS[state.requiredTier] || state.requiredTier})`
+        : baseLabel;
+    const isOwner = state.role === 'admin';
     const currentPlan  = state.currentPlan || 'your current plan';
     const supportEmail = 'upgrade@bestodine.com';
     const mailtoHref =
@@ -102,6 +107,15 @@ export function UpgradePromptHost() {
                         Contact our team and we'll help you pick the right plan for your restaurant.
                     </p>
                 </div>
+
+                {isOwner && (
+                    <a
+                        href="/admin/subscription"
+                        className="block w-full mb-3 py-2.5 px-4 rounded-xl border border-orange-200 text-orange-600 hover:bg-orange-50 font-semibold text-sm text-center transition"
+                    >
+                        View plans &amp; add-ons
+                    </a>
+                )}
 
                 <div className="flex gap-3">
                     <button

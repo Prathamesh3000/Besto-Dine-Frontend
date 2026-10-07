@@ -590,6 +590,8 @@ api.interceptors.response.use(
                     feature: error.response.data.feature,
                     currentPlan: error.response.data.currentPlan,
                     message: error.response.data.message,
+                    requiredTier: error.response.data.requiredTier,
+                    role: userRole,
                 });
                 return Promise.reject(error);
             }
@@ -742,6 +744,17 @@ export const settingsAPI = {
     updateSection: (section, data) => api.patch(`/settings/${section}`, data),
 };
 
+// Thermal printing (Backend/routes/printRoute.js). Printer rows themselves
+// are saved through settingsAPI.updateSection('printers', …).
+export const printAPI = {
+    agentKey:       ()          => api.post('/print/agent-key'),
+    revokeAgentKey: ()          => api.delete('/print/agent-key'),
+    agentStatus:    (opts = {}) => api.get('/print/agent-status', opts),
+    jobs:           (limit = 20) => api.get('/print/jobs', { params: { limit } }),
+    test:           (printerId) => api.post('/print/test', { printerId }),
+    printBill:      (orderId, opts = {}) => api.post(`/print/orders/${orderId}/bill`, opts),
+};
+
 export const inventoryAPI = {
     getAll:          (params) => api.get('/inventory', { params }),
     getSummary:      (params) => api.get('/inventory/summary', { params }),
@@ -754,7 +767,10 @@ export const inventoryAPI = {
     delete:          (id)     => api.delete(`/inventory/${id}`),
     // Recipe management
     getRecipes:          ()             => api.get('/inventory/recipes'),
-    getRecipe:           (menuItemId)   => api.get(`/inventory/recipes/${menuItemId}`),
+    // 404 = "no recipe yet" — RecipeModal / AddMenuItemModal probe this to
+    // decide between edit and create, so the global error toast must not
+    // fire ("No recipe found for this menu item" is not an error there).
+    getRecipe:           (menuItemId)   => api.get(`/inventory/recipes/${menuItemId}`, { _silent: true }),
     saveRecipe:          (data)         => api.post('/inventory/recipes', data),
     deleteRecipe:        (menuItemId)   => api.delete(`/inventory/recipes/${menuItemId}`),
     // Analytics

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { toast } from 'react-hot-toast'
 import NotificationModal from './components/NotificationModal'
 import { useNotifications } from '../../Context/NotificationContext'
 import { useAuth } from '../../Context/AuthContext'
@@ -10,6 +9,7 @@ import { settingsAPI } from '../../utils/api'
 import { resolveImageUrl } from '../../utils/image'
 import { getSocket } from '../../utils/socket'
 import { useAdminPrefetch } from '../../hooks/queries/useAdminPrefetch'
+import { openUpgradePrompt } from '../../utils/upgradePromptBus'
 
 
 // Small inline component for the read-only banner's exit action. It
@@ -348,18 +348,19 @@ const AdminLayoutInner = () => {
           <ul className="flex items-center justify-start md:justify-center min-w-max mx-auto border-b border-gray-100">
             {navItems.map((item) => {
               // Locked features stay visible but cannot be navigated to —
-              // clicking shows an upgrade toast that surfaces the current
-              // plan name. The matching backend route returns 403 with
+              // clicking opens the upgrade prompt that names the module and
+              // the current plan. The matching backend route returns 403 with
               // FEATURE_LOCKED, so this is purely a UX shortcut.
               if (item.locked) {
                 return (
                   <li key={item.name}>
                     <button
                       type="button"
-                      onClick={() => toast(
-                        `Upgrade your plan to unlock ${item.name}.${tenant?.planName ? ` Current plan: ${tenant.planName}.` : ''}`,
-                        { icon: '🔒' }
-                      )}
+                      onClick={() => openUpgradePrompt({
+                        feature: item.feature,
+                        currentPlan: tenant?.planName,
+                        role: user?.role,
+                      })}
                       className="flex items-center justify-center gap-2 h-[44px] px-6 text-[14px] leading-[20px] font-[600] tracking-normal font-manrope font-semibold transition-all relative whitespace-nowrap w-full group cursor-not-allowed text-gray-400 hover:text-gray-500 hover:bg-gray-50"
                     >
                       <i className={`${item.icon} text-[20px]`}></i>

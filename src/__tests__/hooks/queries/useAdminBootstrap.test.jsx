@@ -18,7 +18,7 @@ vi.mock('@/utils/socket', async () => {
 })
 vi.mock('@/Context/AdminBranchContext', () => ({ useAdminBranch: () => h.branch }))
 
-import { useAdminBootstrap } from '@/hooks/queries/useAdminBootstrap'
+import { useAdminBootstrap, patchTableStatus } from '@/hooks/queries/useAdminBootstrap'
 import { adminKeys } from '@/hooks/queries/queryKeys'
 
 let client
@@ -103,5 +103,70 @@ describe('useAdminBootstrap', () => {
     }
     unmount()
     expect(h.socket.totalListeners()).toBe(0)
+  })
+})
+
+// Table-status timing (2026-10): `table:updated` { tableId, status } flips
+// the cached grid status at once (before the refetch lands).
+describe('patchTableStatus', () => {
+  const tables = [
+    { _id: 't1', status: 'occupied', activeOrder: 'o1', mergedWith: [] },
+    { _id: 't2', status: 'merged', activeOrder: null, mergedWith: ['t3'] },
+    { _id: 't3', status: 'merged', activeOrder: 'o2', mergedWith: ['t2'] },
+    { _id: 't4', status: 'free' },
+    { _id: 't5', status: 'disabled' },
+  ]
+
+  test('free → status free, merge link and activeOrder cleared; other rows untouched (same refs)', () => {
+    const out = patchTableStatus(tables, { tableId: 't1', status: 'free' })
+    expect(out[0]).toEqual({ _id: 't1', status: 'free', activeOrder: null, mergedWith: [] })
+    expect(out.slice(1).every((t, i) => t === tables[i + 1])).toBe(true)
+  })
+
+  test('a merged member freed with its group', () => {
+    const out = patchTableStatus(tables, { tableId: 't3', status: 'free' })
+    expect(out[2]).toMatchObject({ status: 'free', mergedWith: [], activeOrder: null })
+  })
+
+  test('scan → occupied on a free table; a merged or disabled table keeps its status', () => {
+    expect(patchTableStatus(tables, { tableId: 't4', status: 'occupied' })[3].status).toBe('occupied')
+    expect(patchTableStatus(tables, { tableId: 't2', status: 'occupied' })).toBe(tables)
+    expect(patchTableStatus(tables, { tableId: 't5', status: 'free' })).toBe(tables)
+  })
+
+  test('no-ops return the same array: unknown id, same status, other statuses, bad input', () => {
+    expect(patchTableStatus(tables, { tableId: 'nope', status: 'free' })).toBe(tables)
+    expect(patchTableStatus(tables, { tableId: 't4', status: 'free' })).toBe(tables)
+    expect(patchTableStatus(tables, { tableId: 't4', status: 'reserved' })).toBe(tables)
+    expect(patchTableStatus(tables, {})).toBe(tables)
+    expect(patchTableStatus(undefined, { tableId: 't1', status: 'free' })).toBeUndefined()
+  })
+
+  test('ObjectId-like ids compare as strings', () => {
+    const out = patchTableStatus([{ _id: { toString: () => 'abc' }, status: 'occupied' }], { tableId: 'abc', status: 'free' })
+    expect(out[0].status).toBe('free')
+  })
+})
+
+describe('useAdminBootstrap — table:updated patches the cache before the refetch', () => {
+  test('the cached bootstrap tables flip to free at once and the slice is invalidated', async () => {
+    api.get.mockResolvedValue({ data: { data: { tables: [{ _id: 't1', status: 'occupied', mergedWith: [] }] } } })
+    const { result } = run()
+    await done(result)
+    // Hold the refetch so the patched value is observable.
+    api.get.mockImplementation(() => new Promise(() => {}))
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    act(() => h.socket.serverEmit('table:updated', { tableId: 't1', status: 'free' }))
+    expect(client.getQueryData([...adminKeys.bootstrap, 'all']).tables[0].status).toBe('free')
+    expect(client.getQueryData(adminKeys.tables)[0].status).toBe('free')
+    expect(spy.mock.calls.map((c) => c[0].queryKey)).toEqual([adminKeys.tables, adminKeys.bootstrap])
+  })
+
+  test('table:updated refetches the ACTIVE bootstrap query (key matches adminScope())', async () => {
+    const { result } = run()
+    await done(result)
+    expect(api.get).toHaveBeenCalledTimes(1)
+    act(() => h.socket.serverEmit('table:updated', { tableId: 'x', status: 'free' }))
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
   })
 })

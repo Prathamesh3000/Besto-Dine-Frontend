@@ -584,34 +584,47 @@ export function AuthProvider({ children }) {
         return user?.permissions?.[key] === true;
     };
 
-    /** Returns true if the user's tenant subscription includes the named
-     *  feature. Mirrors the backend `featureGate(key)` resolution rules:
+    /** The tenant's level for a module: 'none' | 'basic' | 'standard' |
+     *  'advanced' (boolean modules resolve to 'advanced' when on).
+     *  Mirrors the backend utils/featureAccess resolution rules:
      *
-     *    1. featureOverrides[key] === false  →  blocked (Super Admin revoked)
-     *    2. featureOverrides[key] === true   →  allowed (Super Admin granted)
-     *    3. tenant.features[key] is true / 'advanced' / 'standard' / 'basic' → allowed
-     *    4. No tenant on user (legacy single-tenant)  →  allowed
-     *
-     *  Use this in admin sidebars / page guards to drive lock badges and
-     *  upgrade prompts BEFORE the user clicks into a 403 response.
+     *    1. featureOverrides[key] === false  →  'none'  (Super Admin revoked)
+     *    2. featureOverrides[key] === true   →  on      (Super Admin granted)
+     *    3. an active paid add-on for key    →  on      (tenant.addons)
+     *    4. tenant.features[key]             →  plan value (the backend
+     *       already folds add-ons and legacy fallbacks into this map)
+     *    5. No tenant on user (legacy single-tenant)  →  on
      */
-    const hasFeature = (key) => {
-        if (!key) return true;
+    const featureTier = (key) => {
+        if (!key) return 'advanced';
         // Super admins are above the tenant boundary — they see everything.
-        if (user?.role === 'superadmin') return true;
+        if (user?.role === 'superadmin') return 'advanced';
         // Legacy / single-tenant deployments — no tenant snapshot present.
         const tenant = user?.tenant;
-        if (!tenant) return true;
+        if (!tenant) return 'advanced';
 
         const overrides = tenant.featureOverrides || {};
-        if (overrides[key] === false) return false;
-        if (overrides[key] === true) return true;
+        if (overrides[key] === false) return 'none';
+        if (overrides[key] === true) return 'advanced';
+        if (Array.isArray(tenant.addons) && tenant.addons.includes(key)) return 'advanced';
 
         const value = tenant.features?.[key];
-        return value === true
-            || value === 'advanced'
-            || value === 'standard'
-            || value === 'basic';
+        if (value === true) return 'advanced';
+        if (value === 'basic' || value === 'standard' || value === 'advanced') return value;
+        return 'none';
+    };
+
+    /** Returns true if the user's tenant subscription includes the named
+     *  feature. Use this in admin sidebars / page guards to drive lock
+     *  badges and upgrade prompts BEFORE the user clicks into a 403.
+     */
+    const hasFeature = (key) => featureTier(key) !== 'none';
+
+    /** True when the tenant's level for a tiered module is at least
+     *  `minTier` (e.g. hasTier('revenueAnalytics', 'advanced')). */
+    const hasTier = (key, minTier) => {
+        const rank = { none: 0, basic: 1, standard: 2, advanced: 3 };
+        return rank[featureTier(key)] >= (rank[minTier] ?? 1);
     };
 
     /** Returns the numeric limit (e.g. maxStaff, maxBranches) configured
@@ -659,6 +672,8 @@ export function AuthProvider({ children }) {
         hasRole,
         hasPermission,
         hasFeature,
+        featureTier,
+        hasTier,
         getLimit,
         tenant: user?.tenant ?? null,
         role: user?.role ?? null,
