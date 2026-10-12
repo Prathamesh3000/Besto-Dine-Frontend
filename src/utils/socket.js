@@ -5,7 +5,9 @@ import { configuredApiUrl } from './apiOrigin';
 // Derive the Socket.io server URL from the API URL (strip /api/v1 suffix).
 // configuredApiUrl swaps a localhost host for the page's LAN hostname
 // when opened from a phone (see utils/apiOrigin.js).
-const API_URL = configuredApiUrl('http://localhost:5000/api/v1');
+// Same resolution as utils/api.js: VITE_API_URL, else same-origin (the hosted
+// site proxies /api and /socket.io). No localhost literal reaches the bundle.
+const API_URL = configuredApiUrl('');
 const SOCKET_URL = API_URL.replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '');
 
 let socket = null;
