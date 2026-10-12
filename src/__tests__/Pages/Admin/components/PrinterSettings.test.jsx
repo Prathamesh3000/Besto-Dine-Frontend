@@ -3,8 +3,8 @@
  * and auto-print switches are saved through onSave (PATCH
  * /settings/printers); test pages and agent pairing hit /print/*.
  */
-import { describe, test, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 vi.mock('react-hot-toast', () => {
@@ -177,6 +177,107 @@ describe('PrinterSettings — test print and agent key', () => {
     await user.click(revoke)
     await waitFor(() => expect(printAPI.revokeAgentKey).toHaveBeenCalledTimes(1))
     expect(toast.success).toHaveBeenCalledWith('Agent key revoked')
+  })
+})
+
+describe('PrinterSettings — desktop app shell (window.bestodine)', () => {
+  const DESKTOP_STATUS = {
+    state: 'connected',
+    printers: [{ name: 'Kitchen', ok: true }, { name: 'Counter', ok: false }],
+    lastJobAt: '2026-10-09T10:30:00.000Z',
+    error: null,
+  }
+
+  function installBridge(overrides = {}) {
+    const listeners = new Set()
+    const unsubscribe = vi.fn()
+    const bridge = {
+      isDesktop: true,
+      version: '1.0.0',
+      deviceRole: 'counter',
+      serverUrl: 'https://bestodine.com',
+      printAgent: {
+        getStatus: vi.fn().mockResolvedValue(DESKTOP_STATUS),
+        onStatus: vi.fn((cb) => { listeners.add(cb); return unsubscribe }),
+      },
+      openSettings: vi.fn(),
+      openExternal: vi.fn(),
+      ...overrides,
+    }
+    Object.defineProperty(window, 'bestodine', { value: bridge, configurable: true, writable: true })
+    return { bridge, emit: (s) => listeners.forEach((cb) => cb(s)), unsubscribe }
+  }
+
+  afterEach(() => { delete window.bestodine })
+
+  test('in a browser: no desktop card, a one-line hint about the desktop app under the agent section', async () => {
+    setup()
+    expect(screen.queryByTestId('desktop-agent-card')).not.toBeInTheDocument()
+    expect(screen.getByTestId('desktop-hint')).toHaveTextContent(
+      'Running the counter PC app? The BestoDine desktop app includes this print agent — see INSTALLABLE_APPS_GUIDE.md',
+    )
+    // The existing server-side agent card is untouched.
+    await waitFor(() => expect(screen.getByTestId('agent-status')).toHaveTextContent('Agent online'))
+    expect(screen.getByRole('button', { name: /Generate new key/ })).toBeInTheDocument()
+  })
+
+  test('inside the shell: shows the card with state badge, printers, last job and the settings button; hint hidden', async () => {
+    const { bridge } = installBridge()
+    const { user } = setup()
+    const card = screen.getByTestId('desktop-agent-card')
+    expect(screen.queryByTestId('desktop-hint')).not.toBeInTheDocument()
+    expect(within(card).getByText('Desktop app print agent')).toBeInTheDocument()
+
+    await waitFor(() => expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Connected'))
+    const printers = within(card).getByTestId('desktop-agent-printers')
+    const rows = within(printers).getAllByRole('listitem')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('Kitchen')
+    expect(within(rows[0]).getByText('ok')).toBeInTheDocument()
+    expect(rows[1]).toHaveTextContent('Counter')
+    expect(within(rows[1]).getByText('not ok')).toBeInTheDocument()
+    expect(within(card).getByText(/Last job:/)).not.toHaveTextContent('—')
+    expect(within(card).queryByTestId('desktop-agent-error')).not.toBeInTheDocument()
+
+    await user.click(within(card).getByRole('button', { name: /Open desktop settings/ }))
+    expect(bridge.openSettings).toHaveBeenCalledTimes(1)
+
+    // The regular (server-side) agent card and key buttons are still there.
+    await waitFor(() => expect(screen.getByTestId('agent-status')).toHaveTextContent('Agent online'))
+    expect(screen.getByRole('button', { name: /Generate new key/ })).toBeInTheDocument()
+  })
+
+  test('live onStatus pushes update the badge and show the error text; unsubscribes on unmount', async () => {
+    const { emit, unsubscribe } = installBridge()
+    const { unmount } = render(<PrinterSettings initial={INITIAL} onSave={vi.fn()} />)
+    const card = screen.getByTestId('desktop-agent-card')
+    await waitFor(() => expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Connected'))
+
+    act(() => emit({ state: 'error', printers: [{ name: 'Kitchen', ok: false }], lastJobAt: null, error: 'connect ECONNREFUSED 192.168.1.50:9100' }))
+    expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Error')
+    expect(within(card).getByTestId('desktop-agent-error')).toHaveTextContent('ECONNREFUSED')
+    expect(within(card).getByText(/Last job:/)).toHaveTextContent('—')
+
+    act(() => emit({ state: 'revoked', printers: [], lastJobAt: null, error: 'Agent key was revoked. Generate a new key.' }))
+    expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Revoked')
+    expect(within(card).getByText(/No printers reported/)).toBeInTheDocument()
+
+    act(() => emit({ state: 'connecting', printers: [], lastJobAt: null, error: null }))
+    expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Connecting')
+    act(() => emit({ state: 'disabled', printers: [], lastJobAt: null, error: null }))
+    expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Disabled')
+
+    unmount()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  test('an older shell without printAgent still shows the card with "Checking…" and the settings button', () => {
+    const { bridge } = installBridge({ printAgent: undefined })
+    setup()
+    const card = screen.getByTestId('desktop-agent-card')
+    expect(within(card).getByTestId('desktop-agent-state')).toHaveTextContent('Checking…')
+    expect(within(card).getByRole('button', { name: /Open desktop settings/ })).toBeInTheDocument()
+    expect(bridge.openSettings).not.toHaveBeenCalled()
   })
 })
 

@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Save, Plus, Trash2, Printer, KeyRound, Copy, Check, RefreshCw, Loader2, X, WifiOff, Wifi } from 'lucide-react'
+import { Save, Plus, Trash2, Printer, KeyRound, Copy, Check, RefreshCw, Loader2, X, WifiOff, Wifi, Monitor, Settings2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { printAPI } from '../../../utils/api'
 import useSocketEvent from '../../../hooks/useSocketEvent'
+import useDesktopPrintAgent from '../../../hooks/useDesktopPrintAgent'
+import { openDesktopSettings } from '../../../utils/desktopShell'
 import ToggleSwitch from '../../../Components/Common/ToggleSwitch'
 import { STATIONS, MAX_PRINTERS, newPrinter, normalizeInitial, toPayload, validatePrinters as validate } from '../utils/printerSettings'
 
@@ -21,6 +23,14 @@ const STATUS_STYLE = {
     done: 'bg-green-50 text-green-700', failed: 'bg-red-50 text-red-700',
     sent: 'bg-blue-50 text-blue-700', queued: 'bg-amber-50 text-amber-700',
 }
+// Print agent embedded in the desktop app (window.bestodine.printAgent.state)
+const DESKTOP_AGENT_STATE = {
+    connected: { label: 'Connected', cls: 'bg-green-50 text-green-700' },
+    connecting: { label: 'Connecting', cls: 'bg-amber-50 text-amber-700' },
+    error: { label: 'Error', cls: 'bg-red-50 text-red-700' },
+    revoked: { label: 'Revoked', cls: 'bg-red-50 text-red-700' },
+    disabled: { label: 'Disabled', cls: 'bg-gray-100 text-gray-500' },
+}
 
 const PrinterSettings = ({ initial, onSave, isSaving = false }) => {
     const [form, setForm] = useState(() => normalizeInitial(initial))
@@ -31,6 +41,8 @@ const PrinterSettings = ({ initial, onSave, isSaving = false }) => {
     const [keyModal, setKeyModal] = useState(null)   // { token, apiUrl } shown once
     const [busy, setBusy] = useState('')              // 'key' | 'revoke' | 'test:<id>'
     const [copied, setCopied] = useState(false)
+    const { inDesktop, status: desktopAgent } = useDesktopPrintAgent()
+    const desktopState = DESKTOP_AGENT_STATE[desktopAgent?.state] || (desktopAgent ? DESKTOP_AGENT_STATE.error : null)
 
     const loadStatus = useCallback(async () => {
         try {
@@ -293,7 +305,62 @@ const PrinterSettings = ({ initial, onSave, isSaving = false }) => {
                         </button>
                     </div>
                 </div>
+                {!inDesktop && (
+                    <p data-testid="desktop-hint" className="text-[12px] text-[#9CA3AF] mt-3">
+                        Running the counter PC app? The BestoDine desktop app includes this print agent — see INSTALLABLE_APPS_GUIDE.md
+                    </p>
+                )}
             </div>
+
+            {/* ── Desktop app print agent (only inside the Electron shell) ── */}
+            {inDesktop && (
+                <div className={cardCls} data-testid="desktop-agent-card">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <p className="text-[15px] font-[600] text-[#1A181B] flex items-center gap-2">
+                                <Monitor size={16} className="text-[#702083]" />
+                                Desktop app print agent
+                                <span data-testid="desktop-agent-state" className={`inline-flex items-center text-[11px] font-[600] px-2 py-0.5 rounded-full ${desktopState ? desktopState.cls : 'bg-gray-100 text-gray-500'}`}>
+                                    {desktopState ? desktopState.label : 'Checking…'}
+                                </span>
+                            </p>
+                            <p className="text-[12px] text-[#9CA3AF]">
+                                This PC runs the print agent inside the BestoDine app — no separate program needed. Change the agent key or server in the desktop settings.
+                            </p>
+                            {desktopAgent?.error && (
+                                <p data-testid="desktop-agent-error" className="text-[12px] text-red-600 mt-1 break-words">{String(desktopAgent.error)}</p>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => openDesktopSettings()}
+                            className="px-4 py-2 border border-[#702083] text-[#702083] rounded-[10px] text-[13px] font-[600] hover:bg-[#F7EEF9] inline-flex items-center gap-1.5 shrink-0"
+                        >
+                            <Settings2 size={14} /> Open desktop settings
+                        </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 text-[13px]">
+                        <div>
+                            {Array.isArray(desktopAgent?.printers) && desktopAgent.printers.length > 0 ? (
+                                <ul data-testid="desktop-agent-printers" className="flex flex-wrap gap-x-4 gap-y-1">
+                                    {desktopAgent.printers.map((p, i) => (
+                                        <li key={`${p?.name || 'printer'}-${i}`} className="inline-flex items-center gap-1.5 text-[#1A181B]">
+                                            <span aria-hidden="true" className={`inline-block w-2 h-2 rounded-full ${p?.ok ? 'bg-green-500' : 'bg-red-500'}`} />
+                                            <span className="sr-only">{p?.ok ? 'ok' : 'not ok'}</span>
+                                            {p?.name || 'Printer'}
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-[#9CA3AF]">No printers reported by the agent yet.</p>
+                            )}
+                        </div>
+                        <p className="text-[11px] text-[#9CA3AF] md:text-right">
+                            Last job: {desktopAgent?.lastJobAt ? new Date(desktopAgent.lastJobAt).toLocaleString('en-IN') : '—'}
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* ── Recent jobs ───────────────────────────────────────── */}
             <div className={cardCls}>
