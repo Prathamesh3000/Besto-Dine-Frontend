@@ -140,7 +140,11 @@ ${Number(order.tipAmount) > 0 ? `<div class="row"><span>Tip</span><span>${fmt(or
 <div class="footer">Thank you for dining with us.</div>
 <script>window.onload = () => { setTimeout(() => window.print(), 200); };</script>
 </body></html>`;
-            const w = window.open('', '_blank', 'noopener,width=420,height=640');
+            // No 'noopener' here: per spec it makes window.open() return null,
+            // so the receipt could never be written (always toasted "Allow
+            // pop-ups"). The window is about:blank with our own HTML, so there
+            // is no opener risk to mitigate.
+            const w = window.open('', '_blank', 'width=420,height=640');
             if (!w) {
                 toast.error('Allow pop-ups to download the receipt.');
                 return;
