@@ -6,6 +6,7 @@ import './index.css'
 // the side effect of calling i18n.init() in ./i18n/index.js.
 import './i18n'
 import App from './App.jsx'
+import UpdateAvailableToast from './Components/Common/UpdateAvailableToast'
 import { migrateLegacyPlatformSession } from './utils/authStorage'
 
 // One-time move of a Super Admin session from the shared staff_* keys to
@@ -16,5 +17,8 @@ migrateLegacyPlatformSession()
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
+    {/* PWA: "new version ready — Reload" bar. Lives outside App's router
+        so it is visible on every screen (see hooks/useServiceWorkerUpdate). */}
+    <UpdateAvailableToast />
   </StrictMode>,
 )

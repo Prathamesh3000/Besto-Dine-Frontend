@@ -28,6 +28,7 @@ import ChefHeader from './components/ChefHeader';
 import CompletedOrdersDrawer from './components/CompletedOrdersDrawer';
 import ChefOrderCard from './components/ChefOrderCard';
 import OrderDetailModal from './components/OrderDetailModal';
+import InstallAppBanner from '../../Components/Common/InstallAppBanner';
 
 /**
  * ChefDashboard — Kitchen Display System (KDS).
@@ -657,6 +658,8 @@ const ChefDashboard = () => {
                 kitchenLoad={kitchenLoad}
                 isOnline={isOnline}
             />
+
+            <InstallAppBanner className="mx-4 mt-3" />
 
             {/* Connectivity banner — LAN offline wins over socket-only drop,
                 and a socket-only drop still shows "Reconnecting…" so the

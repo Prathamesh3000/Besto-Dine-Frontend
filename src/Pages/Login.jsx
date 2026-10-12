@@ -9,6 +9,7 @@ import { useAuth, USER_ROLES } from '../Context/AuthContext';
 import { setActiveTenant, clearActiveTenant } from '../utils/tenant';
 import BestoDineMark from '../assets/BestoDineMark';
 import RequestDemoForm from '../Components/Common/RequestDemoForm';
+import InstallAppBanner from '../Components/Common/InstallAppBanner';
 import {
     useFormValidation,
     combine,
@@ -237,6 +238,8 @@ const Login = () => {
                             <p className="text-[#7D7380] text-[11px] font-medium mt-0.5">Restaurant Management</p>
                         </div>
                     </div>
+
+                    <InstallAppBanner className="mb-4" />
 
                     {/* Main card */}
                     <div className="bg-white rounded-2xl shadow-[0px_8px_32px_0px_#00000014] border border-gray-100 overflow-hidden">

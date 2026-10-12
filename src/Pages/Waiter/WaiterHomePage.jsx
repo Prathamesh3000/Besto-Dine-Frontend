@@ -7,6 +7,7 @@ import BottomNav from '../../Components/Waiter/BottomNav';
 import WaiterEmptyState from '../../Components/Waiter/WaiterEmptyState';
 import StaffProfileMenu from '../../Components/Waiter/StaffProfileMenu';
 import NotificationBell from '../../Components/Waiter/NotificationBell';
+import InstallAppBanner from '../../Components/Common/InstallAppBanner';
 import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
 import api, { waiterAPI, settingsAPI } from '../../utils/api';
 import { resolveImageUrl } from '../../utils/image';
@@ -448,6 +449,7 @@ const WaiterHomePage = () => {
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
             <div className="max-w-7xl mx-auto">
+                <InstallAppBanner className="mx-4 sm:mx-6 mt-4" />
                 {/* Top Header — sticky so area chips stay reachable while
                     the waiter scans the long table grid on tablets. */}
                 <header className="sticky top-0 z-20 bg-white/95 backdrop-blur px-4 sm:px-6 pt-6 pb-4 border-b border-gray-100">
