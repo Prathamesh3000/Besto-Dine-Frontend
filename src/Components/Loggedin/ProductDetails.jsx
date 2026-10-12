@@ -5,6 +5,8 @@ import { useCart } from "../../Context/CartContext";
 import { useHealthContext } from "../../Context/Loggedin/HealthContext";
 import { menuSearchAPI } from "../../utils/api";
 import { useDineInLock } from "../../utils/dineInSession";
+import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
+import QrMenuOnlyNote from "./QrMenuOnlyNote";
 import { useFavorites } from "../../utils/favorites";
 import VegBadge from "../Common/VegBadge";
 import { handleImageError, resolveImageUrl, sizedImage } from "../../utils/image";
@@ -121,6 +123,8 @@ const ProductDetails = ({ product: propProduct, onClose: propOnClose, onAddToCar
   const { healthMode } = useHealthContext();
   const { updateQuantity, updateCartItem } = useCart();
   const dineInLocked = useDineInLock();
+  // QR is menu-only (operations profile) — browse only, no Add to Cart.
+  const selfOrderBlocked = useSelfOrderBlocked();
 
   // Support both modal (props) and page (route state)
   const rawProduct = propProduct || location.state?.product;
@@ -645,7 +649,12 @@ const ProductDetails = ({ product: propProduct, onClose: propOnClose, onAddToCar
         {/* Bottom Bar — in-flow flex child, guaranteed visible.
             Omitted entirely once the dine-in visit is settled: the
             ordering controls are hidden, not shown as dead buttons. */}
-        {!dineInLocked && (
+        {selfOrderBlocked && !dineInLocked && (
+          <div className="shrink-0 bg-white px-4 py-3 border-t border-[#F0F0F0] safe-bottom">
+            <QrMenuOnlyNote className="max-w-[420px] mx-auto" />
+          </div>
+        )}
+        {!dineInLocked && !selfOrderBlocked && (
         <div className="shrink-0 bg-white px-4 py-3 border-t border-[#F0F0F0] safe-bottom">
           <div className="flex gap-3 items-center max-w-[420px] mx-auto w-full">
             {/* Quantity selector */}

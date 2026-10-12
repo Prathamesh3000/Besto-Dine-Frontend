@@ -3,8 +3,6 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import { QueryClientContext } from '@tanstack/react-query';
 import api, { CUSTOMER_SESSION_EXPIRED_EVENT } from '../utils/api';
 import { toast } from 'react-hot-toast';
-import { getActiveTenantSlug } from '../utils/tenant';
-import { isReservedSlug } from '../utils/reservedSlugs';
 import { disconnectSocket, reconnectWithAuth } from '../utils/socket';
 import { isGuestSessionExpired, clearGuestSession } from '../utils/guestSession';
 import {
@@ -456,12 +454,12 @@ export function AuthProvider({ children }) {
         return () => AUTH_CHANNEL.removeEventListener('message', onMsg);
     }, [hardLogoutLocal]);
 
-    // QA N14 — customer login expired (60-min inactivity or 24h cap; see
-    // api.js announceCustomerSessionExpired). Drop ONLY the login: a
-    // diner who also scanned a table keeps the guest QR session, table
-    // and cart. Explain, then route to the restaurant page (or /login).
+    // Customer login expired — a fixed 1 hour after sign-in, or 60 min
+    // without use (see api.js announceCustomerSessionExpired). Drop ONLY
+    // the login: a diner who also scanned a table keeps the guest QR
+    // session, table and cart. Explain, then go to the login page.
     useEffect(() => {
-        const onExpired = () => {
+        const onExpired = (e) => {
             const wasCustomer = userRef.current?.role === 'customer'
                 || (audRef.current || currentAudience()) === 'customer';
             if (!wasCustomer) return;
@@ -472,21 +470,17 @@ export function AuthProvider({ children }) {
             if (audRef.current === 'customer') setAudience(null);
             disconnectSocket();
             window.dispatchEvent(new Event('storage_sync'));
-            const notice = 'Your session expired, please log in again';
+            const notice = e?.detail?.code === 'SESSION_EXPIRED'
+                ? 'Your 1-hour session has ended. Please log in again.'
+                : 'Your session expired, please log in again';
             const path = window.location.pathname;
-            const first = path.split('/').filter(Boolean)[0];
-            // Pages that work without a login stay put — the scan page, a
-            // restaurant landing page, the pickers and the login itself.
-            const publicPage = path === '/' || path === '/login' || path === '/register'
-                || path.startsWith('/scan') || path.startsWith('/r/') || path === '/branch-selection'
-                || (first && !isReservedSlug(first));
-            if (publicPage) {
+            // Already on the login / register page — just explain.
+            if (path === '/login' || path === '/register') {
                 toast.error(notice, { id: 'customer-session-expired', duration: 6000 });
                 return;
             }
             try { sessionStorage.setItem('bd_customer_session_notice', notice); } catch { /* ignore */ }
-            const slug = getActiveTenantSlug();
-            window.location.assign(slug && !isReservedSlug(slug) ? `/${encodeURIComponent(slug)}` : '/login');
+            window.location.assign('/login');
         };
         window.addEventListener(CUSTOMER_SESSION_EXPIRED_EVENT, onExpired);
         // Notice carried across the redirect above.
@@ -531,6 +525,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('isGuest');
         localStorage.removeItem('guest_session_start');
         localStorage.removeItem('guest_bill_paid_at');
+        localStorage.removeItem('guest_session_ended');
         localStorage.removeItem('guest_cart_reset');
         localStorage.removeItem('cafe_orders_v2');
         localStorage.removeItem('cancelled_orders_v1');
@@ -676,6 +671,9 @@ export function AuthProvider({ children }) {
         hasTier,
         getLimit,
         tenant: user?.tenant ?? null,
+        // Resolved operations profile (how the tenant runs) — read it
+        // through hooks/useOperations, which falls back to today's flow.
+        operations: user?.tenant?.operations ?? null,
         role: user?.role ?? null,
         // Which storage audience this tab's session lives in.
         audience,

@@ -8,6 +8,7 @@ import api, { razorpayAPI, walletAPI, settingsAPI } from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import { rememberOrderIds, getCustomerOrderSession } from '../../utils/customerOrderIds';
+import { getCustomerOperations } from '../../utils/operations';
 import toast from 'react-hot-toast';
 
 // Payment Method Card — richer, accessible radio-card.
@@ -137,6 +138,11 @@ function Payment() {
   const orderPayload = location.state?.orderPayload || rehydrated?.orderPayload || null;
   const cartItemsForStorage = location.state?.cartItemsForStorage || rehydrated?.cartItemsForStorage || null;
   const isTakeawayDeferred = !!orderPayload;
+  // Pay-first dine-in (operations profile): the cart hands over a dine-in
+  // draft; the order is created only after (or, for cash at the counter,
+  // together with) the payment. Reuses the deferred-create path above.
+  const payFirstDineIn = !!(location.state?.payFirstDineIn || rehydrated?.payFirstDineIn);
+  const ops = getCustomerOperations();
 
   const totalAmount = location.state?.total || orderPayload?.total || rehydrated?.total || 0;
 
@@ -162,6 +168,7 @@ function Payment() {
         total: location.state.total || null,
         tableNumber: location.state.tableNumber || null,
         idempotencyKey: idemKeyRef.current || null,
+        payFirstDineIn: !!location.state.payFirstDineIn,
       }));
     } catch { /* sessionStorage unavailable — fall back to in-memory only */ }
   }, [location.state]);
@@ -280,7 +287,7 @@ function Payment() {
       ? `Only ₹${walletBalance.toFixed(2)} available · need ₹${(totalAmount - walletBalance).toFixed(2)} more`
       : `Balance ₹${walletBalance.toFixed(2)} · pays the full bill`;
 
-  const paymentMethods = [
+  const allPaymentMethods = [
     {
       id: 'online',
       icon: Smartphone,
@@ -304,10 +311,16 @@ function Payment() {
       id: 'cash',
       icon: Banknote,
       title: 'Pay at Counter',
-      subtitle: 'Pay with cash or card at the counter',
+      subtitle: payFirstDineIn
+        ? 'Pay with cash or card at the counter — your order goes to the kitchen once paid'
+        : 'Pay with cash or card at the counter',
       accent: 'green',
     },
   ];
+  const PAY_FIRST_METHOD = { online: 'online', wallet: 'wallet', cash: 'counterCash' };
+  const paymentMethods = payFirstDineIn
+    ? allPaymentMethods.filter(m => ops.payment?.methods?.[PAY_FIRST_METHOD[m.id]])
+    : allPaymentMethods;
 
   // Create the cafe order on backend (for takeaway deferred flow).
   // `checkout` is the Razorpay checkout result of a pay-first order: it
@@ -316,10 +329,16 @@ function Payment() {
   const createCafeOrder = async (paymentMethod, checkout = null) => {
     const idemKey = idemKeyRef.current || generateIdempotencyKey();
     idemKeyRef.current = idemKey;
+    // Pay-first dine-in: tell the server how the customer is paying first,
+    // so it holds the order from the kitchen until the money arrives.
+    const paymentIntent = payFirstDineIn && !checkout
+      ? (paymentMethod === 'wallet' ? 'wallet' : paymentMethod === 'cash' ? 'counterCash' : undefined)
+      : undefined;
     const { data } = await api.post('/orders', {
       ...orderPayload,
       clientIdempotencyKey: idemKey,
       paymentMethod,
+      ...(paymentIntent ? { paymentIntent } : {}),
       ...(checkout ? {
         razorpayPayment: {
           razorpay_order_id: checkout.razorpay_order_id,
@@ -350,6 +369,25 @@ function Payment() {
     // the hook also requires an active dine-in session in localStorage.
     if (!isTakeawayDeferred) {
       markDineInBillSettled();
+    }
+    // Pay-first dine-in: every round is paid on its own, so the table
+    // session stays open for another order. Show the confirmation (with
+    // or without live tracking, per the restaurant's setup).
+    if (payFirstDineIn) {
+      navigate('/customer/order-confirmed', {
+        replace: true,
+        state: {
+          orderId: oid,
+          items: cartItemsForStorage || [],
+          total: totalAmount,
+          isTakeaway: false,
+          payFirstDineIn: true,
+          payAtCounter: selectedMethod === 'cash',
+          tracking: ops.orderFlow?.customerTracking !== false,
+          paymentMethod: selectedMethod,
+        },
+      });
+      return;
     }
     if (isGuest) {
       // Mark bill as paid with timestamp for auto-exit timer
@@ -579,7 +617,9 @@ function Payment() {
       if (isTakeawayDeferred) {
         const createdOrder = await createCafeOrder('cash');
         cafeOrderId = createdOrder.orderId;
-        toast.success('Order confirmed — please pay at the counter.', { id: 'pay-cash-success', duration: 4000 });
+        toast.success(payFirstDineIn
+          ? 'Please pay at the counter — your order goes to the kitchen once paid.'
+          : 'Order confirmed — please pay at the counter.', { id: 'pay-cash-success', duration: 4000 });
         navigateAfterPayment(cafeOrderId);
         return;
       }

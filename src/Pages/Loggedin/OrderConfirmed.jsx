@@ -23,6 +23,13 @@ function OrderConfirmed() {
     isTakeaway = false,
     selectedTime,
     paymentMethod: statePaymentMethod,
+    // Pay-first dine-in (operations profile): `payAtCounter` = the order
+    // waits for cash at the counter before the kitchen sees it;
+    // `tracking: false` = the restaurant has no kitchen screen, so there
+    // is no live status to follow — the customer collects when called.
+    payFirstDineIn = false,
+    payAtCounter = false,
+    tracking = true,
   } = location.state || {};
 
   const [cafePhone, setCafePhone] = useState("");
@@ -114,12 +121,24 @@ function OrderConfirmed() {
           <CheckCircle size={36} className="text-white" />
         </div>
         <h1 className="text-[20px] font-nunito font-bold text-[#101828] mb-1">
-          Order Confirmed!
+          {payAtCounter ? "Please pay at the counter" : "Order Confirmed!"}
         </h1>
-        <p className="text-[14px] font-varela text-[#645E66] text-center px-8">
-          Thank you! Your {isTakeaway ? "takeaway" : "dine-in"} order has been
-          placed successfully.
-        </p>
+        {payAtCounter ? (
+          <p className="text-[14px] font-varela text-[#645E66] text-center px-8" data-testid="pay-at-counter-note">
+            Show order <span className="font-semibold text-[#1A181B]">#{orderId}</span> at the counter.
+            Your order goes to the kitchen as soon as it is paid.
+          </p>
+        ) : payFirstDineIn && !tracking ? (
+          <p className="text-[14px] font-varela text-[#645E66] text-center px-8" data-testid="collect-note">
+            Your order <span className="font-semibold text-[#1A181B]">#{orderId}</span> is with the kitchen.
+            Please collect it at the counter when your number is called.
+          </p>
+        ) : (
+          <p className="text-[14px] font-varela text-[#645E66] text-center px-8">
+            Thank you! Your {isTakeaway ? "takeaway" : "dine-in"} order has been
+            placed successfully.
+          </p>
+        )}
       </div>
 
       {/* Order Summary */}
@@ -301,12 +320,14 @@ function OrderConfirmed() {
           OrderConfirmed drops out of history — back from Home doesn't
           loop back here. */}
       <div className="mx-4 flex gap-3 mb-3">
+        {tracking && !payAtCounter && (
         <button
           onClick={() => navigate(`/customer/order-tracking/${orderId}`, { replace: true })}
           className="flex-1 py-3 rounded-xl font-semibold font-nunito text-[14px] bg-[#FE8301] text-white active:scale-[0.98] transition-transform"
         >
           Track Order
         </button>
+        )}
         <button
           onClick={() => setShowQRModal(true)}
           disabled={!orderId}

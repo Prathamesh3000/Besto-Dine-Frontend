@@ -332,7 +332,7 @@ const OrderTracking = () => {
 
   // Derive timeline from real order status
   const currentStatus = (order?.status || 'new').toLowerCase();
-  const statusMap = { new: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 };
+  const statusMap = { 'awaiting-payment': 0, new: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 };
   const currentStep = statusMap[currentStatus] ?? 0;
 
   // Counter-only orders (water, packaged ice cream, etc.) skip the chef
@@ -671,6 +671,7 @@ const OrderTracking = () => {
                         : currentStatus === 'ready' ? 'Ready'
                         : currentStatus === 'preparing' ? 'Preparing'
                         : currentStatus === 'cancelled' ? 'Cancelled'
+                        : currentStatus === 'awaiting-payment' ? 'Pay at counter'
                         : 'Placed'}
                     </span>
                   </div>

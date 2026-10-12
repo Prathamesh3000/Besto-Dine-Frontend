@@ -1430,7 +1430,7 @@ const Bookings = () => {
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                                                         </svg>
                                                         <span className="text-[12px] font-[600] text-gray-500 text-center px-4">Click to upload or drag and drop</span>
-                                                        <span className="text-[10px] text-gray-400 mt-1">PNG, JPG up to 5MB</span>
+                                                        <span className="text-[10px] text-gray-400 mt-1">Any image up to 5MB</span>
                                                     </div>
 
                                                     {/* Existing Images Thumbnails */}

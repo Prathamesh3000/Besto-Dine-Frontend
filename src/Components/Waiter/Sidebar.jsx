@@ -2,11 +2,15 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { X, UserCircle, Utensils, Bell, History, CircleDollarSign, LogOut, ChevronRight, Home, ClipboardList, BellRing, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../../Context/AuthContext';
+import { useStaffOrderOff } from '../RequireStaffOrder';
 
 const Sidebar = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, isCaptain, hasPermission, logout } = useAuth();
+    // /waiter/menu is gated off when the restaurant turns staff
+    // ordering off (operations profile) — don't link to it.
+    const staffOrderOff = useStaffOrderOff();
 
     const handleNavigate = (path) => {
         navigate(path);
@@ -41,7 +45,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         { icon: ClipboardList,   label: 'Active Orders',  path: '/waiter/orders' },
         { icon: BellRing,        label: 'Requests',       path: '/waiter/requests' },
         { icon: UserCircle,      label: 'My Profile',     path: '/waiter/profile' },
-        ...((isCaptain || hasPermission('editMenu')) ? [
+        ...((isCaptain || hasPermission('editMenu')) && !staffOrderOff ? [
             { icon: Utensils,    label: 'Menu Card',      path: '/waiter/menu' },
         ] : []),
         { icon: Bell,            label: 'Shift Status',   path: '/waiter/shift-status' },

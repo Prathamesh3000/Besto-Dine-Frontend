@@ -3,17 +3,20 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavig
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { AuthProvider } from './Context/AuthContext';
 import LanguageSync from './i18n/LanguageSync';
+import OperationsSync from './Components/OperationsSync';
 import { CartProvider } from './Context/CartContext';
 import { HealthProvider } from './Context/Loggedin/HealthContext';
 import { MenuProvider, useMenu } from './Context/MenuContext';
 import { NotificationProvider } from './Context/NotificationContext';
 import ProtectedRoute from './Components/ProtectedRoute';
 import RequireFeature from './Components/RequireFeature';
+import RequireStaffOrder from './Components/RequireStaffOrder';
 import { STAFF_ROLES, CAPTAIN_ROLES, CUSTOMER_ROLES, ADMIN_ROLES, CHEF_ROLES, SUPERADMIN_ROLES } from './Context/AuthContext';
 // Roles the waiterDashboard plan gate applies to (admins also use /waiter/*).
 const WAITER_APP_ROLES = ['waiter', 'captain'];
 import { Toaster } from 'react-hot-toast';
 import { UpgradePromptHost } from './Components/Common/UpgradePrompt';
+import GuestSessionEnd from './Components/Common/GuestSessionEnd';
 import { isServerDown, subscribeServerStatus, isOffline, subscribeOnlineStatus } from './utils/serverStatus';
 import { CUSTOMER_ORDERS_ROOT } from './utils/customerOrderIds';
 import { CUSTOMER_DATA_CLEARED_EVENT } from './utils/customerSession';
@@ -326,6 +329,7 @@ function App() {
     <Router>
       <AuthProvider>
         <LanguageSync />
+        <OperationsSync />
         <NotificationProvider>
           <HealthProvider>
             <MenuProvider>
@@ -359,6 +363,9 @@ function App() {
                     a FEATURE_LOCKED 403. Single mount point = no prop
                     drilling; pub-sub via openUpgradePrompt(). */}
                 <UpgradePromptHost />
+                {/* Guest (QR, no login) visit complete — bill paid and
+                    served — shows "guest mode is over" → login page. */}
+                <GuestSessionEnd />
                 <Suspense fallback={<PageLoader />}>
                 <Routes>
 
@@ -403,15 +410,17 @@ function App() {
                     edit the cart. Open to every staff role (waiter +
                     captain + admin). The table click on WaiterHomePage
                     used to dead-end here for waiters because these were
-                    gated to CAPTAIN_ROLES. */}
+                    gated to CAPTAIN_ROLES. RequireStaffOrder hides the
+                    order-entry screens when the restaurant's operations
+                    profile turns staff ordering off (orderFlow.staffOrder). */}
                 <Route path="/waiter/details"
                   element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><TableDetails /></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/menu"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><Menu /></RequireFeature></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><RequireStaffOrder><Menu /></RequireStaffOrder></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/category/:id"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><Home /></RequireFeature></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><RequireStaffOrder><Home /></RequireStaffOrder></RequireFeature></ProtectedRoute>} />
                 <Route path="/waiter/cart"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><CartPage /></RequireFeature></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><RequireStaffOrder><CartPage /></RequireStaffOrder></RequireFeature></ProtectedRoute>} />
 
                 {/* Billing + payment collection. Opened to STAFF_ROLES
                     (waiter + captain + admin + manager) so the waiter who

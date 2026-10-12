@@ -119,6 +119,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
 
   // Status Badge Logic
   const statusStyles = {
+    'awaiting-payment': 'bg-amber-50 text-amber-700 border-amber-200',
     new: 'bg-blue-50 text-blue-600 border-blue-200',
     preparing: 'bg-orange-50 text-orange-600 border-orange-200',
     ready: 'bg-green-50 text-green-600 border-green-200',
@@ -127,6 +128,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
   }
 
   const headerStyles = {
+    'awaiting-payment': 'bg-[#FFFBEB] border-amber-100',
     new: 'bg-[#E5F2FF] border-blue-100',
     preparing: 'bg-[#FFF7ED] border-orange-100',
     ready: 'bg-[#F0FDF4] border-green-100',
@@ -157,7 +159,9 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
             </div>
             <div className="flex items-center gap-2">
               <span className={`px-3 py-1 text-xs leading-[16px] tracking-normal font-[700] font-manrope rounded-full border ${statusStyles[order.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                {order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
+                {order.status === 'awaiting-payment'
+                  ? 'Awaiting payment'
+                  : order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
               </span>
               <span className={`px-2.5 py-0.5 text-[11px] font-[600] font-manrope rounded-full ${order.delivery?.requested ? 'bg-green-50 text-green-700 border border-green-200' : order.type === 'takeaway' ? 'bg-orange-50 text-orange-600 border border-orange-200' : 'bg-blue-50 text-blue-600 border border-blue-200'}`}>
                 {order.delivery?.requested ? '🛵 Delivery' : order.type === 'takeaway' ? 'Takeaway' : 'Dine-in'}

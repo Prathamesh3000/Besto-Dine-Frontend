@@ -74,6 +74,17 @@ describe('tenant owner (unpinned admin/manager)', () => {
     expect(result.current.selectedBranchId).toBe(expected)
   })
 
+  test('a persisted branch that is not one of this tenant\'s branches is dropped and Main re-defaults', async () => {
+    // e.g. another restaurant's admin used this browser earlier.
+    localStorage.setItem('adminActiveBranch', JSON.stringify('69f8300f24be77f6adbd9c75'))
+    localStorage.setItem('adminBranchPicked', '1')
+    const { result } = mount()
+    await waitFor(() => expect(result.current.selectedBranchId).toBe('main1'))
+    expect(stored()).toBe(JSON.stringify('main1'))
+    expect(localStorage.getItem('adminBranchPicked')).toBeNull()
+    expect(result.current.branchQueryParam).toEqual({ branch: 'main1' })
+  })
+
   test('no Main branch in the list → no default selection', async () => {
     api.get.mockResolvedValue({ data: { data: [{ _id: 'x', slug: 'x' }] } })
     const { result } = mount()

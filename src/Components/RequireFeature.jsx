@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, LogOut } from 'lucide-react';
+import { Lock, LogOut, UserX } from 'lucide-react';
 import { useAuth } from '../Context/AuthContext';
 import { FEATURE_LABELS } from '../utils/featureLabels';
 
@@ -18,15 +18,48 @@ import { FEATURE_LABELS } from '../utils/featureLabels';
  *              straight through (e.g. the waiter-app gate applies to
  *              waiters and captains, not to an admin using /waiter/*).
  *
- * The backend enforces the same rule (featureGate / staffAppGate), so
+ * It also applies the restaurant's operations profile: a waiter, captain
+ * or chef whose role the restaurant has switched off (e.g. a self-service
+ * hotel with no waiters) sees "your restaurant doesn't use this app".
+ *
+ * The backend enforces the same rules (featureGate / staffAppGate), so
  * this is purely UX.
  */
+const OPS_ROLES = new Set(['waiter', 'captain', 'chef']);
+
 export default function RequireFeature({ feature, roles, children }) {
-    const { hasFeature, user } = useAuth();
+    const { hasFeature, user, operations } = useAuth();
     const role = user?.role;
     if (roles && !roles.includes(role)) return children;
-    if (hasFeature(feature)) return children;
-    return <FeatureLockedScreen feature={feature} />;
+    if (!hasFeature(feature)) return <FeatureLockedScreen feature={feature} />;
+    if (OPS_ROLES.has(role) && operations?.roles?.[role] === false) return <RoleNotInUseScreen role={role} />;
+    return children;
+}
+
+const ROLE_APP_LABELS = { waiter: 'the waiter app', captain: 'the captain app', chef: 'the kitchen screen' };
+
+export function RoleNotInUseScreen({ role }) {
+    const { logout } = useAuth();
+    return (
+        <div className="min-h-[60vh] flex items-center justify-center p-6" data-testid="role-not-in-use">
+            <div className="max-w-md w-full bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
+                <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                    <UserX size={24} className="text-slate-600" />
+                </div>
+                <h1 className="text-xl font-bold text-slate-800 mb-2">Not used at your restaurant</h1>
+                <p className="text-sm text-slate-600 leading-relaxed mb-6">
+                    Your restaurant is set up without {ROLE_APP_LABELS[role] || 'this app'}. Please ask your manager if this is a mistake.
+                </p>
+                <button
+                    type="button"
+                    onClick={() => logout()}
+                    className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition"
+                >
+                    <LogOut size={16} /> Sign out
+                </button>
+            </div>
+        </div>
+    );
 }
 
 export function FeatureLockedScreen({ feature }) {

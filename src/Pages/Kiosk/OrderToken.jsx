@@ -70,6 +70,10 @@ function tokenFromOrderId(orderId) {
 // staring at a hardcoded "15-20 mins" estimate.
 function statusToCard(status) {
     switch (status) {
+        // Pay-first hold: the order exists but the kitchen can't see it
+        // until the counter marks it paid.
+        case 'awaiting-payment':
+            return { label: 'Awaiting payment',   hint: 'Please pay at the counter',     Icon: Clock,        tint: '#D97706' };
         case 'preparing':
             return { label: 'In the kitchen',     hint: 'Your food is being prepared',  Icon: ChefHat,      tint: '#F48F1B' };
         case 'ready':

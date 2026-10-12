@@ -4,6 +4,7 @@ import { X, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react';
 import { validateTableName, validateCapacity, validateRequiredSelection } from '../utils/validation';
 import api from '../../../utils/api';
 import toast from 'react-hot-toast';
+import { useAdminBranch } from '../../../Context/AdminBranchContext';
 
 const AddTableModal = ({ onClose, onSubmit, tableToEdit }) => {
     const [tableName, setTableName] = useState('');
@@ -25,6 +26,14 @@ const AddTableModal = ({ onClose, onSubmit, tableToEdit }) => {
     const [branchOptions, setBranchOptions] = useState([]);
     const [branch, setBranch] = useState('');
     const [submitError, setSubmitError] = useState('');
+
+    // New tables default to the branch the owner is viewing in the
+    // switcher, so they appear in that branch's strictly filtered list
+    // instead of landing tenant-level and vanishing from the Main view.
+    const { selectedBranchId: activeBranchId, isLocked: branchLocked } = useAdminBranch();
+    useEffect(() => {
+        if (!tableToEdit && !branchLocked && activeBranchId) setBranch((prev) => prev || activeBranchId);
+    }, [tableToEdit, branchLocked, activeBranchId]);
 
     useEffect(() => {
         if (tableToEdit) {

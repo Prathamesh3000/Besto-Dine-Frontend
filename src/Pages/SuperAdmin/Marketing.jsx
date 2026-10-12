@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { Globe, Save, Phone, Mail, MessageCircle, MapPin, Share2, Image as ImageIcon, Video, Upload, Plus, Trash2, Monitor } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
+import { IMAGE_ACCEPT, isImageFile } from '../../utils/imageFile';
 import {
     PageHeader,
     SectionCard,
@@ -71,8 +72,8 @@ const Marketing = () => {
         const file = e.target.files?.[0];
         e.target.value = ''; // allow re-selecting the same file later
         if (!file) return;
-        if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) {
-            return toast.error('Please choose a JPG, PNG, or WebP image');
+        if (!isImageFile(file)) {
+            return toast.error('Please choose an image file');
         }
         if (file.size > 5 * 1024 * 1024) {
             return toast.error('Image must be under 5MB');
@@ -115,8 +116,8 @@ const Marketing = () => {
         const file = e.target.files?.[0];
         e.target.value = ''; // allow re-selecting the same file later
         if (!file) return;
-        if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) {
-            return toast.error('Please choose a JPG, PNG, or WebP image');
+        if (!isImageFile(file)) {
+            return toast.error('Please choose an image file');
         }
         if (file.size > 5 * 1024 * 1024) {
             return toast.error('Image must be under 5MB');
@@ -229,7 +230,7 @@ const Marketing = () => {
                                     <input
                                         ref={logoInputRef}
                                         type="file"
-                                        accept="image/png,image/jpeg,image/webp"
+                                        accept={IMAGE_ACCEPT}
                                         className="hidden"
                                         onChange={handleLogoUpload}
                                     />
@@ -309,7 +310,7 @@ const Marketing = () => {
                                             <label className="mt-2 inline-flex items-center gap-1.5 cursor-pointer rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
                                                 <input
                                                     type="file"
-                                                    accept="image/png,image/jpeg,image/webp"
+                                                    accept={IMAGE_ACCEPT}
                                                     className="hidden"
                                                     disabled={uploadingShot === i}
                                                     onChange={handleShotUpload(i)}

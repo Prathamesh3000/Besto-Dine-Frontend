@@ -43,6 +43,10 @@ import { resolveUnitPrice, formatPrice } from "../../utils/pricing";
 import BestoDineMark from "../../assets/BestoDineMark";
 import { useFavorites } from "../../utils/favorites";
 import useCustomerSession from "../../hooks/useCustomerSession";
+import { getCustomerOperations } from '../../utils/operations';
+import useSelfOrderBlocked from '../../hooks/useSelfOrderBlocked';
+import QrMenuOnlyNote from '../../Components/Loggedin/QrMenuOnlyNote';
+import { serviceSpotLabel } from '../../utils/customerOrdering';
 
 // Consistent horizontal padding value
 const SECTION_PADDING = "px-4";
@@ -839,6 +843,10 @@ function Home() {
   // request and ordering buttons across the page so the customer
   // doesn't tap something that'll only respond with a "locked" toast.
   const dineInLocked = useDineInLockState();
+  // QR is menu-only (operations profile customerSelfOrder:false) — a
+  // dine-in customer browses, the staff take the order. Always false
+  // for staff and takeaway.
+  const selfOrderBlocked = useSelfOrderBlocked();
   // One source of truth for "what may this customer do right now".
   // The service buttons below are HIDDEN (not merely greyed) once the
   // bill is settled: a disabled "🔒 Locked" button invites tapping and
@@ -1286,7 +1294,7 @@ function Home() {
                 session rather than poking localStorage inline. */}
             {customerSession.showTableChrome && (
               <div className="text-[14px] font-semibold text-[#8D848F]">
-                Table {customerSession.table?.name || '—'}
+                {serviceSpotLabel()} {customerSession.table?.name || '—'}
               </div>
             )}
           </header>
@@ -1337,6 +1345,7 @@ function Home() {
       )}
 
       <main className={`flex flex-col px-4 ${isStaff ? 'gap-3 pt-1' : 'gap-4 pt-3'}`}>
+        {selfOrderBlocked && <QrMenuOnlyNote />}
         {(isStaff || routeCategoryId) && (
           /* Horizontal Categories — staff / item-route browsing view.
              Matches the customer Home CategoriesCarousel responsive scale
@@ -1426,7 +1435,10 @@ function Home() {
                 (icon + label in one line) rather than 70px tall tiles.
                 `canRequestService` is false once the bill is settled, so
                 the strip unmounts rather than sitting there greyed out. */}
-            {(orderType !== "takeaway" && customerSession.canRequestService) && (
+            {(orderType !== "takeaway" && customerSession.canRequestService
+              // Self-service restaurants (operations profile) have nobody
+              // to bring water or answer "call waiter".
+              && getCustomerOperations().customerApp?.callWaiter !== false) && (
               <div className="grid grid-cols-2 gap-3 w-full">
                 <button
                   onClick={() => handleServiceRequest('water')}
@@ -1621,7 +1633,7 @@ function Home() {
                 // Lock state — disables Add / +/- visually when the
                 // dine-in bill is settled. Card itself stays tappable
                 // (read-only browse).
-                disabled: dineInLocked,
+                disabled: dineInLocked || selfOrderBlocked,
               };
 
               // content-visibility:auto (#26) lets the browser skip layout
@@ -1810,7 +1822,7 @@ function Home() {
         )
       )}
 
-      {!isStaff && <CartButton />}
+      {!isStaff && !selfOrderBlocked && <CartButton />}
       {isStaff ? <BottomNavWaiter /> : <BottomNavCustomer />}
 
       {/* Exit-confirmation guard — only mounted on the bare customer

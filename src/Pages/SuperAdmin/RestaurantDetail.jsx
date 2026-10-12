@@ -32,11 +32,13 @@ import {
     Clock,
     Globe2,
     Pencil,
+    Workflow,
 } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import ShareLinkPanel from '../../Components/Common/ShareLinkPanel';
 import RestaurantModulesPanel from './components/RestaurantModulesPanel';
+import OperationsPanel from './components/OperationsPanel';
 import { restaurantLink } from '../../utils/customerLinks';
 import {
     Card,
@@ -78,6 +80,7 @@ const STATUS_TONES = {
 const TABS = [
     { key: 'overview', label: 'Overview', icon: Building2 },
     { key: 'billing',  label: 'Billing',  icon: CreditCard },
+    { key: 'operations', label: 'Operations', icon: Workflow },
     { key: 'branches', label: 'Branches', icon: GitBranch },
     { key: 'account',  label: 'Account',  icon: UserCog },
 ];
@@ -1234,6 +1237,11 @@ const RestaurantDetail = () => {
             <RestaurantModulesPanel restaurant={data} canEdit={isFullSuperAdmin} onChanged={load} />
 
             </>
+            )}
+
+            {/* ═══ OPERATIONS TAB — how this restaurant runs ═══ */}
+            {activeTab === 'operations' && (
+                <OperationsPanel restaurant={data} canEdit={isFullSuperAdmin} />
             )}
 
             {/* ═══ ACCOUNT TAB ═══ */}

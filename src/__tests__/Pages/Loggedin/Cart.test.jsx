@@ -45,7 +45,11 @@ vi.mock('@/Context/MenuContext', () => ({ useMenu: () => ({ menuItems: [] }) }))
 vi.mock('@/utils/favorites', () => ({ useFavorites: () => ({ has: () => false, toggle: () => {} }) }))
 vi.mock('@/Components/Loggedin/ProductDetailsModal', () => ({ default: () => null }))
 vi.mock('@/Components/Waiter/SpecialInstructionsPopup', () => ({ default: () => null }))
+// Active tenant blob — `operations` is the customer-safe operations profile
+// read by utils/operations.getCustomerOperations(). null → defaults.
+let tenantBlob = null
 vi.mock('@/utils/tenant', () => ({
+  getActiveTenant: vi.fn(() => tenantBlob),
   getActiveBranch: vi.fn(() => ({ _id: 'br1', name: 'MG Road' })),
   activeRestaurantPath: () => '/cafe-uno',
 }))
@@ -104,6 +108,7 @@ function renderCart({ lines = LINES, orderType = 'dine-in', wallet = 0, coupons 
         <Route path="/customer/orders" element={<Probe name="orders-page" />} />
         <Route path="/bill-preview" element={<Probe name="bill-preview" />} />
         <Route path="/login" element={<Probe name="login-page" />} />
+        <Route path="/customer/payment" element={<Probe name="payment-page" />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -124,6 +129,7 @@ async function settle() {
 
 beforeEach(() => {
   landed = null
+  tenantBlob = null
   Object.assign(auth, { isGuest: false, isLoggedIn: true, user: { name: 'Asha', mobile: '9876543210' } })
   settingsAPI.getSettings.mockResolvedValue({ data: { taxes: TAXES } })
   api.get.mockImplementation((url) => {
@@ -327,7 +333,7 @@ describe('Cart — takeaway: wallet points and hand-off', () => {
       phone: '9876543210', pickupTime: '9:00 AM', pickupLocation: 'MG Road', branchId: 'br1',
     })
     expect(api.post).not.toHaveBeenCalledWith('/orders', expect.anything(), expect.anything())
-  })
+  }, 15000) // many keystrokes — ~5s under a parallel run
 
   // Regression (fixed 2026-10): takeaway "Proceed to Pay" label shows the total to the paisa, like the dine-in label.
   test('takeaway "Proceed to Pay" label shows the total to the paisa', async () => {
@@ -346,5 +352,63 @@ describe('Cart — takeaway: wallet points and hand-off', () => {
     expect(screen.getByText('Please select a pickup time before proceeding')).toBeInTheDocument()
     expect(screen.getByText(/valid 10-digit mobile number/)).toBeInTheDocument()
     expect(screen.queryByText('bill-preview')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('Cart — operations profile (pay-first dine-in, tips)', () => {
+  const PAY_FIRST_OPS = {
+    payment: { dineIn: 'payFirst', methods: { online: true, wallet: true, counterCash: true } },
+    customerApp: { callWaiter: false, tips: false },
+    orderFlow: { customerTracking: true },
+  }
+
+  test('payFirst dine-in: no POST /orders — hands the draft to /customer/payment', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: PAY_FIRST_OPS }
+    const expected = computeBill({ subtotal: SUBTOTAL, taxConfig: TAX_CONFIG, orderType: 'dine-in' })
+    const user = renderCart()
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('payment-page')
+    expect(api.post).not.toHaveBeenCalledWith('/orders', expect.anything(), expect.anything())
+    expect(landed.state).toMatchObject({ payFirstDineIn: true, total: expected.total })
+    expect(landed.state.orderPayload).toMatchObject({
+      type: 'dine-in', tableId: 'tbl1', total: expected.total, tipAmount: 0,
+      clientIdempotencyKey: expect.any(String),
+    })
+    expect(landed.state.orderPayload.items).toEqual([
+      expect.objectContaining({ menuItem: 'm1', quantity: 2 }),
+      expect.objectContaining({ menuItem: 'm2', quantity: 3, price: 35.25 }),
+    ])
+    expect(landed.state.cartItemsForStorage).toEqual([
+      // same shape as the takeaway hand-off: unit = resolveUnitPrice (base),
+      // the server re-prices sizes/toppings from the payload
+      expect.objectContaining({ name: 'Paneer Tikka', quantity: 2, unitPrice: landed.state.orderPayload.items[0].price }),
+      expect.objectContaining({ name: 'Masala Chai', quantity: 3, unitPrice: 35.25 }),
+    ])
+    // the cart is kept until the payment screen actually creates the order
+    expect(cartStore.clearCart).not.toHaveBeenCalled()
+  })
+
+  test('payAfter (explicit) dine-in still POSTs /orders', async () => {
+    tenantBlob = { operations: { ...PAY_FIRST_OPS, payment: { ...PAY_FIRST_OPS.payment, dineIn: 'payAfter' } } }
+    const user = renderCart()
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('orders-page')
+    expect(api.post.mock.calls.some((c) => c[0] === '/orders')).toBe(true)
+  })
+
+  test('tips section is shown with no profile (default tips: true)', async () => {
+    renderCart()
+    await settle()
+    expect(screen.getByText('Add Tip')).toBeInTheDocument()
+  })
+
+  test('tips === false hides the Add Tip section', async () => {
+    tenantBlob = { operations: PAY_FIRST_OPS }
+    renderCart()
+    await settle()
+    expect(screen.queryByText('Add Tip')).not.toBeInTheDocument()
   })
 })

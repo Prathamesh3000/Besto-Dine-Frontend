@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { X, Save, Upload } from 'lucide-react'
 import { backendOrigin } from '../../../utils/apiOrigin';
+import { IMAGE_ACCEPT } from '../../../utils/imageFile';
 
 const AddEventTypeModal = ({ isOpen, onClose, onSave, eventType }) => {
     const [name, setName] = useState('')
@@ -124,7 +125,7 @@ const AddEventTypeModal = ({ isOpen, onClose, onSave, eventType }) => {
                                 <div className="flex flex-col gap-2">
                                     <div className="flex flex-col">
                                         <span className="text-[14px] font-[600] text-[#1A181B]">Click to upload</span>
-                                        <span className="text-[12px] text-[#9CA3AF]">PNG, JPG, SVG up to 5MB</span>
+                                        <span className="text-[12px] text-[#9CA3AF]">Any image up to 5MB</span>
                                     </div>
                                     <label className="cursor-pointer">
                                         <div className="flex items-center gap-2 px-5 py-2 border-2 border-[#FE8301] text-[#FE8301] rounded-[10px] text-[13px] font-[700] hover:bg-orange-50 transition-colors w-fit">
@@ -134,7 +135,7 @@ const AddEventTypeModal = ({ isOpen, onClose, onSave, eventType }) => {
                                         <input
                                             type="file"
                                             className="hidden"
-                                            accept="image/*"
+                                            accept={IMAGE_ACCEPT}
                                             onChange={handleFileSelect}
                                         />
                                     </label>

@@ -56,6 +56,7 @@ export function clearGuestSession() {
         localStorage.removeItem('guest_session_start');
         localStorage.removeItem('guest_cart_reset');
         localStorage.removeItem('guest_bill_paid_at');
+        localStorage.removeItem('guest_session_ended');
         localStorage.removeItem('dineInTable');
         localStorage.removeItem('tableNumber');
         localStorage.removeItem('fromQrScan');

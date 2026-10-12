@@ -16,6 +16,11 @@ vi.mock('react-hot-toast', () => {
   return { default: toast, toast }
 })
 vi.mock('@/hooks/useSocketEvent', () => ({ default: () => {} }))
+// No AuthProvider in this test — the operations profile falls back to defaults.
+vi.mock('@/hooks/useOperations', async () => {
+  const { DEFAULT_OPERATIONS } = await import('@/utils/operations')
+  return { default: () => DEFAULT_OPERATIONS, useOperations: () => DEFAULT_OPERATIONS }
+})
 vi.mock('@/Pages/Admin/components/AddReservationModal', () => ({ default: () => null }))
 vi.mock('@/Pages/Admin/components/AddAreaModal', () => ({ default: () => null }))
 vi.mock('@/Pages/Admin/components/AddTableModal', () => ({ default: () => null }))

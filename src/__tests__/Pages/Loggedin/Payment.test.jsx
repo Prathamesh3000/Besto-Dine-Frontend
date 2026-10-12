@@ -17,6 +17,12 @@ vi.mock('react-hot-toast', () => {
   const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() })
   return { default: toast, toast }
 })
+// Customer-side operations profile (null → DEFAULT_PUBLIC_OPERATIONS).
+let opsProfile = null
+vi.mock('@/utils/operations', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, getCustomerOperations: () => opsProfile || actual.DEFAULT_PUBLIC_OPERATIONS }
+})
 vi.mock('@/utils/dineInSession', () => ({ markDineInBillSettled: vi.fn() }))
 vi.mock('@/utils/customerOrderIds', () => ({ rememberOrderIds: vi.fn(), getCustomerOrderSession: vi.fn(() => 'sess') }))
 const socket = { on: vi.fn(), off: vi.fn() }
@@ -75,6 +81,7 @@ async function choose(user, title) {
 
 beforeEach(() => {
   landed = null
+  opsProfile = null
   Object.assign(auth, { isLoggedIn: true, isGuest: false })
   installRazorpay()
   walletAPI.getWallet.mockResolvedValue({ data: { balance: 5000 } })
@@ -327,5 +334,103 @@ describe('Payment — pay at counter', () => {
     await user.click(payBtn())
     expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
     expect(api.post).toHaveBeenCalledWith('/orders', expect.objectContaining({ paymentMethod: 'cash' }), expect.anything())
+  })
+})
+
+
+describe('Payment — pay-first dine-in (operations profile)', () => {
+  const DINE_PAYLOAD = { items: [{ menuItem: 'm1', quantity: 2 }], total: 480.5, type: 'dine-in', tableId: 'tbl1', clientIdempotencyKey: 'web-dine-key' }
+  const PAY_FIRST = { payFirstDineIn: true, orderPayload: DINE_PAYLOAD, total: 480.5, cartItemsForStorage: [{ name: 'Thali', quantity: 2 }] }
+  const ops = ({ online = true, wallet = true, counterCash = true, customerTracking = true } = {}) => ({
+    payment: { dineIn: 'payFirst', methods: { online, wallet, counterCash } },
+    orderFlow: { customerSelfOrder: true, customerTracking },
+    customerApp: { callWaiter: false, tips: false },
+  })
+  const orderCreate = () => api.post.mock.calls.find(([url]) => url === '/orders')
+
+  beforeEach(() => {
+    api.post.mockResolvedValue({ data: { success: true, order: { orderId: 'ORD-DI-7' } } })
+  })
+
+  test.each([
+    [{ online: true, wallet: false, counterCash: false }, ['Pay Online'], ['Pay from Wallet', 'Pay at Counter']],
+    [{ online: false, wallet: true, counterCash: true }, ['Pay from Wallet', 'Pay at Counter'], ['Pay Online']],
+    [{ online: true, wallet: true, counterCash: false }, ['Pay Online', 'Pay from Wallet'], ['Pay at Counter']],
+  ])('methods %o → only the allowed cards are offered', (methods, shown, hidden) => {
+    opsProfile = ops(methods)
+    renderPayment(PAY_FIRST)
+    shown.forEach((t) => expect(screen.getByRole('button', { name: new RegExp(t) })).toBeInTheDocument())
+    hidden.forEach((t) => expect(screen.queryByRole('button', { name: new RegExp(t) })).not.toBeInTheDocument())
+  })
+
+  test('without payFirstDineIn the method filter does not apply (all three cards)', () => {
+    opsProfile = ops({ online: true, wallet: false, counterCash: false })
+    renderPayment(DINE_IN)
+    ;['Pay Online', 'Pay from Wallet', 'Pay at Counter'].forEach((t) =>
+      expect(screen.getByRole('button', { name: new RegExp(t) })).toBeInTheDocument())
+  })
+
+  test('cash: creates the order with paymentIntent counterCash → pay-at-counter confirmation, no bill settle', async () => {
+    opsProfile = ops()
+    const user = renderPayment(PAY_FIRST)
+    await choose(user, 'Pay at Counter')
+    await user.click(payBtn())
+    expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
+    const [, body, opts] = orderCreate()
+    expect(body).toMatchObject({ ...DINE_PAYLOAD, paymentMethod: 'cash', paymentIntent: 'counterCash' })
+    expect(opts).toEqual({ headers: { 'Idempotency-Key': 'web-dine-key' } })
+    expect(api.post).not.toHaveBeenCalledWith(expect.stringMatching(/request-counter-payment/))
+    expect(landed.state).toMatchObject({
+      orderId: 'ORD-DI-7', total: 480.5, isTakeaway: false, payFirstDineIn: true, payAtCounter: true, tracking: true, paymentMethod: 'cash',
+    })
+    expect(markDineInBillSettled).not.toHaveBeenCalled()
+  })
+
+  test('wallet: paymentIntent wallet, pays the server order, confirmation without counter note; tracking follows the profile', async () => {
+    opsProfile = ops({ customerTracking: false })
+    api.get.mockResolvedValue({ data: { order: { _id: 'mongo7', total: 480.5, amountPaid: 0 } } })
+    walletAPI.payWithWallet.mockResolvedValue({ data: { newBalance: 4519.5 } })
+    const user = renderPayment(PAY_FIRST)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Pay from Wallet/ })).toBeEnabled())
+    await choose(user, 'Pay from Wallet')
+    await user.click(payBtn())
+    expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
+    expect(orderCreate()[1]).toMatchObject({ paymentMethod: 'wallet', paymentIntent: 'wallet' })
+    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(480.5, 'mongo7')
+    expect(landed.state).toMatchObject({ payFirstDineIn: true, payAtCounter: false, tracking: false, paymentMethod: 'wallet' })
+    expect(markDineInBillSettled).not.toHaveBeenCalled()
+  })
+
+  test('online: order created after capture with checkout ids and NO paymentIntent', async () => {
+    opsProfile = ops()
+    const user = renderPayment(PAY_FIRST)
+    await choose(user, 'Pay Online')
+    await user.click(payBtn())
+    await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(480.5, null)
+    await act(() => rzp.options.handler(RZP))
+    const body = orderCreate()[1]
+    expect(body).toMatchObject({ paymentMethod: 'online', razorpayPayment: RZP })
+    expect(body).not.toHaveProperty('paymentIntent')
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-DI-7' })
+    expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
+    expect(landed.state).toMatchObject({ payFirstDineIn: true, payAtCounter: false, tracking: true, paymentMethod: 'online' })
+    expect(markDineInBillSettled).not.toHaveBeenCalled()
+  })
+
+  test('the draft records payFirstDineIn so a refresh resumes the pay-first flow', () => {
+    opsProfile = ops()
+    renderPayment(PAY_FIRST)
+    expect(JSON.parse(sessionStorage.getItem('payment_draft_v1'))).toMatchObject({ payFirstDineIn: true, idempotencyKey: 'web-dine-key' })
+  })
+
+  test('takeaway (not pay-first) cash create sends no paymentIntent', async () => {
+    opsProfile = ops()
+    const user = renderPayment(TAKEAWAY)
+    await choose(user, 'Pay at Counter')
+    await user.click(payBtn())
+    await screen.findByText('order-confirmed')
+    expect(orderCreate()[1]).not.toHaveProperty('paymentIntent')
+    expect(landed.state).not.toHaveProperty('payFirstDineIn')
   })
 })

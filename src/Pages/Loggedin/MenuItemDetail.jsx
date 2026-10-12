@@ -18,6 +18,8 @@ import CelebrationIcon from "/celebration.svg";
 import { useCart } from "../../Context/CartContext";
 import { useMenu } from "../../Context/MenuContext";
 import CartButton from "../../Components/Loggedin/CartButton";
+import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
+import QrMenuOnlyNote from "../../Components/Loggedin/QrMenuOnlyNote";
 import VegBadge from "../../Components/Common/VegBadge";
 import { handleImageError, FALLBACK_IMAGE } from "../../utils/image";
 import { resolveUnitPrice } from '../../utils/pricing';
@@ -432,6 +434,9 @@ const MenuItemDetail = () => {
   const [healthMode, setHealthMode] = useState(false);
 
   const { cartItems: cartItemsObj, updateQuantity } = useCart();
+  // QR is menu-only (operations profile) — browse only; CartContext
+  // also refuses the add with the same note.
+  const selfOrderBlocked = useSelfOrderBlocked();
   const { menuItems: contextMenuItems, categories: contextCategories, fetchMenuItems, fetchCategories, menuLoading } = useMenu();
 
   const navigate = useNavigate();
@@ -726,6 +731,7 @@ const MenuItemDetail = () => {
 
         {/* ── Main Content ── */}
         <main className="flex flex-col bg-[#FFFFFF] pb-24">
+          {selfOrderBlocked && <QrMenuOnlyNote className="mx-4 mt-3" />}
 
           {/* ── Category Slider Section ── */}
           <div className="mb-4">
@@ -979,7 +985,7 @@ const MenuItemDetail = () => {
         />
 
         {/* CartButton (global) handles the floating cart bar — no local one needed */}
-        <CartButton />
+        {!selfOrderBlocked && <CartButton />}
 
         {/* <BottomNav /> Removed as file not found */}
 

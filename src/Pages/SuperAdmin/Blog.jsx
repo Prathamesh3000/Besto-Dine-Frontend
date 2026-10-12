@@ -18,6 +18,7 @@ import {
     FileText,
 } from 'lucide-react';
 import api from '../../utils/api';
+import { IMAGE_ACCEPT, isImageFile } from '../../utils/imageFile';
 import {
     PageHeader,
     StatCard,
@@ -161,7 +162,7 @@ function Blog() {
         const file = e.target.files?.[0];
         e.target.value = '';
         if (!file) return;
-        if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return toast.error('Use a JPEG, PNG or WebP image');
+        if (!isImageFile(file)) return toast.error('Please choose an image file');
         if (file.size > 5 * 1024 * 1024) return toast.error('Image must be under 5MB');
         setUploading(true);
         try {
@@ -434,7 +435,7 @@ function Blog() {
                                     : <ImagePlus size={18} className="text-gray-300" />}
                             </div>
                             <label className="cursor-pointer">
-                                <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onCoverPick} />
+                                <input type="file" accept={IMAGE_ACCEPT} className="hidden" onChange={onCoverPick} />
                                 <span className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-xl bg-white text-gray-700 border border-gray-200 hover:border-[#FE8301]/40 hover:bg-orange-50 hover:text-[#FE8301] transition">
                                     {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
                                     {form.coverUrl ? 'Replace' : 'Upload'}

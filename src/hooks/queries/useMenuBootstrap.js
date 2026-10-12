@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import api from '../../utils/api';
-import { getActiveTenantSlug, getActiveBranchId, subscribeActiveTenant } from '../../utils/tenant';
+import { getActiveTenantSlug, getActiveBranchId, subscribeActiveTenant, setActiveTenantOperations } from '../../utils/tenant';
 
 /**
  * Single round-trip first-paint loader for the customer menu page.
@@ -116,6 +116,11 @@ export function useMenuBootstrap({ enabled = true } = {}) {
         }
         if (Array.isArray(categories)) {
             queryClient.setQueryData(['categories', tenantScope], categories);
+        }
+        // Keep the stored operations profile current (pay first / after,
+        // call-waiter…) — the bootstrap always carries the latest one.
+        if (query.data.restaurant?.operations) {
+            setActiveTenantOperations(query.data.restaurant.operations);
         }
     }, [query.data, slug, queryClient]);
 

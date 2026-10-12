@@ -4,8 +4,15 @@ import { X, Edit2, AlertCircle, Trash2, Loader2 } from 'lucide-react';
 import { validateAreaName } from '../utils/validation'
 import api from '../../../utils/api'
 import toast from 'react-hot-toast';
+import { useAdminBranch } from '../../../Context/AdminBranchContext';
 
 const AddAreaModal = ({ onClose, onSubmit }) => {
+    // The branch the owner is viewing in the switcher. A new area is
+    // stamped with it so it shows up in that branch's (strictly
+    // filtered) Tables view instead of landing tenant-level and
+    // disappearing. Pinned sub-admins are forced to their branch by the
+    // backend regardless.
+    const { selectedBranchId: activeBranchId, isLocked: branchLocked } = useAdminBranch();
     const [areaName, setAreaName] = useState('');
     const [note, setNote] = useState('');
     // Customer-facing description of this seating option (QA N12) —
@@ -99,6 +106,7 @@ const AddAreaModal = ({ onClose, onSubmit }) => {
                 setTouched(false);
                 fetchAreas();
             } else {
+                if (!branchLocked && activeBranchId) areaData.branch = activeBranchId;
                 const response = await api.post('/areas', areaData, { _silent: true });
                 toast.success('Area created successfully');
                 if (onSubmit) {

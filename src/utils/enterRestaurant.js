@@ -65,6 +65,7 @@ export function enterRestaurant(restaurant, branch = null, previousTenant = getA
         name: restaurant.name,
         _id: restaurant._id,
         features: restaurant.features || {},
+        operations: restaurant.operations || null,
         branch: branch || null,
     });
 
