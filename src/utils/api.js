@@ -748,6 +748,12 @@ export const shiftAPI = {
     clockOut:    (note) => api.post('/shifts/clock-out', { note }),
 };
 
+export const staffAPI = {
+    // Admin/manager clears a staff member's temporary login lock (10 wrong
+    // passwords → 15 min cooldown). A password reset also clears it.
+    unlockLogin: (id) => api.post(`/staff/${id}/unlock-login`),
+};
+
 export const walletAPI = {
     getWallet:        (opts = {}) => api.get('/wallet', opts),
     redeemPoints:     (points) => api.post('/wallet/points/redeem', { points }),
