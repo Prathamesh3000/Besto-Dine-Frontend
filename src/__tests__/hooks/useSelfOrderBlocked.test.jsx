@@ -5,7 +5,7 @@ const authState = vi.hoisted(() => ({ value: { isStaff: false } }))
 vi.mock('@/Context/AuthContext', () => ({ useAuth: () => authState.value }))
 
 import useSelfOrderBlocked from '@/hooks/useSelfOrderBlocked'
-import { setActiveTenant, clearActiveTenant } from '@/utils/tenant'
+import { setActiveTenant, setActiveTenantOperations, clearActiveTenant } from '@/utils/tenant'
 
 const menuOnly = () => setActiveTenant({ slug: 'hotel', operations: { orderFlow: { customerSelfOrder: false } } })
 
@@ -51,6 +51,33 @@ describe('useSelfOrderBlocked', () => {
       localStorage.setItem('orderType', 'dine-in')
       window.dispatchEvent(new Event('storage_sync'))
     })
+    expect(result.current).toBe(true)
+  })
+
+  // A9: the menu bootstrap refreshes the profile with setActiveTenantOperations
+  // — the hook must pick that up without a storage event from another tab.
+  test('re-evaluates when the restaurant switches self-ordering off/on via setActiveTenantOperations', () => {
+    setActiveTenant({ slug: 'hotel', operations: { orderFlow: { customerSelfOrder: true } } })
+    localStorage.setItem('orderType', 'dine-in')
+    const { result } = renderHook(() => useSelfOrderBlocked())
+    expect(result.current).toBe(false)
+
+    act(() => { setActiveTenantOperations({ orderFlow: { customerSelfOrder: false } }) })
+    expect(result.current).toBe(true)
+
+    act(() => { setActiveTenantOperations({ orderFlow: { customerSelfOrder: true } }) })
+    expect(result.current).toBe(false)
+  })
+
+  test('an unchanged profile does not re-render the hook (no event loop)', () => {
+    setActiveTenant({ slug: 'hotel', operations: { orderFlow: { customerSelfOrder: false } } })
+    localStorage.setItem('orderType', 'dine-in')
+    let renders = 0
+    const { result } = renderHook(() => { renders += 1; return useSelfOrderBlocked() })
+    expect(result.current).toBe(true)
+    const before = renders
+    act(() => { setActiveTenantOperations({ orderFlow: { customerSelfOrder: false } }) })
+    expect(renders).toBe(before)
     expect(result.current).toBe(true)
   })
 })

@@ -6,6 +6,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import api, { razorpayAPI, walletAPI, settingsAPI } from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
+import { useCart } from '../../Context/CartContext';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import { rememberOrderIds, getCustomerOrderSession } from '../../utils/customerOrderIds';
 import { getCustomerOperations } from '../../utils/operations';
@@ -94,6 +95,16 @@ function generateIdempotencyKey() {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
+// Cart.jsx keeps the dine-in checkout's idempotency key under this
+// sessionStorage key (its CHECKOUT_IDEM_KEY) so every retry of the same
+// cart reuses it. In the pay-first flow the cart hands the draft to this
+// page WITHOUT clearing it (a failed payment must keep the cart), so the
+// page that finally creates the order is the one that retires the key.
+const CHECKOUT_IDEM_KEY = 'checkout_idem_v1';
+function clearCheckoutIdempotencyKey() {
+  try { sessionStorage.removeItem(CHECKOUT_IDEM_KEY); } catch { /* ignore */ }
+}
+
 // Load Razorpay script dynamically
 function loadRazorpayScript() {
   return new Promise((resolve) => {
@@ -113,6 +124,7 @@ function Payment() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoggedIn, isGuest } = useAuth();
+  const { clearCart } = useCart();
 
   let tableData = {};
   try { tableData = JSON.parse(localStorage.getItem('dineInTable') || '{}'); } catch { /* corrupted localStorage */ }
@@ -353,6 +365,15 @@ function Payment() {
     // re-fetch it from the server — no order objects on the device.
     rememberOrderIds(getCustomerOrderSession(user, isLoggedIn), [String(data.order.orderId)]);
     window.dispatchEvent(new Event('storage_sync'));
+
+    // Pay-first dine-in: the order now exists, so the cart it was built
+    // from is done — empty it and retire the checkout key. Up to here
+    // (payment cancelled / declined / create rejected) the cart is kept
+    // intact so the customer can simply try again.
+    if (payFirstDineIn) {
+      clearCart();
+      clearCheckoutIdempotencyKey();
+    }
 
     return data.order;
   };

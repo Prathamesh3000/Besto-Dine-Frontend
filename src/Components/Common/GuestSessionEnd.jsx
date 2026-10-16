@@ -7,7 +7,7 @@ import useSocketEvent from '../../hooks/useSocketEvent';
 import { clearGuestSession } from '../../utils/guestSession';
 import { clearOrderIds, getCustomerOrderSession, readRecoveryOrderIds } from '../../utils/customerOrderIds';
 import {
-    isGuestVisitComplete, readGuestSessionEnded, markGuestSessionEnded, clearGuestSessionEnded,
+    evaluateGuestVisit, readGuestSessionEnded, markGuestSessionEnded, clearGuestSessionEnded,
 } from '../../utils/guestSessionEnd';
 
 const POLL_MS = 30 * 1000;
@@ -23,6 +23,9 @@ const POLL_MS = 30 * 1000;
  * Checks run on mount, on any live order update (online payment, staff
  * settling at the counter, kitchen marking served), when the tab comes
  * back into view, and every 30s as a fallback for a dropped socket.
+ * In a no-tracking profile (orders are "served" at creation) the visit
+ * also has to outlive a grace period after the last payment, so a check
+ * that lands inside it schedules one more check for when it elapses.
  */
 export default function GuestSessionEnd() {
     const { isGuest, isLoggedIn, exitGuestMode } = useAuth();
@@ -30,6 +33,7 @@ export default function GuestSessionEnd() {
     const location = useLocation();
     const [open, setOpen] = useState(() => readGuestSessionEnded());
     const checking = useRef(false);
+    const graceTimer = useRef(null);
 
     const onKiosk = location.pathname.startsWith('/kiosk');
     const active = isGuest && !isLoggedIn && !onKiosk;
@@ -46,9 +50,16 @@ export default function GuestSessionEnd() {
             const orders = results
                 .filter((r) => r.status === 'fulfilled' && r.value?.data?.order)
                 .map((r) => r.value.data.order);
-            if (isGuestVisitComplete(orders)) {
+            const { complete, recheckInMs } = evaluateGuestVisit(orders);
+            clearTimeout(graceTimer.current);
+            graceTimer.current = null;
+            if (complete) {
                 markGuestSessionEnded();
                 setOpen(true);
+            } else if (recheckInMs != null) {
+                // Settled but inside the grace period: look again the moment
+                // it is over (plus a beat so the clock has surely passed).
+                graceTimer.current = setTimeout(() => { graceTimer.current = null; check(); }, recheckInMs + 1000);
             }
         } finally {
             checking.current = false;
@@ -64,6 +75,8 @@ export default function GuestSessionEnd() {
         window.addEventListener('dineInLockChange', check);
         return () => {
             clearInterval(timer);
+            clearTimeout(graceTimer.current);
+            graceTimer.current = null;
             document.removeEventListener('visibilitychange', onVisible);
             window.removeEventListener('dineInLockChange', check);
         };

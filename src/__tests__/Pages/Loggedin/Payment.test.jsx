@@ -13,6 +13,10 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 
 const auth = { user: { name: 'Asha', email: 'a@x.in', mobile: '9876543210' }, isLoggedIn: true, isGuest: false }
 vi.mock('@/Context/AuthContext', () => ({ useAuth: () => auth }))
+// Cart store — the pay-first dine-in flow empties the cart once the order
+// exists (the cart page hands the draft over without clearing it).
+const cart = vi.hoisted(() => ({ clearCart: vi.fn() }))
+vi.mock('@/Context/CartContext', () => ({ useCart: () => cart }))
 vi.mock('react-hot-toast', () => {
   const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() })
   return { default: toast, toast }
@@ -82,6 +86,7 @@ async function choose(user, title) {
 beforeEach(() => {
   landed = null
   opsProfile = null
+  cart.clearCart.mockReset()
   Object.assign(auth, { isLoggedIn: true, isGuest: false })
   installRazorpay()
   walletAPI.getWallet.mockResolvedValue({ data: { balance: 5000 } })
@@ -432,5 +437,106 @@ describe('Payment — pay-first dine-in (operations profile)', () => {
     await screen.findByText('order-confirmed')
     expect(orderCreate()[1]).not.toHaveProperty('paymentIntent')
     expect(landed.state).not.toHaveProperty('payFirstDineIn')
+  })
+
+  // A2: Cart.jsx hands the draft over WITHOUT clearing the cart (a failed
+  // payment must keep it). The cart is emptied, and the cart's checkout
+  // idempotency key retired, exactly once the order has been created.
+  describe('cart clean-up once the pay-first order exists', () => {
+    const IDEM = 'checkout_idem_v1'
+    beforeEach(() => {
+      opsProfile = ops()
+      sessionStorage.setItem(IDEM, JSON.stringify({ key: 'web-dine-key', fp: 'fp' }))
+    })
+
+    test('cash: order created → clearCart once + checkout key cleared', async () => {
+      const user = renderPayment(PAY_FIRST)
+      await choose(user, 'Pay at Counter')
+      await user.click(payBtn())
+      await screen.findByText('order-confirmed')
+      expect(cart.clearCart).toHaveBeenCalledTimes(1)
+      expect(sessionStorage.getItem(IDEM)).toBeNull()
+    })
+
+    test('wallet: order created → clearCart once + checkout key cleared', async () => {
+      api.get.mockResolvedValue({ data: { order: { _id: 'mongo7', total: 480.5, amountPaid: 0 } } })
+      walletAPI.payWithWallet.mockResolvedValue({ data: { newBalance: 4519.5 } })
+      const user = renderPayment(PAY_FIRST)
+      await waitFor(() => expect(screen.getByRole('button', { name: /Pay from Wallet/ })).toBeEnabled())
+      await choose(user, 'Pay from Wallet')
+      await user.click(payBtn())
+      await screen.findByText('order-confirmed')
+      expect(cart.clearCart).toHaveBeenCalledTimes(1)
+      expect(sessionStorage.getItem(IDEM)).toBeNull()
+    })
+
+    test('online: cleared only after capture + create succeed', async () => {
+      const user = renderPayment(PAY_FIRST)
+      await choose(user, 'Pay Online')
+      await user.click(payBtn())
+      await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+      expect(cart.clearCart).not.toHaveBeenCalled()          // checkout still open
+      await act(() => rzp.options.handler(RZP))
+      await screen.findByText('order-confirmed')
+      expect(cart.clearCart).toHaveBeenCalledTimes(1)
+      expect(sessionStorage.getItem(IDEM)).toBeNull()
+    })
+
+    test('order create rejected → cart and key left intact', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      api.post.mockRejectedValue({ response: { status: 409, data: { message: 'Table is closed' } } })
+      const user = renderPayment(PAY_FIRST)
+      await choose(user, 'Pay at Counter')
+      await user.click(payBtn())
+      await waitFor(() => expect(toast.error).toHaveBeenCalled())
+      expect(screen.queryByText('order-confirmed')).not.toBeInTheDocument()
+      expect(cart.clearCart).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(IDEM)).not.toBeNull()
+    })
+
+    test('online checkout dismissed / failed → cart and key left intact', async () => {
+      const user = renderPayment(PAY_FIRST)
+      await choose(user, 'Pay Online')
+      await user.click(payBtn())
+      await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+      act(() => rzp.handlers['payment.failed']({ error: { description: 'Bank declined' } }))
+      act(() => rzp.options.modal.ondismiss())
+      expect(cart.clearCart).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(IDEM)).not.toBeNull()
+      expect(payBtn()).toBeEnabled()
+    })
+
+    test('online: create rejected after capture → orphan refund, cart kept', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      api.post.mockRejectedValue({ response: { data: { message: 'Thali is out of stock' } } })
+      const user = renderPayment(PAY_FIRST)
+      await choose(user, 'Pay Online')
+      await user.click(payBtn())
+      await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+      await act(() => rzp.options.handler(RZP))
+      expect(razorpayAPI.orphanRefund).toHaveBeenCalled()
+      expect(cart.clearCart).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(IDEM)).not.toBeNull()
+    })
+
+    test('non-pay-first flows (existing dine-in order, deferred takeaway) never touch the cart here', async () => {
+      const user = renderPayment(DINE_IN)
+      await choose(user, 'Pay Online')
+      await user.click(payBtn())
+      await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+      await act(() => rzp.options.handler(RZP))
+      await screen.findByText('orders-page')
+      expect(cart.clearCart).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(IDEM)).not.toBeNull()
+    })
+
+    test('deferred takeaway create leaves the cart to Cart.jsx (unchanged behaviour)', async () => {
+      const user = renderPayment(TAKEAWAY)
+      await choose(user, 'Pay at Counter')
+      await user.click(payBtn())
+      await screen.findByText('order-confirmed')
+      expect(cart.clearCart).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(IDEM)).not.toBeNull()
+    })
   })
 })

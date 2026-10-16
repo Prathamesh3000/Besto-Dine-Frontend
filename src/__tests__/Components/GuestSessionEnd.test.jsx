@@ -15,7 +15,13 @@ vi.mock('@/utils/customerOrderIds', () => ({
 }))
 
 import GuestSessionEnd from '@/Components/Common/GuestSessionEnd'
-import { isGuestVisitComplete } from '@/utils/guestSessionEnd'
+import { isGuestVisitComplete, evaluateGuestVisit, GUEST_END_GRACE_MS } from '@/utils/guestSessionEnd'
+import { setActiveTenant, clearActiveTenant } from '@/utils/tenant'
+
+// Operations profile without a kitchen screen: the customer blob says
+// tracking is off, and the server marks orders served at creation.
+const NO_TRACKING = { orderFlow: { customerSelfOrder: true, customerTracking: false } }
+const MIN = 60 * 1000
 
 const order = (orderId, status, paymentStatus, extra = {}) => ({ orderId, status, paymentStatus, ...extra })
 const serve = (...orders) => {
@@ -39,6 +45,7 @@ const renderAt = (path = '/customer/menu') => render(
 
 beforeEach(() => {
   localStorage.clear()
+  clearActiveTenant()
   api.get.mockReset()
   auth = { isGuest: true, isLoggedIn: false, exitGuestMode: vi.fn() }
 })
@@ -55,6 +62,51 @@ describe('isGuestVisitComplete', () => {
     ['refunded counts as settled', [order('A', 'served', 'Refunded')], true],
     ['home delivery delivered', [order('A', 'ready', 'Paid', { delivery: { status: 'delivered' } })], true],
   ])('%s', (_l, orders, expected) => expect(isGuestVisitComplete(orders)).toBe(expected))
+
+  test('reads the active restaurant\'s profile by default (no tenant → today\'s rule, no grace)', () => {
+    const justPaid = order('A', 'served', 'Paid', { paidAt: new Date().toISOString() })
+    expect(isGuestVisitComplete([justPaid])).toBe(true)
+    setActiveTenant({ slug: 'counter', operations: NO_TRACKING })
+    expect(isGuestVisitComplete([justPaid])).toBe(false)
+  })
+})
+
+describe('isGuestVisitComplete — no-tracking profile (orders are "served" at creation)', () => {
+  const now = Date.parse('2026-10-16T12:00:00Z')
+  const paid = (id, minutesAgo, extra = {}) =>
+    order(id, 'served', 'Paid', { paidAt: new Date(now - minutesAgo * MIN).toISOString(), ...extra })
+
+  test('GUEST_END_GRACE_MS is 20 minutes', () => expect(GUEST_END_GRACE_MS).toBe(20 * MIN))
+
+  test.each([
+    ['paid + served 1 min ago → still eating, not complete', [paid('A', 1)], false],
+    ['paid + served 21 min ago → complete', [paid('A', 21)], true],
+    ['exactly 20 min ago → complete', [paid('A', 20)], true],
+    ['mixed: one round 25 min ago, latest 1 min ago → not complete', [paid('A', 25), paid('B', 1)], false],
+    ['mixed: both rounds older than 20 min → complete', [paid('A', 45), paid('B', 22)], true],
+    ['mixed: latest round unpaid → not complete regardless of age', [paid('A', 45), order('B', 'served', 'Pending')], false],
+    ['cancelled round is ignored for the grace clock', [paid('A', 30), order('B', 'cancelled', 'Pending', { paidAt: new Date(now).toISOString() })], true],
+    ['no paidAt → falls back to updatedAt', [order('A', 'served', 'Paid', { updatedAt: new Date(now - 2 * MIN).toISOString() })], false],
+    ['no timestamps at all → today\'s rule (complete)', [order('A', 'served', 'Paid')], true],
+    ['still cooking (profile with a kitchen but tracking off) → not complete', [order('A', 'preparing', 'Paid', { paidAt: new Date(now - 30 * MIN).toISOString() })], false],
+  ])('%s', (_l, orders, expected) => expect(isGuestVisitComplete(orders, NO_TRACKING, now)).toBe(expected))
+
+  test('the default profile ignores the grace period (today\'s behaviour)', () => {
+    expect(isGuestVisitComplete([paid('A', 0)], undefined, now)).toBe(true)
+    expect(isGuestVisitComplete([paid('A', 0)], { orderFlow: { customerTracking: true } }, now)).toBe(true)
+  })
+
+  test('the full staff flags are honoured too (kitchenDisplay / servedStep false)', () => {
+    expect(isGuestVisitComplete([paid('A', 1)], { orderFlow: { kitchenDisplay: false } }, now)).toBe(false)
+    expect(isGuestVisitComplete([paid('A', 1)], { orderFlow: { servedStep: false } }, now)).toBe(false)
+  })
+
+  test('evaluateGuestVisit reports how long until the grace period is over', () => {
+    expect(evaluateGuestVisit([paid('A', 25), paid('B', 5)], NO_TRACKING, now)).toEqual({ complete: false, recheckInMs: 15 * MIN })
+    expect(evaluateGuestVisit([paid('A', 25)], NO_TRACKING, now)).toEqual({ complete: true, recheckInMs: null })
+    expect(evaluateGuestVisit([order('A', 'served', 'Pending')], NO_TRACKING, now)).toEqual({ complete: false, recheckInMs: null })
+    expect(evaluateGuestVisit([paid('A', 0)], undefined, now)).toEqual({ complete: true, recheckInMs: null })
+  })
 })
 
 describe('GuestSessionEnd popup', () => {
@@ -87,6 +139,38 @@ describe('GuestSessionEnd popup', () => {
     renderAt()
     await waitFor(() => expect(api.get).toHaveBeenCalled())
     expect(screen.queryByTestId('guest-session-end')).not.toBeInTheDocument()
+  })
+
+  test('no-tracking profile: a just-paid guest is NOT told guest mode is over; the popup comes once the grace period elapses (timer, no new order event)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      setActiveTenant({ slug: 'counter', operations: NO_TRACKING })
+      // Paid (and auto-"served") 19 minutes ago — still inside the grace period.
+      serve(order('ORD-1', 'served', 'Paid', { paidAt: new Date(Date.now() - 19 * MIN).toISOString() }),
+        order('ORD-2', 'served', 'Paid', { paidAt: new Date(Date.now() - 30 * MIN).toISOString() }))
+      renderAt()
+      await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+      expect(screen.queryByTestId('guest-session-end')).not.toBeInTheDocument()
+      expect(localStorage.getItem('guest_session_ended')).toBeNull()
+
+      // 1 min + the re-check beat later the grace period is over: the
+      // component re-checks on its own and the popup appears.
+      api.get.mockClear()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1 * MIN + 1500) })
+      expect(api.get).toHaveBeenCalled()
+      expect(await screen.findByTestId('guest-session-end')).toBeInTheDocument()
+      expect(localStorage.getItem('guest_session_ended')).toBe('1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('default profile: the popup still appears immediately on paid + served (no grace)', async () => {
+    setActiveTenant({ slug: 'cafe', operations: { orderFlow: { customerSelfOrder: true, customerTracking: true } } })
+    serve(order('ORD-1', 'served', 'Paid', { paidAt: new Date().toISOString() }), order('ORD-2', 'served', 'Paid', { paidAt: new Date().toISOString() }))
+    renderAt()
+    expect(await screen.findByTestId('guest-session-end')).toBeInTheDocument()
   })
 
   test('a reload after the visit ended shows the popup again without refetching', async () => {

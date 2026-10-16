@@ -180,15 +180,27 @@ export function setActiveBranch(branch) {
  * menu bootstrap carries the latest one). Deliberately does NOT notify
  * subscribers: tenant subscribers drop the bootstrap cache, and a
  * notify from the bootstrap's own success handler would loop.
+ *
+ * It does announce a CHANGED profile with the same-window `storage_sync`
+ * event the other customer-state writers use (guestSession, dineInSession,
+ * enterRestaurant), so hooks that read the profile from localStorage
+ * (useSelfOrderBlocked, Header, Home…) re-render at once. An identical
+ * profile is a no-op — the bootstrap calls this on every success.
  */
 export function setActiveTenantOperations(operations) {
     const t = getActiveTenant();
     if (!t || !operations || typeof operations !== 'object') return t;
+    let changed = true;
+    try {
+        changed = JSON.stringify(t.operations ?? null) !== JSON.stringify(operations);
+    } catch { /* unserialisable — treat as changed */ }
+    if (!changed) return t;
     const next = { ...t, operations };
     inMemoryCache = next;
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event('storage_sync')); } catch { /* ignore */ }
     return next;
 }
 
