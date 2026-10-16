@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'vitest'
 import {
-  QR_MENU_ONLY_NOTE, isCustomerSelfOrderOff, isDineInSelfOrderBlocked, serviceSpotLabel,
+  QR_MENU_ONLY_NOTE, isCustomerSelfOrderOff, isDineInSelfOrderBlocked, serviceSpotLabel, dineInPaymentChoice,
 } from '@/utils/customerOrdering'
 import { setActiveTenant, clearActiveTenant } from '@/utils/tenant'
 
@@ -48,5 +48,28 @@ describe('customerOrdering helpers', () => {
     expect(serviceSpotLabel({ serviceModel: 'counterService' })).toBe('Table')
     expect(serviceSpotLabel({ serviceModel: 'tableService' })).toBe('Table')
     expect(serviceSpotLabel()).toBe('Table')
+  })
+})
+
+describe('dineInPaymentChoice', () => {
+  test('no profile / no payment block / unknown value → payAfter (today)', () => {
+    expect(dineInPaymentChoice()).toBe('payAfter')
+    expect(dineInPaymentChoice(null)).toBe('payAfter')
+    expect(dineInPaymentChoice({})).toBe('payAfter')
+    expect(dineInPaymentChoice({ payment: {} })).toBe('payAfter')
+    expect(dineInPaymentChoice({ payment: { dineIn: 'bogus' } })).toBe('payAfter')
+    setActiveTenant({ slug: 'cafe' })
+    expect(dineInPaymentChoice()).toBe('payAfter')
+  })
+
+  test('passes payFirst / payAfter / either through', () => {
+    expect(dineInPaymentChoice({ payment: { dineIn: 'payFirst' } })).toBe('payFirst')
+    expect(dineInPaymentChoice({ payment: { dineIn: 'payAfter' } })).toBe('payAfter')
+    expect(dineInPaymentChoice({ payment: { dineIn: 'either' } })).toBe('either')
+  })
+
+  test('reads the active tenant profile by default', () => {
+    setActiveTenant({ slug: 'hotel', operations: { payment: { dineIn: 'either' } } })
+    expect(dineInPaymentChoice()).toBe('either')
   })
 })

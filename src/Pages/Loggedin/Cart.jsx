@@ -39,7 +39,7 @@ import { reportMissingFields } from "../../utils/requiredFields";
 import { getCustomerOperations } from "../../utils/operations";
 import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
 import QrMenuOnlyNote from "../../Components/Loggedin/QrMenuOnlyNote";
-import { QR_MENU_ONLY_NOTE, serviceSpotLabel } from "../../utils/customerOrdering";
+import { QR_MENU_ONLY_NOTE, serviceSpotLabel, dineInPaymentChoice } from "../../utils/customerOrdering";
 
 // ─── Checkout idempotency key ────────────────────────────────────────────────
 // One key per checkout attempt. It survives a slow-network retry / double
@@ -1364,8 +1364,10 @@ function Cart() {
     setCustomizeItemIndex(null);
   };
 
-  // Handle Place Order
-  const handlePlaceOrder = async () => {
+  // Handle Place Order. `payChoice` ('payFirst' | 'payAfter') is the
+  // customer's pick when the operations profile says payment.dineIn is
+  // 'either' (two buttons); the single-button modes ignore it.
+  const handlePlaceOrder = async (payChoice) => {
     if (cartItems.length === 0 || isSubmitting) return;
 
     // GST-005 — 24h FE cap. Block guest checkout when guest_session_start
@@ -1644,7 +1646,10 @@ function Cart() {
           },
         });
       };
-      if (getCustomerOperations().payment?.dineIn === 'payFirst') {
+      // 'either': the customer chose "Pay now" (pay-first path) or "Pay
+      // after the meal" (today's path). Without a pick, today's path.
+      const payMode = dineInPaymentChoice();
+      if (payMode === 'payFirst' || (payMode === 'either' && payChoice === 'payFirst')) {
         handOffToPayment(idemKey);
         return;
       }
@@ -2733,9 +2738,46 @@ function Cart() {
         {/* QR is menu-only — no Place Order, just the note. */}
         {dineInOrderingOff ? (
           <QrMenuOnlyNote />
+        ) : !isTakeaway && dineInPaymentChoice() === 'either' ? (
+          /* Operations profile payment.dineIn:'either' — the customer
+             picks: pay now (hand-off to the payment screen, the order is
+             created once paid) or pay after the meal (today's path). */
+          <div className="flex flex-col gap-2" data-testid="pay-choice">
+            <button
+              type="button"
+              onClick={() => handlePlaceOrder('payFirst')}
+              disabled={cartItems.length === 0 || isSubmitting || dineInLocked}
+              className={`w-full py-3 rounded-xl semibold font-nunito text-[14px] shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-300 ${
+                isSubmitting || cartItems.length === 0 || dineInLocked
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-[#FE8301] text-white"
+              }`}
+            >
+              {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <ShoppingCart size={18} />}
+              <span>
+                {dineInLocked
+                  ? "Re-scan QR to order"
+                  : isSubmitting
+                  ? "Placing Order..."
+                  : `Pay now ₹${finalTakeawayTotal.toFixed(2)}`}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePlaceOrder('payAfter')}
+              disabled={cartItems.length === 0 || isSubmitting || dineInLocked}
+              className={`w-full py-2.5 rounded-xl semibold font-nunito text-[14px] border flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-300 ${
+                isSubmitting || cartItems.length === 0 || dineInLocked
+                  ? "border-gray-200 text-gray-400 cursor-not-allowed"
+                  : "border-[#FE8301] text-[#FE8301] bg-white"
+              }`}
+            >
+              Pay after the meal
+            </button>
+          </div>
         ) : (
         <button
-          onClick={handlePlaceOrder}
+          onClick={() => handlePlaceOrder()}
           disabled={cartItems.length === 0 || isSubmitting || (dineInLocked && !isTakeaway)}
           className={`w-full py-3 rounded-xl semibold font-nunito text-[14px] shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-300 ${
             isSubmitting || cartItems.length === 0 || (dineInLocked && !isTakeaway)

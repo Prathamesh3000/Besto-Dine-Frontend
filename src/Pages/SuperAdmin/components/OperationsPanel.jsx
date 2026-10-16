@@ -35,9 +35,20 @@ const ADVANCED_LABELS = {
     'customerApp.requestBill': '"Ask for bill" button',
     'customerApp.appendToOrder': 'Customers can add more items',
     'customerApp.tips': 'Tips',
+    'tables.useTables': 'Table numbers in use',
     'tables.assignWaiters': 'Assign waiters to tables',
     'tables.mergeTables': 'Merge tables',
 };
+
+// Offered by the catalogue but not implemented yet (design §5.4: token-
+// number mode "needs its own design"). The server normalises
+// tables.useTables:false back to true and reports it in `warnings`.
+const TOKEN_MODE_NOTE = 'Token-number mode (no tables) is not available yet';
+const UNAVAILABLE_QUESTIONS = { useTables: TOKEN_MODE_NOTE };
+const UNAVAILABLE_ADVANCED = { 'tables.useTables': TOKEN_MODE_NOTE };
+
+/** Save failed because someone saved a newer version first (409). */
+const STALE_PROFILE_NOTE = 'Someone else changed this profile — reloaded the latest version';
 
 const ENUM_LABELS = {
     tableService: 'Table service',
@@ -141,7 +152,10 @@ export default function OperationsPanel({ restaurant, canEdit }) {
 
     const resolved = (canEdit ? preview?.resolved : null) || loaded?.resolved || null;
     const errors = preview?.errors || [];
-    const warnings = preview?.warnings || loaded?.validation?.warnings || [];
+    // The save response carries `warnings` at the top level (and in
+    // `validation`); GET only has `validation.warnings`.
+    const storedWarnings = loaded?.warnings || loaded?.validation?.warnings || [];
+    const warnings = preview?.warnings || storedWarnings;
     const impact = preview?.impact || [];
 
     const applyPreset = (key) => {
@@ -167,13 +181,38 @@ export default function OperationsPanel({ restaurant, canEdit }) {
     const save = async () => {
         setSaving(true);
         try {
-            const res = await api.put(`/superadmin/restaurants/${rid}/operations`, { operations: draft });
+            // Optimistic concurrency: the stamp of the version this edit
+            // started from (the stored profile's updatedAt; null when the
+            // restaurant has no profile yet). The server answers 409
+            // OPERATIONS_STALE when someone saved a newer one meanwhile.
+            const expectedUpdatedAt = loaded?.profile?.updatedAt || null;
+            const res = await api.put(`/superadmin/restaurants/${rid}/operations`, {
+                operations: { ...draft, updatedAt: expectedUpdatedAt },
+                expectedUpdatedAt,
+            });
             const payload = res.data?.data;
             setLoaded(payload);
             setDraft(payload?.profile || draft);
+            setPreview(null);   // show the saved version's warnings until the next preview
             toast.success('Operations updated — the restaurant\'s apps follow the new flow');
         } catch (err) {
-            toast.error(err.response?.data?.message || 'Failed to save operations');
+            const body = err.response?.data;
+            if (err.response?.status === 409 && body?.code === 'OPERATIONS_STALE') {
+                // Someone else saved first: drop the local edits and show
+                // the latest version — the controller returns it as
+                // `data` (the GET payload shape); else refetch it.
+                toast.error(STALE_PROFILE_NOTE);
+                const current = body.data?.profile ? body.data : body.current?.profile ? body.current : null;
+                if (current) {
+                    setLoaded(current);
+                    setDraft(current.profile);
+                    setPreview(null);
+                } else {
+                    await load();
+                }
+                return;
+            }
+            toast.error(body?.message || 'Failed to save operations');
         } finally {
             setSaving(false);
         }
@@ -289,23 +328,31 @@ export default function OperationsPanel({ restaurant, canEdit }) {
 
             {/* 4. Questions */}
             <div className="mb-5 grid gap-3 sm:grid-cols-3">
-                {catalog.questions.map(q => (
-                    <label key={q.key} className="block text-xs">
-                        <span className="font-semibold text-gray-800">{q.label}</span>
-                        {q.help && <span className="block text-gray-500 mt-0.5">{q.help}</span>}
-                        <select
-                            className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs"
-                            value={draft.answers[q.key] == null ? '' : String(draft.answers[q.key])}
-                            disabled={!canEdit}
-                            onChange={e => setAnswer(q.key, e.target.value)}
-                            aria-label={q.label}
-                        >
-                            {q.options.map(o => (
-                                <option key={String(o.value)} value={o.value == null ? '' : String(o.value)}>{o.label}</option>
-                            ))}
-                        </select>
-                    </label>
-                ))}
+                {catalog.questions.map(q => {
+                    const unavailable = UNAVAILABLE_QUESTIONS[q.key];
+                    return (
+                        <label key={q.key} className={`block text-xs ${unavailable ? 'opacity-60' : ''}`}>
+                            <span className="font-semibold text-gray-800">{q.label}</span>
+                            {q.help && <span className="block text-gray-500 mt-0.5">{q.help}</span>}
+                            <select
+                                className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                value={draft.answers[q.key] == null ? '' : String(draft.answers[q.key])}
+                                disabled={!canEdit || !!unavailable}
+                                onChange={e => setAnswer(q.key, e.target.value)}
+                                aria-label={q.label}
+                            >
+                                {q.options.map(o => (
+                                    <option key={String(o.value)} value={o.value == null ? '' : String(o.value)} disabled={!!o.disabled}>
+                                        {o.label}{o.note ? ` — ${o.note}` : ''}
+                                    </option>
+                                ))}
+                            </select>
+                            {unavailable && (
+                                <span className="block text-gray-500 mt-0.5" data-testid={`ops-question-${q.key}-unavailable`}>{unavailable}</span>
+                            )}
+                        </label>
+                    );
+                })}
             </div>
 
             {/* 5. Advanced fine-tune */}
@@ -328,15 +375,20 @@ export default function OperationsPanel({ restaurant, canEdit }) {
                             {Object.entries(catalog.advancedPaths || {}).map(([path, type]) => {
                                 const overridden = Object.prototype.hasOwnProperty.call(draft.advanced || {}, path);
                                 const value = overridden ? draft.advanced[path] : getPath(resolved, path);
+                                const unavailable = UNAVAILABLE_ADVANCED[path];
+                                const locked = !canEdit || !!unavailable;
                                 return (
-                                    <tr key={path} className="border-b border-gray-50 last:border-0">
-                                        <td className="py-1.5 pr-3 text-gray-800">{ADVANCED_LABELS[path] || path}</td>
+                                    <tr key={path} className={`border-b border-gray-50 last:border-0 ${unavailable ? 'opacity-60' : ''}`}>
+                                        <td className="py-1.5 pr-3 text-gray-800">
+                                            {ADVANCED_LABELS[path] || path}
+                                            {unavailable && <span className="block text-[11px] text-gray-500">{unavailable}</span>}
+                                        </td>
                                         <td className="py-1.5 pr-3">
                                             {Array.isArray(type) ? (
                                                 <select
                                                     className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs"
                                                     value={value}
-                                                    disabled={!canEdit}
+                                                    disabled={locked}
                                                     onChange={e => setAdvanced(path, e.target.value)}
                                                     aria-label={ADVANCED_LABELS[path] || path}
                                                 >
@@ -349,7 +401,7 @@ export default function OperationsPanel({ restaurant, canEdit }) {
                                                     max={240}
                                                     className="w-20 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs"
                                                     value={value ?? ''}
-                                                    disabled={!canEdit}
+                                                    disabled={locked}
                                                     onChange={e => setAdvanced(path, Number(e.target.value))}
                                                     aria-label={ADVANCED_LABELS[path] || path}
                                                 />
@@ -358,7 +410,7 @@ export default function OperationsPanel({ restaurant, canEdit }) {
                                                     type="checkbox"
                                                     className="accent-[#FE8301]"
                                                     checked={!!value}
-                                                    disabled={!canEdit}
+                                                    disabled={locked}
                                                     onChange={e => setAdvanced(path, e.target.checked)}
                                                     aria-label={ADVANCED_LABELS[path] || path}
                                                 />

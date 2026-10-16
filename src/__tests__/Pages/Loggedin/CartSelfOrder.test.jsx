@@ -178,6 +178,39 @@ describe('Cart — QR menu-only (customerSelfOrder:false)', () => {
   })
 })
 
+describe('Cart — payment.dineIn "either" with the other gates', () => {
+  const EITHER = { payment: { dineIn: 'either', methods: { online: true, wallet: true, counterCash: true } } }
+
+  test('menu-only QR wins: no pay choice, just the staff note', async () => {
+    tenantBlob = { slug: 'hotel', operations: { ...EITHER, orderFlow: { customerSelfOrder: false } } }
+    renderCart()
+    await settle()
+    expect(screen.queryByTestId('pay-choice')).not.toBeInTheDocument()
+    expect(screen.getByTestId('qr-menu-only-note')).toBeInTheDocument()
+  })
+
+  test('takeaway is untouched by the dine-in choice: single Proceed to Pay', async () => {
+    tenantBlob = { slug: 'hotel', operations: EITHER }
+    renderCart({ orderType: 'takeaway' })
+    await settle()
+    expect(screen.queryByTestId('pay-choice')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Please Select Pickup Time|Proceed to Pay/ })).toBeInTheDocument()
+  })
+
+  test('"Pay after the meal" then a stale 402 still recovers into the pay-first hand-off', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: EITHER }
+    api.post.mockImplementation((url) => (url === '/orders'
+      ? Promise.reject({ response: { status: 402, data: { code: 'PAYMENT_REQUIRED_FIRST', methods: { online: true, wallet: true, counterCash: false } } } })
+      : Promise.resolve({ data: { success: true } })))
+    const user = renderCart()
+    await settle()
+    await user.click(screen.getByRole('button', { name: 'Pay after the meal' }))
+    await screen.findByText('payment-page')
+    expect(tenantBlob.operations.payment.dineIn).toBe('payFirst')
+    expect(landed.state).toMatchObject({ payFirstDineIn: true })
+  })
+})
+
 describe('Cart — serviceModel wording', () => {
   test('roomService labels the spot "Room"', async () => {
     tenantBlob = { operations: { serviceModel: 'roomService' } }
@@ -206,8 +239,10 @@ describe('Cart — 402 PAYMENT_REQUIRED_FIRST (stale cached profile)', () => {
     await settle()
     await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
     await screen.findByText('payment-page')
+    // getCustomerOperations() fills the blob with today's defaults, so the
+    // stored payment block also carries the default channel modes.
     expect(setActiveTenantOperations).toHaveBeenCalledWith(expect.objectContaining({
-      payment: { dineIn: 'payFirst', methods: { online: true, wallet: false, counterCash: true } },
+      payment: expect.objectContaining({ dineIn: 'payFirst', methods: { online: true, wallet: false, counterCash: true } }),
     }))
     expect(tenantBlob.operations.payment.dineIn).toBe('payFirst')
     expect(toast).toHaveBeenCalledWith('This restaurant asks you to pay first', expect.anything())
@@ -227,6 +262,6 @@ describe('Cart — 402 PAYMENT_REQUIRED_FIRST (stale cached profile)', () => {
     await settle()
     await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
     await screen.findByText('payment-page')
-    expect(tenantBlob.operations.payment).toEqual({ dineIn: 'payFirst', methods })
+    expect(tenantBlob.operations.payment).toMatchObject({ dineIn: 'payFirst', methods })
   })
 })

@@ -9,6 +9,8 @@ vi.mock('react-hot-toast', () => ({ toast, default: toast }))
 
 import OperationsPanel, { flowSteps } from '@/Pages/SuperAdmin/components/OperationsPanel'
 
+const STALE_PROFILE_NOTE = 'Someone else changed this profile — reloaded the latest version'
+
 const ALL_ON = { qrOrdering: true, waiter: true, captain: true, chef: true, customerPayment: true }
 const HOTEL_MODULES = { qrOrdering: true, waiter: false, captain: false, chef: false, customerPayment: true }
 
@@ -49,11 +51,16 @@ const CATALOG = {
   ],
   questions: [
     { key: 'dineInPayment', label: 'When does a dine-in customer pay?', options: [{ value: null, label: 'Decide' }, { value: 'payFirst', label: 'Before' }, { value: 'payAfter', label: 'After' }] },
+    { key: 'useTables', label: 'Does the restaurant use table numbers?', options: [{ value: null, label: 'Yes (default)' }, { value: true, label: 'Yes' }, { value: false, label: 'No — token numbers instead' }] },
   ],
   advancedPaths: { 'customerApp.tips': 'boolean', 'payment.takeaway': ['payFirst', 'payAfter', 'either'] },
 }
 
 const STORED = { version: 1, preset: 'fullService', modules: ALL_ON, answers: { dineInPayment: null, counterCash: null, useTables: null }, advanced: {} }
+// What the server says when a stored profile asked for token-number mode
+// (resolver normalises tables.useTables:false → true and warns).
+const TOKEN_WARNING = 'token-number mode (tables.useTables:false) is not available yet — table numbers stay in use'
+const tokenWarnings = (profile) => (profile?.answers?.useTables === false ? [TOKEN_WARNING] : [])
 
 const restaurant = {
   _id: 'r1',
@@ -66,10 +73,10 @@ beforeEach(() => {
     return Promise.resolve({ data: { data: { profile: STORED, isDefault: true, resolved: resolvedFor(ALL_ON), validation: { errors: [], warnings: [] } } } })
   })
   api.post.mockReset().mockImplementation((_url, body) => Promise.resolve({
-    data: { data: { profile: body.operations, resolved: resolvedFor(body.operations.modules), errors: [], warnings: [], impact: [{ area: 'roles', severity: 'info', message: 'Waiter app switched off' }] } },
+    data: { data: { profile: body.operations, resolved: resolvedFor(body.operations.modules), errors: [], warnings: tokenWarnings(body.operations), impact: [{ area: 'roles', severity: 'info', message: 'Waiter app switched off' }] } },
   }))
   api.put.mockReset().mockImplementation((_url, body) => Promise.resolve({
-    data: { data: { profile: body.operations, isDefault: false, resolved: resolvedFor(body.operations.modules), validation: { errors: [], warnings: [] } } },
+    data: { data: { profile: { ...body.operations, updatedAt: '2026-10-16T10:00:00.000Z' }, isDefault: false, resolved: resolvedFor(body.operations.modules), validation: { errors: [], warnings: tokenWarnings(body.operations) }, warnings: tokenWarnings(body.operations), impact: [] } },
   }))
   toast.success.mockReset(); toast.error.mockReset()
 })
@@ -129,8 +136,36 @@ describe('OperationsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/superadmin/restaurants/r1/operations', { operations: expect.objectContaining({ preset: 'hotelPayFirstSelfOrder' }) }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/superadmin/restaurants/r1/operations', expect.objectContaining({ operations: expect.objectContaining({ preset: 'hotelPayFirstSelfOrder' }) })))
     expect(toast.success).toHaveBeenCalled()
+  })
+
+  test('save sends the stamp of the version being edited (null when the restaurant has no profile yet)', async () => {
+    await mount()
+    fireEvent.click(screen.getByText('Hotel / self-service, pay first'))
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const body = api.put.mock.calls.at(-1)[1]
+    expect(body.expectedUpdatedAt).toBeNull()
+    expect(body.operations.updatedAt).toBeNull()
+  })
+
+  test('save sends the stored updatedAt as the stamp once a profile exists', async () => {
+    const stored = { ...STORED, updatedAt: '2026-10-15T08:00:00.000Z' }
+    api.get.mockImplementation((url) => (url === '/superadmin/operations/presets'
+      ? Promise.resolve({ data: { data: CATALOG } })
+      : Promise.resolve({ data: { data: { profile: stored, isDefault: false, resolved: resolvedFor(ALL_ON), validation: { errors: [], warnings: [] } } } })))
+    await mount()
+    fireEvent.click(screen.getByLabelText('Waiter'))
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const body = api.put.mock.calls.at(-1)[1]
+    expect(body.expectedUpdatedAt).toBe('2026-10-15T08:00:00.000Z')
+    expect(body.operations.updatedAt).toBe('2026-10-15T08:00:00.000Z')
   })
 
   test('ticking a module switches the preset to custom', async () => {
@@ -166,6 +201,105 @@ describe('OperationsPanel', () => {
     fireEvent.click(screen.getByText(/Advanced — fine-tune/))
     fireEvent.click(within(screen.getByTestId('ops-advanced')).getByLabelText('Tips'))
     await waitFor(() => expect(api.post.mock.calls.at(-1)?.[1].operations.advanced).toEqual({ 'customerApp.tips': false }))
+  })
+
+  describe('tables.useTables:false (token-number mode) is offered but not available (B12)', () => {
+    const TOKEN_STORED = { ...STORED, preset: 'custom', answers: { ...STORED.answers, useTables: false } }
+    const getWithTokenProfile = (url) => (url === '/superadmin/operations/presets'
+      ? Promise.resolve({ data: { data: CATALOG } })
+      : Promise.resolve({ data: { data: { profile: TOKEN_STORED, isDefault: false, resolved: resolvedFor(ALL_ON), validation: { errors: [], warnings: [TOKEN_WARNING] } } } }))
+
+    test('the table-numbers question is disabled with a "not available yet" note, other questions stay editable', async () => {
+      await mount()
+      const select = screen.getByLabelText('Does the restaurant use table numbers?')
+      expect(select).toBeDisabled()
+      expect(screen.getByTestId('ops-question-useTables-unavailable')).toHaveTextContent('Token-number mode (no tables) is not available yet')
+      expect(screen.getByLabelText('When does a dine-in customer pay?')).toBeEnabled()
+      // changing it does nothing (no preview with useTables:false is requested)
+      fireEvent.change(select, { target: { value: 'false' } })
+      await waitFor(() => expect(api.post).toHaveBeenCalledTimes(0))
+    })
+
+    test('a stored profile with useTables:false shows the server warning from the preview', async () => {
+      api.get.mockImplementation(getWithTokenProfile)
+      await mount()
+      await waitFor(() => expect(api.post).toHaveBeenCalled())
+      expect(await screen.findByTestId('ops-warnings')).toHaveTextContent(TOKEN_WARNING)
+      expect(screen.getByTestId('ops-question-useTables-unavailable')).toBeInTheDocument()
+    })
+
+    test('read-only: the stored validation warning is shown without a preview', async () => {
+      api.get.mockImplementation(getWithTokenProfile)
+      await mount({ canEdit: false })
+      expect(screen.getByTestId('ops-warnings')).toHaveTextContent(TOKEN_WARNING)
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    test('the save response warnings are shown after saving', async () => {
+      api.get.mockImplementation(getWithTokenProfile)
+      await mount()
+      fireEvent.click(screen.getByLabelText('Waiter'))
+      await waitFor(() => expect(api.post.mock.calls.at(-1)?.[1].operations.modules.waiter).toBe(false))
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      await waitFor(() => expect(toast.success).toHaveBeenCalled())
+      expect(screen.getByTestId('ops-warnings')).toHaveTextContent(TOKEN_WARNING)
+    })
+  })
+
+  describe('optimistic concurrency: 409 OPERATIONS_STALE', () => {
+    // operationsController.staleResponse: the latest GET-shaped payload rides in `data`
+    const stale = (current) => ({ response: { status: 409, data: { success: false, code: 'OPERATIONS_STALE', message: 'stale', ...(current ? { data: current } : {}) } } })
+    const editAndSave = async () => {
+      fireEvent.click(screen.getByLabelText('Waiter'))
+      await waitFor(() => expect(api.post.mock.calls.at(-1)?.[1].operations.modules.waiter).toBe(false))
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+    }
+
+    test('reloads the latest version from the 409 body, discards the local edits, tells the admin', async () => {
+      const theirs = { ...STORED, preset: 'custom', modules: { ...ALL_ON, chef: false }, updatedAt: '2026-10-16T09:00:00.000Z' }
+      api.put.mockRejectedValue(stale({ profile: theirs, isDefault: false, resolved: resolvedFor(theirs.modules), validation: { errors: [], warnings: [] } }))
+      await mount()
+      await editAndSave()
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(STALE_PROFILE_NOTE))
+      expect(toast.success).not.toHaveBeenCalled()
+      // our edit (waiter off) is gone; theirs (chef off) is what is shown
+      await waitFor(() => expect(screen.getByLabelText('Waiter')).toBeChecked())
+      expect(screen.getByLabelText('Chef (kitchen screen)')).not.toBeChecked()
+      // nothing dirty any more → Save disabled; not refetched
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+      expect(api.get.mock.calls.filter(([u]) => u.endsWith('/operations')).length).toBe(1)
+      // the next save would carry their stamp
+      fireEvent.click(screen.getByLabelText('Captain'))
+      await waitFor(() => expect(api.post.mock.calls.at(-1)?.[1].operations.modules.captain).toBe(false))
+      api.put.mockImplementation((_url, body) => Promise.resolve({ data: { data: { profile: body.operations, isDefault: false, resolved: resolvedFor(body.operations.modules), validation: { errors: [], warnings: [] }, warnings: [] } } }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+      expect(api.put.mock.calls.at(-1)[1].expectedUpdatedAt).toBe('2026-10-16T09:00:00.000Z')
+    })
+
+    test('without the latest payload in the body it refetches the profile', async () => {
+      api.put.mockRejectedValue(stale(null))
+      await mount()
+      await editAndSave()
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(STALE_PROFILE_NOTE))
+      await waitFor(() => expect(api.get.mock.calls.filter(([u]) => u.endsWith('/operations')).length).toBe(2))
+      await waitFor(() => expect(screen.getByLabelText('Waiter')).toBeChecked())
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    })
+
+    test('other 409s / errors keep the generic failure toast and the local edits', async () => {
+      api.put.mockRejectedValue({ response: { status: 409, data: { code: 'SOMETHING_ELSE', message: 'nope' } } })
+      await mount()
+      await editAndSave()
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('nope'))
+      expect(screen.getByLabelText('Waiter')).not.toBeChecked()
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    })
   })
 
   test('read-only for support-level super admins: inputs disabled, no preview calls, no Save', async () => {

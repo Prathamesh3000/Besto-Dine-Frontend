@@ -34,3 +34,16 @@ export function isDineInSelfOrderBlocked(ops = getCustomerOperations()) {
 export function serviceSpotLabel(ops = getCustomerOperations()) {
     return ops?.serviceModel === 'roomService' ? 'Room' : 'Table';
 }
+
+/**
+ * How a dine-in customer pays here (operations `payment.dineIn`):
+ *   'payFirst' — the cart hands the draft to the payment screen; the order
+ *                exists only once it is paid
+ *   'payAfter' — today's flow: the order is placed, the bill comes later
+ *   'either'   — the cart offers both ("Pay now" / "Pay after the meal")
+ * A missing profile or an unknown value is today's behaviour.
+ */
+export function dineInPaymentChoice(ops = getCustomerOperations()) {
+    const mode = ops?.payment?.dineIn;
+    return mode === 'payFirst' || mode === 'either' ? mode : 'payAfter';
+}

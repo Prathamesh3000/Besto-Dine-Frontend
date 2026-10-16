@@ -5,7 +5,7 @@
  */
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import React, { useSyncExternalStore } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { computeBill, computeSubtotal, toTaxConfig } from '@/utils/billing'
@@ -403,6 +403,59 @@ describe('Cart — operations profile (pay-first dine-in, tips)', () => {
     renderCart()
     await settle()
     expect(screen.getByText('Add Tip')).toBeInTheDocument()
+  })
+
+  describe('payment.dineIn: "either" — the customer chooses', () => {
+    const EITHER_OPS = { ...PAY_FIRST_OPS, payment: { ...PAY_FIRST_OPS.payment, dineIn: 'either' } }
+
+    test('shows "Pay now" and "Pay after the meal" instead of one Place Order button', async () => {
+      tenantBlob = { slug: 'cafe-uno', operations: EITHER_OPS }
+      const expected = computeBill({ subtotal: SUBTOTAL, taxConfig: TAX_CONFIG, orderType: 'dine-in' })
+      renderCart()
+      await settle()
+      const choice = screen.getByTestId('pay-choice')
+      expect(within(choice).getByRole('button', { name: `Pay now ₹${expected.total.toFixed(2)}` })).toBeEnabled()
+      expect(within(choice).getByRole('button', { name: 'Pay after the meal' })).toBeEnabled()
+      expect(screen.queryByRole('button', { name: /Place Order ₹/ })).not.toBeInTheDocument()
+    })
+
+    test('"Pay now" → no POST /orders, the draft goes to /customer/payment (pay-first hand-off)', async () => {
+      tenantBlob = { slug: 'cafe-uno', operations: EITHER_OPS }
+      const expected = computeBill({ subtotal: SUBTOTAL, taxConfig: TAX_CONFIG, orderType: 'dine-in' })
+      const user = renderCart()
+      await settle()
+      await user.click(screen.getByRole('button', { name: /^Pay now/ }))
+      await screen.findByText('payment-page')
+      expect(api.post).not.toHaveBeenCalledWith('/orders', expect.anything(), expect.anything())
+      expect(landed.state).toMatchObject({ payFirstDineIn: true, total: expected.total })
+      expect(landed.state.orderPayload).toMatchObject({ type: 'dine-in', tableId: 'tbl1', total: expected.total, clientIdempotencyKey: expect.any(String) })
+      expect(cartStore.clearCart).not.toHaveBeenCalled()
+    })
+
+    test('"Pay after the meal" → POST /orders exactly as a pay-after restaurant', async () => {
+      tenantBlob = { slug: 'cafe-uno', operations: EITHER_OPS }
+      const expected = computeBill({ subtotal: SUBTOTAL, taxConfig: TAX_CONFIG, orderType: 'dine-in' })
+      const user = renderCart()
+      await settle()
+      await user.click(screen.getByRole('button', { name: 'Pay after the meal' }))
+      await screen.findByText('orders-page')
+      const call = api.post.mock.calls.find((c) => c[0] === '/orders')
+      expect(call).toBeTruthy()
+      expect(call[1]).toMatchObject({ type: 'dine-in', tableId: 'tbl1', total: expected.total })
+      expect(call[1].paymentIntent).toBeUndefined()
+      expect(call[1].razorpayPayment).toBeUndefined()
+    })
+
+    test('payFirst, payAfter and no profile keep the single button', async () => {
+      for (const ops of [PAY_FIRST_OPS, { payment: { dineIn: 'payAfter' } }, null]) {
+        tenantBlob = ops ? { operations: ops } : null
+        renderCart()
+        await settle()
+        expect(screen.queryByTestId('pay-choice')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Place Order ₹/ })).toBeInTheDocument()
+        cleanup()
+      }
+    })
   })
 
   test('tips === false hides the Add Tip section', async () => {
