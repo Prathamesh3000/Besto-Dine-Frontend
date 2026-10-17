@@ -140,14 +140,30 @@ export function AdminBranchProvider({ children }) {
         }
     }, [isLocked, hasPicked, selectedBranchId, branches]);
 
+    // A persisted branch that is not one of THIS tenant's branches is
+    // stale (another restaurant's admin used this browser, or the branch
+    // was deleted). Left alone it is injected as `?branch=<foreign id>`
+    // into every admin GET and every list comes back empty. Resolve it
+    // to Main (system default, not a user pick) — derived, so no extra
+    // render pass; the persistence effect below writes the corrected
+    // value to storage.
+    const staleSelection = !isLocked
+        && !!selectedBranchId
+        && branches.length > 0
+        && !branches.some(b => String(b._id) === String(selectedBranchId));
+    const resolvedSelectedId = staleSelection
+        ? (branches.find(b => b.slug === 'main')?._id || null)
+        : selectedBranchId;
+
     // Branch-pinned admins ignore the persisted switcher value; their
     // pin wins. For unpinned tenant owners, persist the selection so a
     // page refresh keeps the same scoped view AND the global API
     // interceptor can read it on every request.
     useEffect(() => {
         if (isLocked) return;
-        writeStoredBranchId(selectedBranchId);
-    }, [selectedBranchId, isLocked]);
+        writeStoredBranchId(resolvedSelectedId);
+        if (staleSelection) writePickedFlag(false);
+    }, [resolvedSelectedId, staleSelection, isLocked]);
 
     // Clear the persisted value AND the "has picked" flag the moment
     // the user signs out so the next sign-in re-runs the Main-default
@@ -162,7 +178,7 @@ export function AdminBranchProvider({ children }) {
     }, [user]);
 
     // The actual branch ID to filter by
-    const activeBranchId = isLocked ? lockedBranchId : selectedBranchId;
+    const activeBranchId = isLocked ? lockedBranchId : resolvedSelectedId;
 
     // Resolve the Main branch id so callers can tell whether the user
     // is currently viewing Main or a sub-branch.

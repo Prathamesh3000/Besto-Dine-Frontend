@@ -4,7 +4,16 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- PWA: theme colour for the installed-app title bar + iOS standalone hints
+       (the manifest itself is injected by vite-plugin-pwa at build time). -->
+  <meta name="theme-color" content="#FE8301" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="BestoDine" />
   <!-- Warm up the TLS connection to the image CDNs before the first
        category/menu photo is requested. Category + item images are
        hosted on Unsplash / Cloudinary, so opening these sockets early

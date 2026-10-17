@@ -363,6 +363,23 @@ describe('customer session keep-alive (background tick)', () => {
     expect(requests).toHaveLength(0)
   })
 
+  test('fixed 1-hour login: once the token session end (sexp) passes, the tick ends the session without a request', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'Date'] })
+    const now = Math.floor(Date.now() / 1000)
+    localStorage.setItem('refresh_token', 'cr')
+    localStorage.setItem('token', jwt({ sub: 'c', exp: now + 600, sexp: now + 5 }))   // session ends in 5 s
+    localStorage.setItem('bd_last_activity', String(Date.now()))
+    const { customerSessionEndsAtMs } = await loadApi()
+    expect(customerSessionEndsAtMs()).toBe((now + 5) * 1000)
+    const expired = vi.fn()
+    window.addEventListener('bd:customer-session-expired', expired)
+    await vi.advanceTimersByTimeAsync(15 * 1000)
+    expect(expired).toHaveBeenCalledTimes(1)
+    expect(expired.mock.calls[0][0].detail).toEqual({ code: 'SESSION_EXPIRED' })
+    expect(requests.filter((r) => r.url === '/auth/refresh')).toHaveLength(0)
+    window.removeEventListener('bd:customer-session-expired', expired)
+  })
+
   test('returning to the tab after the idle timeout asks the server immediately', async () => {
     localStorage.setItem('refresh_token', 'cr')
     localStorage.setItem('token', tokenFor('c'))

@@ -138,8 +138,28 @@ async function doRefresh(aud) {
 //  * when the tab becomes visible again after the idle timeout, ask the
 //    server right away (it refuses → "session expired") instead of
 //    waiting for the next tap to fail.
+// The customer login's fixed end (epoch ms) — the `sexp` claim the server
+// puts in the access token: 1 hour after sign-in, active or not.
+export function customerSessionEndsAtMs() {
+    const token = getToken('customer');
+    if (!token) return null;
+    try {
+        const json = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return typeof json.sexp === 'number' ? json.sexp * 1000 : null;
+    } catch {
+        return null;
+    }
+}
+
 function customerSessionTick({ onReturn = false } = {}) {
     if (!getRefreshToken('customer') || identityMismatch('customer')) return;
+    // Fixed 1-hour login: end it on time even if the customer is just
+    // sitting on a page (no request would otherwise notice).
+    const endsAt = customerSessionEndsAtMs();
+    if (endsAt && Date.now() >= endsAt) {
+        announceCustomerSessionExpired('SESSION_EXPIRED');
+        return;
+    }
     const idle = msSinceActivity();
     if (onReturn) {
         if (idle >= CUSTOMER_IDLE_TIMEOUT_MS) refreshSession('customer').catch(() => {});
@@ -154,7 +174,8 @@ function customerSessionTick({ onReturn = false } = {}) {
 }
 if (typeof window !== 'undefined') {
     startActivityTracking();
-    setInterval(() => customerSessionTick(), 60 * 1000);
+    // Every 15s — the fixed-hour check above should fire close to the hour.
+    setInterval(() => customerSessionTick(), 15 * 1000);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') customerSessionTick({ onReturn: true });
     });
@@ -360,6 +381,10 @@ api.interceptors.request.use(
                         // etc. ignore branchScope so it's safe to send
                         // globally on every authed admin GET.
                         config.params = { ...(config.params || {}), branch: adminBranchId, branchScope: 'auto' };
+                        // Lets the BRANCH_NOT_FOUND recovery below tell a
+                        // stale admin switcher value apart from a customer's
+                        // X-Branch-Id problem.
+                        config._adminBranchInjected = true;
                     }
                 }
             }
@@ -455,6 +480,22 @@ api.interceptors.response.use(
         // branch — same UX pattern as TENANT_REQUIRED above. Skip
         // when we're already on the picker so we don't loop.
         if (status === 404 && error.response?.data?.code === 'BRANCH_NOT_FOUND') {
+            // Admin switcher carried a branch that isn't this tenant's
+            // (stale localStorage after another restaurant's admin used
+            // this browser, or a deleted branch). Drop it and reload so
+            // AdminBranchContext re-defaults to Main. One-shot guard so a
+            // persistent server problem can't loop the page.
+            if (error.config?._adminBranchInjected) {
+                try {
+                    localStorage.removeItem('adminActiveBranch');
+                    localStorage.removeItem('adminBranchPicked');
+                    if (!sessionStorage.getItem('adminBranchReset')) {
+                        sessionStorage.setItem('adminBranchReset', '1');
+                        setTimeout(() => { window.location.reload(); }, 0);
+                    }
+                } catch { /* storage unavailable */ }
+                return Promise.reject(error);
+            }
             if (!onTenantRecoveryPage()) {
                 // Dine-in: re-scan to pull a fresh, valid branch from the
                 // table. Takeaway/no-table: clear the dead branch and let
@@ -705,6 +746,12 @@ export const shiftAPI = {
     getMyShifts: () => api.get('/shifts/my'),
     clockIn:     () => api.post('/shifts/clock-in'),
     clockOut:    (note) => api.post('/shifts/clock-out', { note }),
+};
+
+export const staffAPI = {
+    // Admin/manager clears a staff member's temporary login lock (10 wrong
+    // passwords → 15 min cooldown). A password reset also clears it.
+    unlockLogin: (id) => api.post(`/staff/${id}/unlock-login`),
 };
 
 export const walletAPI = {

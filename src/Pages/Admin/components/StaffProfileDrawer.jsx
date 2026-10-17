@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { X, Check, Pencil, Ban, KeyRound, Copy, Trash2, Clock, ChevronRight } from 'lucide-react'
+import { X, Check, Pencil, Ban, KeyRound, LockOpen, Copy, Trash2, Clock, ChevronRight } from 'lucide-react'
 import StaffPerformanceModal from './StaffPerformanceModal'
 import { toast } from 'react-hot-toast'
-import api from '../../../utils/api'
+import api, { staffAPI } from '../../../utils/api'
 import { backendOrigin } from '../../../utils/apiOrigin';
 
 const BACKEND_URL = backendOrigin();
@@ -18,6 +18,7 @@ const StaffProfileDrawer = ({ staff, isActive, onClose, onEdit, onToggleStatus, 
     const [showPerformance, setShowPerformance] = useState(false)
     const [resettingPassword, setResettingPassword] = useState(false)
     const [resetResult, setResetResult] = useState(null) // { tempPassword }
+    const [unlockingLogin, setUnlockingLogin] = useState(false)
 
     // ADM-070 — Shift history state. Lazily fetched when the section is
     // expanded so opening the drawer doesn't pay the round-trip every
@@ -326,6 +327,34 @@ const StaffProfileDrawer = ({ staff, isActive, onClose, onEdit, onToggleStatus, 
                             {resettingPassword ? 'Resetting...' : 'Reset Password'}
                         </button>
                     )}
+
+                    {/* Unlock Login — clears the per-account lock the backend
+                         applies after 10 wrong passwords. Same visibility as
+                         Reset Password (canManage). */}
+                    <div className="space-y-1.5">
+                        <button
+                            onClick={async () => {
+                                if (unlockingLogin) return
+                                setUnlockingLogin(true)
+                                try {
+                                    await staffAPI.unlockLogin(staff._id)
+                                    toast.success(`Login unlocked for ${staff.name}`)
+                                } catch (err) {
+                                    toast.error(err.response?.data?.message || 'Failed to unlock login')
+                                } finally {
+                                    setUnlockingLogin(false)
+                                }
+                            }}
+                            disabled={unlockingLogin}
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-[#FE8301] text-[#FE8301] rounded-xl text-[14px] font-[600] hover:bg-orange-50 transition-colors disabled:opacity-50"
+                        >
+                            <LockOpen size={18} />
+                            {unlockingLogin ? 'Unlocking...' : 'Unlock Login'}
+                        </button>
+                        <p className="text-[12px] text-gray-400 text-center font-manrope">
+                            Clears a temporary lock after repeated wrong passwords (locks expire by themselves after 15 min).
+                        </p>
+                    </div>
                     </>)}
 
                     {(isWaiter || isChef || isCaptain) && (

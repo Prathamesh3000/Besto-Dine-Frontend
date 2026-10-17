@@ -10,6 +10,7 @@ import { resolveImageUrl } from '../../utils/image'
 import { getSocket } from '../../utils/socket'
 import { useAdminPrefetch } from '../../hooks/queries/useAdminPrefetch'
 import { openUpgradePrompt } from '../../utils/upgradePromptBus'
+import InstallAppBanner from '../../Components/Common/InstallAppBanner'
 
 
 // Small inline component for the read-only banner's exit action. It
@@ -425,6 +426,7 @@ const AdminLayoutInner = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col pt-4 px-4 md:pt-4 md:px-6 overflow-visible w-full max-w-[1920px] mx-auto">
+        <InstallAppBanner className="mb-4" />
         <Outlet />
       </main>
 

@@ -340,14 +340,23 @@ describe('customer session expiry event', () => {
     expect(toast.error).toHaveBeenCalledWith('Your session expired, please log in again', expect.any(Object))
   })
 
-  test('on a private page: stashes the notice and redirects to the restaurant page', async () => {
+  test('anywhere else: stashes the notice and goes to the login page', async () => {
     const assign = vi.fn()
     vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, pathname: '/customer/orders', assign })
     localStorage.setItem('activeTenant', JSON.stringify({ slug: 'spice' }))
     await restoreCustomer()
     act(() => { window.dispatchEvent(new Event('bd:customer-session-expired')) })
-    expect(sessionStorage.getItem('bd_customer_session_notice')).toBeTruthy()
-    expect(assign).toHaveBeenCalled()
+    expect(sessionStorage.getItem('bd_customer_session_notice')).toBe('Your session expired, please log in again')
+    expect(assign).toHaveBeenCalledWith('/login')
+  })
+
+  test('also from a restaurant landing page (fixed 1-hour logout → login page)', async () => {
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, pathname: '/spice', assign })
+    await restoreCustomer()
+    act(() => { window.dispatchEvent(new CustomEvent('bd:customer-session-expired', { detail: { code: 'SESSION_EXPIRED' } })) })
+    expect(sessionStorage.getItem('bd_customer_session_notice')).toBe('Your 1-hour session has ended. Please log in again.')
+    expect(assign).toHaveBeenCalledWith('/login')
   })
 
   test('is ignored for a staff tab', async () => {

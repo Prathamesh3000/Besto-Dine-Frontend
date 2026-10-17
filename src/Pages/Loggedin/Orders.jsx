@@ -28,6 +28,7 @@ import { billFromOrder, toTaxConfig } from '../../utils/billing';
 import { sizedImage } from '../../utils/image';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import useCustomerSession from '../../hooks/useCustomerSession';
+import { getCustomerOperations } from '../../utils/operations';
 import {
   CUSTOMER_ORDERS_ROOT,
   getCustomerOrderSession,
@@ -61,6 +62,8 @@ function getTableNumber() {
 function mapOrderStatus(status) {
   switch (status) {
     case 'served': return 'Delivered';
+    // Pay-first restaurant: the order waits for payment at the counter.
+    case 'awaiting-payment': return 'Awaiting payment';
     case 'new': return 'Order Placed';
     case 'cancelled': return 'Cancelled';
     case 'preparing': return 'Preparing';
@@ -98,7 +101,9 @@ const OrderCard = React.memo(
         {!isCancelled && (
           <span
             className={`flex items-center gap-1 text-[11px] sm:text-[12px] font-varela regular px-2 py-1 rounded-[60px] shrink-0 leading-[14px] ${
-              order.status === "Order Placed"
+              order.status === "Awaiting payment"
+                ? "text-[#B45309] bg-[#FEF3C7]"
+                : order.status === "Order Placed"
                 ? "text-[#FFA601] bg-[#FFEFD0]"
                 : order.status === "Preparing"
                 ? "text-[#007AFF] bg-[#E5F2FF]"
@@ -110,7 +115,7 @@ const OrderCard = React.memo(
             <span className="pt-[1px]">
               <i
                 className={`fi ${
-                  order.status === "Order Placed"
+                  order.status === "Order Placed" || order.status === "Awaiting payment"
                     ? "fi-rr-clock-three"
                     : order.status === "Preparing"
                     ? "fi-rr-flame"
@@ -282,7 +287,7 @@ const OrderCard = React.memo(
         )}
 
       {/* Track Order — shown for active orders */}
-      {!isCancelled && ["Order Placed", "Preparing", "Ready"].includes(order.status) && (
+      {!isCancelled && ["Awaiting payment", "Order Placed", "Preparing", "Ready"].includes(order.status) && (
         <div className="pt-3 border-t border-[#F7F7F7] mt-4">
           <button
             onClick={(e) => { e.stopPropagation(); onTrack && onTrack(order.orderId || order.id); }}
@@ -1122,7 +1127,7 @@ function Orders() {
   // that authenticate AFTER placing the order still receive events.
   useEffect(() => {
     const activeIds = (historyOrders || [])
-      .filter(o => ['Order Placed', 'Preparing', 'Ready', 'Delivered'].includes(o.status))
+      .filter(o => ['Awaiting payment', 'Order Placed', 'Preparing', 'Ready', 'Delivered'].includes(o.status))
       .map(o => o.orderId || o.id)
       .filter(Boolean);
     for (const oid of activeIds) {
@@ -1238,7 +1243,7 @@ function Orders() {
 
   const getFilteredHistory = () => {
     // Statuses that are still active — exclude from past tab
-    const activeStatuses = ["Order Placed", "Preparing", "Ready", "new", "preparing", "ready"];
+    const activeStatuses = ["Awaiting payment", "Order Placed", "Preparing", "Ready", "awaiting-payment", "new", "preparing", "ready"];
     // Anchor for "today" — same calendar day as right now. Used to
     // keep today's orders out of the Past tab (they live in the
     // Today tab, including cancelled ones with the cancel banner).
@@ -1441,6 +1446,10 @@ function Orders() {
     const ref = repeatSourceOrder._id || repeatSourceOrder.id;
     const toastId = `order-repeat-${ref}`;
     const isTakeawaySource = !!repeatSourceOrder.isTakeaway;
+    // Pay-first restaurant (operations profile): a dine-in repeat must go
+    // through the cart and payment too — /repeat-all would create an
+    // unpaid order (the server refuses it with REPEAT_REQUIRES_PAYMENT).
+    const payFirstDineIn = !isTakeawaySource && getCustomerOperations().payment?.dineIn === 'payFirst';
 
     // ── Takeaway: payment-FIRST flow ─────────────────────────────────
     // Cart's takeaway path creates the order only AFTER payment lands
@@ -1450,7 +1459,7 @@ function Orders() {
     // Instead we preload the customer cart with the picked items and
     // bounce them into /customer/cart so they go through pickup-time
     // selection → bill preview → payment exactly like a fresh order.
-    if (isTakeawaySource) {
+    if (isTakeawaySource || payFirstDineIn) {
       // Resolve missing menuItem ids by name against the live menu —
       // legacy orders (and ones returned before the backend started
       // including menuItem in the customer endpoint) have no id on
@@ -1481,7 +1490,8 @@ function Orders() {
         clearCustomerCart();
         // Flip to takeaway BEFORE filling the cart — the cart refuses
         // dine-in adds when no table is scanned (see needsTableScan).
-        try { localStorage.setItem('orderType', 'takeaway'); } catch { /* noop */ }
+        // A pay-first dine-in repeat stays dine-in (the table is scanned).
+        if (isTakeawaySource) { try { localStorage.setItem('orderType', 'takeaway'); } catch { /* noop */ } }
         for (const it of usable) {
           updateCartQty(it.menuItem, it.quantity, {
             id: it.menuItem,
@@ -1498,11 +1508,11 @@ function Orders() {
             instructions: '',
           });
         }
-        try { localStorage.setItem('orderType', 'takeaway'); } catch { /* noop */ }
+        if (isTakeawaySource) { try { localStorage.setItem('orderType', 'takeaway'); } catch { /* noop */ } }
         setShowRepeatModal(false);
         setRepeatSourceOrder(null);
         setRepeatItems([]);
-        toast.success('Items added — pick a pickup time and pay.', { id: toastId, duration: 3500 });
+        toast.success(isTakeawaySource ? 'Items added — pick a pickup time and pay.' : 'Items added — pay to send them to the kitchen.', { id: toastId, duration: 3500 });
         navigate('/customer/cart');
       } catch {
         toast.error('Failed to load items into your cart.', { id: toastId });
@@ -1666,7 +1676,7 @@ function Orders() {
           .includes(searchQuery.toLowerCase()),
       );
     // Show all active orders: Pending (new), Preparing (cooking), Ready, Delivered (served)
-    const visibleStatuses = ["Order Placed", "Preparing", "Ready", "Delivered"];
+    const visibleStatuses = ["Awaiting payment", "Order Placed", "Preparing", "Ready", "Delivered"];
     const isActiveStatus = visibleStatuses.includes(o.status);
 
     const isShownInConfirmation =
@@ -1810,7 +1820,10 @@ function Orders() {
                 <OrderCard
                   key={o.id}
                   order={o}
-                  onRepeatOrder={customerSession.isSettled ? null : handleRepeatOrder}
+                  onRepeatOrder={customerSession.isSettled
+                    // "Add more items" switched off for this restaurant (operations profile)
+                    || (!o.isTakeaway && getCustomerOperations().customerApp?.appendToOrder === false)
+                    ? null : handleRepeatOrder}
                   onRate={handleRate}
                   rating={orderRatings[o.id]?.rating}
                   onCancel={handleCancelOrder}

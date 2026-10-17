@@ -28,7 +28,7 @@ const getEstimatedTime = (item) => {
     return '15m';
 };
 
-const ChefItemCard = ({ item }) => {
+const ChefItemCard = React.memo(function ChefItemCard({ item }) {
     const estimatedTime = getEstimatedTime(item);
     const isVeg = item.vegType === 'veg';
     const hasInstructions = !!item.instructions;
@@ -131,6 +131,6 @@ const ChefItemCard = ({ item }) => {
             </div>
         </div>
     );
-};
+});
 
 export default ChefItemCard;

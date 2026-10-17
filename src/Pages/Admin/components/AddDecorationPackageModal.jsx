@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Upload, ChevronUp, ChevronDown } from 'lucide-react'
 import api from '../../../utils/api'
 import AddAddonModal from './AddAddonModal'
 import { backendOrigin } from '../../../utils/apiOrigin';
+import { IMAGE_ACCEPT } from '../../../utils/imageFile';
 
 // Backend host — strip the trailing /api so /uploads paths resolve to
 // the static-file mount instead of an undefined route. Reused by the
@@ -1822,10 +1823,10 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
                                                 </svg>
                                             </div>
                                             <span className="text-[11px] font-[500] text-gray-500 mb-1">Click to upload or drag and drop</span>
-                                            <span className="text-[10px] text-gray-400">PNG, JPG up to 5MB</span>
+                                            <span className="text-[10px] text-gray-400">Any image up to 5MB</span>
                                             <input
                                                 type="file"
-                                                accept="image/*"
+                                                accept={IMAGE_ACCEPT}
                                                 multiple
                                                 className="hidden"
                                                 onChange={handleImageUpload}

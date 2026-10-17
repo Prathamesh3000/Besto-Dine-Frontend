@@ -6,6 +6,7 @@ import api from '../../utils/api';
 import { resolveImageUrl } from '../../utils/image';
 import toast from 'react-hot-toast';
 import { sanitizeMobileInput, mobileError, mobileInputAttrs } from '../../utils/mobile';
+import { IMAGE_ACCEPT, isImageFile } from '../../utils/imageFile';
 
 const fallbackAvatar = (name) =>
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'Staff')}&background=702083&color=fff&size=192`;
@@ -43,7 +44,7 @@ const WaiterProfile = () => {
     const handleAvatarUpload = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        if (!file.type.startsWith('image/')) {
+        if (!isImageFile(file)) {
             toast.error('Please select an image file');
             return;
         }
@@ -165,7 +166,7 @@ const WaiterProfile = () => {
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/*"
+                            accept={IMAGE_ACCEPT}
                             onChange={handleAvatarUpload}
                             className="hidden"
                         />

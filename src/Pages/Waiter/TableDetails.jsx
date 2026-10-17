@@ -9,6 +9,7 @@ import useSocketEvent from '../../hooks/useSocketEvent';
 import toast from 'react-hot-toast';
 import { useAuth, CAPTAIN_ROLES } from '../../Context/AuthContext';
 import { getWaiterScope } from '../../utils/waiterScope';
+import { useStaffOrderOff } from '../../Components/RequireStaffOrder';
 
 /**
  * Human labels for Request.type. The model's enum is
@@ -40,6 +41,9 @@ const TableDetails = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { user } = useAuth();
+    // Operations profile orderFlow.staffOrder:false — waiters / captains
+    // don't enter orders, so the Menu / Browse Menu entry points hide.
+    const staffOrderOff = useStaffOrderOff();
     // Billing is a captain-only action (per CLAUDE.md: Captain "finalizes
     // a bill" while Waiter cannot). The button used to render for every
     // staff member, but clicking it as a Waiter just bounced back to
@@ -380,12 +384,14 @@ const TableDetails = () => {
                         </div>
                         <p className="text-xs sm:text-sm font-semibold text-gray-500 mt-0.5 truncate">{activeOrder?.table?.area?.name ? `Floor ${activeOrder.table.area.name}` : ''}</p>
                     </div>
+                    {!staffOrderOff && (
                     <button
                         onClick={() => navigate('/waiter/menu', { state: { tableId, tableName } })}
                         className="min-h-11 px-4 sm:px-5 rounded-full border-2 border-[#FE8301] text-[#FE8301] bg-white font-semibold text-sm hover:bg-orange-50 active:scale-[0.98] transition-all shrink-0"
                     >
                         Menu
                     </button>
+                    )}
                 </div>
 
                 {/* Pending requests for this table. Rendered ABOVE the
@@ -447,8 +453,11 @@ const TableDetails = () => {
                         </div>
                         <h4 className="text-[16px] font-bold text-[#1A181B] mb-1">No items yet</h4>
                         <p className="text-[13px] text-[#645E66] mb-6 max-w-[260px]">
-                            Start taking the order by browsing the menu.
+                            {staffOrderOff
+                                ? 'Guests order themselves here — new orders will show up on this table.'
+                                : 'Start taking the order by browsing the menu.'}
                         </p>
+                        {!staffOrderOff && (
                         <button
                             onClick={() => navigate('/waiter/menu', { state: { tableId, tableName } })}
                             className="bg-[#FF7A00] text-white rounded-xl py-3 px-8 font-bold shadow-lg shadow-orange-100 active:scale-[0.98] transition-all flex items-center gap-2"
@@ -456,6 +465,7 @@ const TableDetails = () => {
                             <Menu size={18} strokeWidth={2.5} />
                             Browse Menu
                         </button>
+                        )}
                     </div>
                 )}
 

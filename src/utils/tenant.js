@@ -109,7 +109,7 @@ export function getActiveBranch() {
  * The active-tenant subscriber in App.jsx applies it as CSS vars
  * and document-level effects.
  */
-export function setActiveTenant({ slug, name, _id, features, branch, branding } = {}) {
+export function setActiveTenant({ slug, name, _id, features, branch, branding, operations } = {}) {
     if (!slug || typeof slug !== 'string') {
         throw new Error('setActiveTenant requires a string slug');
     }
@@ -136,6 +136,10 @@ export function setActiveTenant({ slug, name, _id, features, branch, branding } 
             emailFromName: branding.emailFromName || '',
             tagline: branding.tagline || '',
         } : null,
+        // Operations profile (customer-safe subset) — how this restaurant
+        // runs: pay first or after, call-waiter, tracking. See
+        // utils/operations.js. null = unknown → today's behaviour.
+        operations: operations && typeof operations === 'object' ? operations : null,
         pickedAt: new Date().toISOString(),
     };
     inMemoryCache = blob;
@@ -168,6 +172,35 @@ export function setActiveBranch(branch) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch { /* ignore */ }
     notifySubscribers();
+    return next;
+}
+
+/**
+ * Refresh ONLY the operations profile on the existing tenant blob (the
+ * menu bootstrap carries the latest one). Deliberately does NOT notify
+ * subscribers: tenant subscribers drop the bootstrap cache, and a
+ * notify from the bootstrap's own success handler would loop.
+ *
+ * It does announce a CHANGED profile with the same-window `storage_sync`
+ * event the other customer-state writers use (guestSession, dineInSession,
+ * enterRestaurant), so hooks that read the profile from localStorage
+ * (useSelfOrderBlocked, Header, Home…) re-render at once. An identical
+ * profile is a no-op — the bootstrap calls this on every success.
+ */
+export function setActiveTenantOperations(operations) {
+    const t = getActiveTenant();
+    if (!t || !operations || typeof operations !== 'object') return t;
+    let changed = true;
+    try {
+        changed = JSON.stringify(t.operations ?? null) !== JSON.stringify(operations);
+    } catch { /* unserialisable — treat as changed */ }
+    if (!changed) return t;
+    const next = { ...t, operations };
+    inMemoryCache = next;
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event('storage_sync')); } catch { /* ignore */ }
     return next;
 }
 

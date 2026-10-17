@@ -20,6 +20,16 @@ export function getVoiceSupport() {
             reasonText: 'Voice search needs a secure (https) connection — browsers block the microphone on plain http pages.',
         };
     }
+    // The BestoDine desktop app (Electron) exposes webkitSpeechRecognition
+    // but has no speech backend, so recognition always fails with
+    // 'network'. Hide the mic there instead of showing a button that errors.
+    if (window.bestodine && window.bestodine.isDesktop === true) {
+        return {
+            supported: false,
+            reason: 'unsupported',
+            reasonText: 'Voice search is not available in the desktop app. Use the browser or the phone app.',
+        };
+    }
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) {
         return {

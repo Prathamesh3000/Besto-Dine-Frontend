@@ -18,7 +18,41 @@ import useSocketEvent from '../../hooks/useSocketEvent'
 import toast from 'react-hot-toast'
 import { billFromOrders, orderAmountDue, settleAmountForOrders, toTaxConfig } from '../../utils/billing'
 import { useAdminBootstrap } from '../../hooks/queries/useAdminBootstrap'
+import useOperations from '../../hooks/useOperations'
 import { SkeletonTablesGrid, SkeletonStatGrid } from '../../Components/Common/Skeleton'
+
+// ─── Pay-first held orders ───────────────────────────────────────────────────
+// A pay-first order waiting for cash at the counter is created with
+// status 'awaiting-payment'. It occupies the table, but the per-table
+// /orders/active* endpoints only list kitchen statuses, so the drawer
+// (and its counter-payment "Mark Paid" alert) would never see it. The
+// admin live feed does carry held orders: pick this table's from there
+// and load each one's full doc (counterPaymentRequestedAt, bill fields).
+const fetchHeldOrdersForTables = async (tableIds) => {
+  try {
+    const ids = tableIds.map(String)
+    const { data } = await api.get('/orders/live')
+    const held = (data?.orders || []).filter(o =>
+      o.status === 'awaiting-payment' && o.table?._id && ids.includes(String(o.table._id)))
+    if (held.length === 0) return []
+    const docs = await Promise.all(held.map(o =>
+      api.get(`/orders/${o._id}/detail`)
+        .then(r => (r.data?.order ? { live: o, doc: r.data.order } : null))
+        .catch(() => null)))
+    return docs.filter(Boolean).map(({ live, doc }) => ({
+      ...doc,
+      _id: doc._id || live._id,
+      orderId: doc.orderId || live.id,
+      tableId: String(live.table._id),
+      // The detail formatter ships the customer NAME as `user`.
+      customerName: doc.user || live.user || 'Guest',
+      user: live.isRegistered ? true : null,
+      items: (doc.items || []).map((it, idx) => ({ ...it, _id: it._id || `held-${doc._id || live._id}-${idx}` })),
+    }))
+  } catch {
+    return []
+  }
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 const TablesDashboard = () => {
@@ -77,6 +111,11 @@ const TablesDashboard = () => {
   const [tableToEdit, setTableToEdit] = useState(null)
   const [tableToDelete, setTableToDelete] = useState(null)
   const [showMergeTables, setShowMergeTables] = useState(false)
+  // Operations profile — a restaurant that doesn't merge tables or
+  // assign waiters never sees those controls (server rejects them too).
+  const operations = useOperations()
+  const mergeTablesEnabled = operations?.tables?.mergeTables !== false
+  const assignWaitersEnabled = operations?.tables?.assignWaiters !== false
   // Track only the ID of the open drawer's table — the live table
   // object is derived from processedTablesData below. Storing the
   // full object snapshot was the bug behind "alert drawer doesn't
@@ -279,15 +318,19 @@ const TablesDashboard = () => {
             const orderPromises = mergedIds.map(id =>
               api.get(`/orders/active/table/${id}`).catch(() => ({ data: { success: false } }))
             )
-            const results = await Promise.all(orderPromises)
+            const [results, heldOrders] = await Promise.all([
+              Promise.all(orderPromises),
+              fetchHeldOrdersForTables(mergedIds),
+            ])
             const allItems = []
             const mergedOrders = []
             let primaryOrder = null
-            results.forEach((res, idx) => {
+            const heldResults = heldOrders.map(o => ({ data: { success: true, order: o }, tableId: o.tableId }))
+            ;[...results.map((res, idx) => ({ ...res, tableId: mergedIds[idx] })), ...heldResults].forEach((res, idx) => {
               if (res.data.success && res.data.order) {
                 if (!primaryOrder) primaryOrder = res.data.order
                 mergedOrders.push(res.data.order)
-                const tableName = processedTablesData.find(t => String(t._id) === String(mergedIds[idx]))?.name || `Table ${idx + 1}`
+                const tableName = processedTablesData.find(t => String(t._id) === String(res.tableId))?.name || `Table ${idx + 1}`
                 res.data.order.items.forEach(item => {
                   allItems.push({
                     id: item._id,
@@ -320,7 +363,19 @@ const TablesDashboard = () => {
               paymentMethod: primaryOrder.paymentMethod || '',
               // Customer-initiated counter-payment request flag —
               // drives the red alert banner at the top of the drawer.
-              counterPaymentRequestedAt: primaryOrder.counterPaymentRequestedAt || null,
+              counterPaymentRequestedAt: primaryOrder.counterPaymentRequestedAt
+                || mergedOrders.find(o => o.counterPaymentRequestedAt)?.counterPaymentRequestedAt
+                || null,
+              // A held (pay-first) order rides along → "Mark Paid"
+              // must settle every order in the group, held one included.
+              ...(heldOrders.length > 0 ? {
+                allOrderIds: mergedOrders.map(o => o._id),
+                orderCount: mergedOrders.length,
+                allOrders: mergedOrders.map(o => ({
+                  _id: o._id, orderId: o.orderId, total: o.total, itemCount: (o.items || []).length,
+                  status: o.status, paymentStatus: o.paymentStatus, createdAt: o.createdAt,
+                })),
+              } : {}),
               // Full order docs — the bill and the settle amount are
               // read from their STORED totals (utils/billing).
               orders: mergedOrders,
@@ -332,8 +387,15 @@ const TablesDashboard = () => {
             // drawer needs to show them all so the bill aggregation,
             // counter-payment alert, and "mark paid" all settle the
             // entire table at once.
-            const { data } = await api.get(`/orders/active-list/table/${tableId}`)
-            const list = data?.success && Array.isArray(data.orders) ? data.orders : []
+            const [{ data }, heldOrders] = await Promise.all([
+              api.get(`/orders/active-list/table/${tableId}`),
+              fetchHeldOrdersForTables([tableId]),
+            ])
+            const activeList = data?.success && Array.isArray(data.orders) ? data.orders : []
+            // Held pay-first orders join the list in placement order.
+            const list = heldOrders.length === 0
+              ? activeList
+              : [...activeList, ...heldOrders].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
             if (list.length > 0) {
               // Combine items from every order into a flat list, but
               // tag each line with its source orderId so the drawer
@@ -461,6 +523,12 @@ const TablesDashboard = () => {
     if (!payload?.orderId || !activeOrderMeta?.orderId) return
     if (String(payload.orderId) !== String(activeOrderMeta.orderId)) return
     setDrawerRefreshKey(k => k + 1)
+  })
+  // A counter-cash request (incl. a new pay-first held order) can land on
+  // the open table before any order:updated — reload the drawer so the
+  // "Mark Paid" alert appears.
+  useSocketEvent('counter-payment:requested', () => {
+    if (selectedTable) setDrawerRefreshKey(k => k + 1)
   })
 
   // ── Bill calculations ───────────────────────────────────────────────────
@@ -865,7 +933,7 @@ const TablesDashboard = () => {
   }, [location.key, location.state?.highlightTable, tablesData, loading])
 
   // ── Merge Tables view ──────────────────────────────────────────────────
-  if (showMergeTables) {
+  if (showMergeTables && mergeTablesEnabled) {
     return (
       <MergeTables
         onCancel={() => setShowMergeTables(false)}
@@ -922,10 +990,12 @@ const TablesDashboard = () => {
             <CalendarPlus size={18} />
             Add Reservation
           </button>
-          <button onClick={() => setShowMergeTables(true)} className="flex items-center gap-2 px-5 py-2.5 text-orange-500 font-[600] border border-orange-500 rounded-[10px] hover:bg-[#FFF3E6] active:bg-[#FFE6CC] transition-colors font-manrope text-[14px]">
-            <Link size={18} className="rotate-45" />
-            Merge Table
-          </button>
+          {mergeTablesEnabled && (
+            <button onClick={() => setShowMergeTables(true)} className="flex items-center gap-2 px-5 py-2.5 text-orange-500 font-[600] border border-orange-500 rounded-[10px] hover:bg-[#FFF3E6] active:bg-[#FFE6CC] transition-colors font-manrope text-[14px]">
+              <Link size={18} className="rotate-45" />
+              Merge Table
+            </button>
+          )}
         </div>
       </div>
 
@@ -1826,6 +1896,7 @@ const TablesDashboard = () => {
             </div>
           </div>
         </div>
+      {assignWaitersEnabled && (
       <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
         {selectedTable.assignedWaiter ? (
           <div className="bg-[#FFF9F5] rounded-[10px] p-3 border border-[#FFE4CC] flex items-center justify-between">
@@ -1872,6 +1943,7 @@ const TablesDashboard = () => {
           </select>
         )}
       </div>
+      )}
     </>
     )
   }
@@ -2007,7 +2079,7 @@ const TablesDashboard = () => {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {selectedTable.mergedWith?.length > 0 && (() => {
+                  {mergeTablesEnabled && selectedTable.mergedWith?.length > 0 && (() => {
                     // Block unmerge while the group has a live order —
                     // the order lives on the leader's tableId and would
                     // be orphaned if siblings flipped to 'free'. The

@@ -16,6 +16,7 @@ import api from "../../utils/api";
 import { resolveImageUrl } from "../../utils/image";
 import toast from "react-hot-toast";
 import { sanitizeMobileInput } from "../../utils/mobile";
+import { IMAGE_ACCEPT, isImageFile } from '../../utils/imageFile';
 
 const fallbackAvatar = (name) =>
   `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'U')}&background=FE8301&color=fff&size=128`;
@@ -162,7 +163,7 @@ function EditProfile() {
   const handleAvatarUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
+    if (!isImageFile(file)) {
       toast.error('Please select an image file');
       return;
     }
@@ -331,7 +332,7 @@ function EditProfile() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={IMAGE_ACCEPT}
               onChange={handleAvatarUpload}
               className="hidden"
             />

@@ -79,9 +79,10 @@ const PAST_DATE_OPTIONS = [
 // Dine In tab filter pills. Module-scoped so the snap-back useEffect
 // keeps a stable dependency reference and React doesn't re-run the
 // effect on every render.
-const DINE_IN_FILTERS = ['All', 'New', 'Preparing', 'Ready', 'Served', 'Cancelled']
+const DINE_IN_FILTERS = ['All', 'Awaiting payment', 'New', 'Preparing', 'Ready', 'Served', 'Cancelled']
 
 const statusStyles = {
+  'awaiting-payment': 'bg-amber-50 text-amber-700 border-amber-200',
   new: 'bg-blue-50 text-blue-600 border-blue-200',
   preparing: 'bg-orange-50 text-orange-600 border-orange-200',
   ready: 'bg-green-50 text-green-600 border-green-200',
@@ -90,6 +91,7 @@ const statusStyles = {
 }
 
 const cardBorderStyles = {
+  'awaiting-payment': 'border-amber-300',
   new: 'border-blue-200',
   preparing: 'border-orange-300',
   ready: 'border-green-200',
@@ -99,6 +101,7 @@ const cardBorderStyles = {
 
 // ─── Takeaway-specific badge styles (outlined pills) ───────────────────────
 const takeawayBadgeStyles = {
+  'awaiting-payment': 'bg-[#FFFBEB] text-[#B45309] border border-[#F59E0B]',
   new: 'bg-[#EBF4FF] text-[#1D72E8] border border-[#1D72E8]',
   preparing: 'bg-[#FFF4EB] text-[#FE8301] border border-[#FE8301]',
   ready: 'bg-[#EDFBF3] text-[#1DB954] border border-[#1DB954]',
@@ -106,13 +109,94 @@ const takeawayBadgeStyles = {
   cancelled: 'bg-[#FFF0EF] text-[#FF3B30] border border-[#FF3B30]',
 }
 
+// Pay-first hold: the order exists but the kitchen can't see it until
+// the counter marks it paid. Never show the raw status code.
+const HELD_STATUS = 'awaiting-payment'
+const HELD_LABEL = 'Awaiting payment'
+
+const getStatusLabel = (status) => {
+  if (!status || typeof status !== 'string') return '—'
+  if (status === HELD_STATUS) return HELD_LABEL
+  return status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+// Does an order's status match a filter pill name ('New', 'Awaiting payment', …)?
+const matchesStatusPill = (status, pill) =>
+  getStatusLabel(status).toLowerCase() === String(pill || '').toLowerCase()
+
 const getTakeawayLabel = (status) => {
   // Null guard — a stray order without `status` used to render the
   // label as `undefined.charAt(...)` and crash the row. Show a dash
   // instead so the rest of the card still paints.
   if (!status || typeof status !== 'string') return '—'
   if (status === 'served') return 'Delivered'
-  return status.charAt(0).toUpperCase() + status.slice(1)
+  return getStatusLabel(status)
+}
+
+// ─── Held-order cashier actions ────────────────────────────────────────────
+// "Mark paid (cash)" releases a held order to the kitchen through the
+// normal payment PATCH; "Cancel" voids it. Rendered only for
+// awaiting-payment orders.
+const HeldOrderActions = ({ order, onDone, className = '' }) => {
+  const [busy, setBusy] = useState(false)
+  if (!order || order.status !== HELD_STATUS) return null
+  const orderId = order._id || order.id
+
+  const markPaid = async (e) => {
+    e.stopPropagation()
+    if (busy) return
+    setBusy(true)
+    try {
+      await api.patch(`/orders/${orderId}/status`, {
+        paymentStatus: 'Paid',
+        paymentMethod: 'cash',
+        amountPaid: Math.max(0, Math.round(((Number(order.total) || 0) - (Number(order.manualDiscount) || 0)) * 100) / 100),
+      })
+      toast.success(`${order.id || 'Order'} paid — sent to the kitchen`)
+      if (onDone) onDone()
+    } catch (err) {
+      toast.error('Failed to mark paid: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancelHeld = async (e) => {
+    e.stopPropagation()
+    if (busy) return
+    if (!window.confirm(`Cancel unpaid order ${order.id || ''}?`)) return
+    setBusy(true)
+    try {
+      await api.patch(`/orders/${orderId}/status`, { status: 'cancelled', cancelReason: 'admin-void' })
+      toast.success(`${order.id || 'Order'} cancelled`)
+      if (onDone) onDone()
+    } catch (err) {
+      toast.error('Failed to cancel: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={`flex items-center gap-2 ${className}`}>
+      <button
+        type="button"
+        onClick={markPaid}
+        disabled={busy}
+        className="flex-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-[700] font-manrope transition-colors disabled:opacity-60"
+      >
+        Mark paid (cash)
+      </button>
+      <button
+        type="button"
+        onClick={cancelHeld}
+        disabled={busy}
+        className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-[700] font-manrope transition-colors disabled:opacity-60"
+      >
+        Cancel
+      </button>
+    </div>
+  )
 }
 
 // ─── Ellipsis pagination helper ────────────────────────────────────────────
@@ -126,7 +210,7 @@ const getPaginationRange = (currentPage, totalPages) => {
 }
 
 // ─── Takeaway Card ──────────────────────────────────────────────────────────
-const TakeawayCard = ({ order, onView }) => (
+const TakeawayCard = ({ order, onView, onSettled }) => (
   <div className="bg-white rounded-2xl p-4 flex flex-col shadow-[0px_2px_8px_0px_#00000014]">
     {/* Source pill row removed 2026-05-20 — the QR Scan / STAFF / kiosk
         ribbon at the top of each card was noisy and overlapped the
@@ -210,6 +294,7 @@ const TakeawayCard = ({ order, onView }) => (
         <Eye size={18} />
       </button>
     </div>
+    <HeldOrderActions order={order} onDone={onSettled} className="mt-3" />
   </div>
 )
 
@@ -357,7 +442,7 @@ const OrdersDashboard = () => {
   // runs its own server-side summary instead of deriving from this.
   const orderCounts = useMemo(() => {
     const counts = { dineIn: {}, takeaway: {}, all: {} }
-    const statusList = ['new', 'preparing', 'ready', 'served', 'cancelled']
+    const statusList = [HELD_STATUS, 'new', 'preparing', 'ready', 'served', 'cancelled']
     statusList.forEach(s => { counts.dineIn[s] = 0; counts.takeaway[s] = 0; counts.all[s] = 0 })
     counts.dineIn.total = 0; counts.takeaway.total = 0; counts.takeaway.revenue = 0; counts.all.revenue = 0
     counts.dineIn.completedToday = 0; counts.takeaway.completedToday = 0
@@ -432,7 +517,8 @@ const OrdersDashboard = () => {
   const filters = useMemo(() => {
     const c = orderCounts.dineIn
     const pad = (n) => String(n).padStart(2, '0')
-    const total = (c.new || 0) + (c.preparing || 0) + (c.ready || 0) + (c.served || 0) + (c.cancelled || 0)
+    const held = c[HELD_STATUS] || 0
+    const total = held + (c.new || 0) + (c.preparing || 0) + (c.ready || 0) + (c.served || 0) + (c.cancelled || 0)
     // Only surface pills that have at least one matching order. "All"
     // is included only when there's something to filter; on a quiet
     // shift with zero dine-in activity the row collapses to nothing,
@@ -440,6 +526,7 @@ const OrdersDashboard = () => {
     // attention. The activeFilter snap-back effect below handles the
     // case where the currently-selected pill disappears.
     const pills = [{ name: 'All', count: pad(total), n: total }]
+    if (held)         pills.push({ name: HELD_LABEL, count: pad(held), n: held })
     if (c.new)        pills.push({ name: 'New',        count: pad(c.new),        n: c.new })
     if (c.preparing)  pills.push({ name: 'Preparing',  count: pad(c.preparing),  n: c.preparing })
     if (c.ready)      pills.push({ name: 'Ready',      count: pad(c.ready),      n: c.ready })
@@ -469,13 +556,15 @@ const OrdersDashboard = () => {
   const takeawayFilters = useMemo(() => {
     const c = orderCounts.takeaway
     const pad = (n) => String(n).padStart(2, '0')
-    const total = (c.new || 0) + (c.preparing || 0) + (c.ready || 0) + (c.served || 0) + (c.cancelled || 0)
+    const held = c[HELD_STATUS] || 0
+    const total = held + (c.new || 0) + (c.preparing || 0) + (c.ready || 0) + (c.served || 0) + (c.cancelled || 0)
     // `name` matches the existing matchStatus comparison
     // (`takeawayStatus.toLowerCase() === o.status`). 'Status' is the
     // sentinel for "show all" — kept verbatim so we don't have to
     // touch every consumer of takeawayStatus elsewhere.
     const pills = [{ name: 'Status', label: 'All', count: pad(total), n: total }]
-    if (c.new)       pills.push({ name: 'New',        count: pad(c.new),        n: c.new })
+    if (held)        pills.push({ name: HELD_LABEL, count: pad(held), n: held })
+    if (c.new)      pills.push({ name: 'New',        count: pad(c.new),        n: c.new })
     if (c.preparing) pills.push({ name: 'Preparing',  count: pad(c.preparing),  n: c.preparing })
     if (c.ready)     pills.push({ name: 'Ready',      count: pad(c.ready),      n: c.ready })
     if (c.served)    pills.push({ name: 'Served',     count: pad(c.served),     n: c.served })
@@ -609,6 +698,9 @@ const OrdersDashboard = () => {
 
   useSocketEvent('order:new', () => scheduleRefetch())
   useSocketEvent('order:appended', () => scheduleRefetch())
+  // Pay-first counter-cash orders are created held (no kitchen order:new);
+  // the counter-payment request is what tells the cashier one is waiting.
+  useSocketEvent('counter-payment:requested', () => scheduleRefetch())
   // A status-only update already patched into the cache needs no list refetch.
   useSocketEvent('order:updated', (data) => { const patched = patchOrderFromEvent(data); scheduleRefetch(true, !patched) })
   useSocketEvent('order:ready', (data) => { patchOrderFromEvent(data, 'ready'); scheduleRefetch() })
@@ -627,7 +719,7 @@ const OrdersDashboard = () => {
       (order.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       tableStr.toLowerCase().includes(searchTerm.toLowerCase())
 
-    const matchFilter = activeFilter === 'All' || order.status.toLowerCase() === activeFilter.toLowerCase()
+    const matchFilter = activeFilter === 'All' || matchesStatusPill(order.status, activeFilter)
 
     return matchSearch && matchFilter
   })
@@ -704,7 +796,7 @@ const OrdersDashboard = () => {
       const matchSearch = !term ||
         (o.user || '').toLowerCase().includes(term) ||
         (o.id || '').toLowerCase().includes(term)
-      const matchStatus = takeawayStatus === 'Status' || o.status === takeawayStatus.toLowerCase()
+      const matchStatus = takeawayStatus === 'Status' || matchesStatusPill(o.status, takeawayStatus)
       return matchSearch && matchStatus
     })
 
@@ -848,7 +940,7 @@ const OrdersDashboard = () => {
           ) : takeawayViewMode === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredTakeaway.map((order) => (
-                <TakeawayCard key={order._id || order.id || order.orderId} order={order} onView={setSelectedOrder} />
+                <TakeawayCard key={order._id || order.id || order.orderId} order={order} onView={setSelectedOrder} onSettled={fetchOrders} />
               ))}
             </div>
           ) : (
@@ -888,12 +980,15 @@ const OrdersDashboard = () => {
                       <td className="px-6 py-4 font-[600] text-gray-500">{formatOrderDate(order)}</td>
                       <td className="px-6 py-4 text-right font-[700] text-gray-900">₹{order.total}</td>
                       <td className="px-6 py-4 text-center">
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="text-gray-400 hover:text-orange-500 transition-colors p-1 rounded-md hover:bg-orange-50"
-                        >
-                          <Eye size={20} />
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <HeldOrderActions order={order} onDone={fetchOrders} />
+                          <button
+                            onClick={() => setSelectedOrder(order)}
+                            className="text-gray-400 hover:text-orange-500 transition-colors p-1 rounded-md hover:bg-orange-50"
+                          >
+                            <Eye size={20} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1229,7 +1324,7 @@ const OrdersDashboard = () => {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-3 py-1 rounded-full text-xs font-[600] border ${statusStyles[order.status]}`}>
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                        {getStatusLabel(order.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 font-[600] text-gray-500">{formatOrderTime(order)}</td>
@@ -1239,12 +1334,15 @@ const OrdersDashboard = () => {
                     <td className="px-6 py-4 text-right font-[600] text-gray-900">₹{order.total}.00</td>
                     <td className="px-6 py-4 text-gray-600 font-[600]">{order.user || 'Guest'}{order.isRegistered && <span className="ml-1 text-orange-400">★</span>}</td>
                     <td className="px-6 py-4 text-center">
-                      <button
-                        onClick={() => setSelectedOrder(order)}
-                        className="text-gray-400 hover:text-orange-500 transition-colors p-1 rounded-md hover:bg-orange-50"
-                      >
-                        <Eye size={24} />
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        <HeldOrderActions order={order} onDone={fetchOrders} />
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="text-gray-400 hover:text-orange-500 transition-colors p-1 rounded-md hover:bg-orange-50"
+                        >
+                          <Eye size={24} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1256,7 +1354,7 @@ const OrdersDashboard = () => {
             {paginatedOrders.map((order) => (
               <div
                 key={order._id || order.id || order.orderId}
-                className={`bg-white rounded-xl p-4 flex flex-col transition-all shadow-[0px_2px_8px_0px_#00000014] border ${order.hasAlert ? 'border-[#FF3B30]' : 'border-white'}`}
+                className={`bg-white rounded-xl p-4 flex flex-col transition-all shadow-[0px_2px_8px_0px_#00000014] border ${order.hasAlert ? 'border-[#FF3B30]' : order.status === HELD_STATUS ? cardBorderStyles[HELD_STATUS] : 'border-white'}`}
               >
                 {/* Source pill removed 2026-05-20 — see TakeawayCard
                     comment above for context. Drawer still surfaces
@@ -1326,7 +1424,7 @@ const OrdersDashboard = () => {
                   </div>
                   <div className="text-right">
                     <span className={`px-2 py-1 text-xs font-[600] rounded-full border ${statusStyles[order.status]}`}>
-                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      {getStatusLabel(order.status)}
                     </span>
                     <p className="text-xs font-[600] text-gray-400 mt-1">{formatOrderTime(order)}</p>
                   </div>
@@ -1375,6 +1473,7 @@ const OrdersDashboard = () => {
                     <Eye size={24} />
                   </button>
                 </div>
+                <HeldOrderActions order={order} onDone={fetchOrders} className="mt-3" />
               </div>
             ))}
           </div>

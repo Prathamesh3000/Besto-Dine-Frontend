@@ -8,6 +8,7 @@ import { restaurantLink } from '../../../utils/customerLinks'
 import ToggleSwitch from '../../../Components/Common/ToggleSwitch'
 import ShareLinkPanel from '../../../Components/Common/ShareLinkPanel'
 import VegBadge from '../../../Components/Common/VegBadge'
+import { IMAGE_ACCEPT } from '../../../utils/imageFile'
 
 /**
  * Admin → Settings → "Landing Page": customises the public restaurant
@@ -317,12 +318,12 @@ const LandingPageSettings = ({ initial, slug, onSave, isSaving = false, readOnly
                         >
                             {uploading ? <Loader2 size={22} className="animate-spin" /> : <Upload size={22} strokeWidth={1.5} />}
                             <span className="text-[12px] text-center leading-snug px-2">
-                                {uploading ? 'Uploading…' : <>Add images<br /><span className="text-[11px] text-[#9CA3AF]">PNG, JPG up to 5MB</span></>}
+                                {uploading ? 'Uploading…' : <>Add images<br /><span className="text-[11px] text-[#9CA3AF]">Any image up to 5MB</span></>}
                             </span>
                         </button>
                     )}
                 </div>
-                <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} />
+                <input ref={fileRef} type="file" accept={IMAGE_ACCEPT} multiple className="hidden" onChange={handleUpload} />
             </Card>
 
             {/* Featured dishes */}

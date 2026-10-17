@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { useMenu } from '../../../Context/MenuContext'
 import { resolveImageUrl } from '../../../utils/image'
 import BranchPricesModal from './BranchPricesModal'
+import { IMAGE_ACCEPT, isImageFile } from '../../../utils/imageFile'
 
 // Recipe section — units accepted by the Recipe schema. Mirrors
 // Backend/models/recipe.js. Kept in sync with RecipeModal so a recipe
@@ -306,7 +307,7 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
 
         // Validate file types and sizes before uploading
         const validFiles = files.filter(file => {
-            if (!file.type.startsWith('image/')) {
+            if (!isImageFile(file)) {
                 toast.error(`"${file.name}" is not a valid image file`);
                 return false;
             }
@@ -695,7 +696,7 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
                                         ref={fileInputRef}
                                         onChange={handleImageUpload}
                                         className="hidden"
-                                        accept="image/png,image/jpeg,image/jpg,image/webp"
+                                        accept={IMAGE_ACCEPT}
                                     />
                                     <div
                                         onClick={() => fileInputRef.current.click()}
@@ -707,7 +708,7 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
                                     >
                                         <Upload size={24} className={`${isUploading ? 'animate-bounce text-orange-500' : 'text-[#98A2B3]'} mb-2`} />
                                         <p className="text-xs text-[#475467] font-semibold">{isUploading ? 'Uploading...' : 'Click to upload'}</p>
-                                        <p className="text-[10px] leading-[14px] text-[#98A2B3] mt-1">PNG, JPG up to 5MB</p>
+                                        <p className="text-[10px] leading-[14px] text-[#98A2B3] mt-1">Any image up to 5MB</p>
                                     </div>
                                     <div className="w-[120px] grid grid-cols-2 gap-2">
                                         {formData.images.map((img, i) => (

@@ -220,6 +220,7 @@ const Stepper = ({ currentStep }) => {
 import api from '../../../utils/api'
 import { resolveImageUrl } from '../../../utils/image'
 import { sanitizeMobileInput, isValidMobile, mobileError } from '../../../utils/mobile'
+import { IMAGE_ACCEPT } from '../../../utils/imageFile'
 
 // ── Permission catalog ───────────────────────────────────────────────────────
 // Single source of truth for the toggles shown on step 3 of the modal.
@@ -309,12 +310,21 @@ const AddStaffModal = ({ onClose, onSubmit, editData }) => {
     // Only an Admin may create / promote Managers (backend: ROLE_ADMIN_ONLY).
     // Non-admin callers (Managers with manageStaff) see floor roles only;
     // an existing Manager row keeps its option so the form can render it.
-    const { user } = useAuth()
+    const { user, operations } = useAuth()
     const canAssignManager = user?.role === 'admin'
         || String(editData?.role || '').toLowerCase() === 'manager'
-    const roleOptions = canAssignManager
+    // Operations profile: roles the restaurant is set up without (e.g. a
+    // self-service hotel with no waiters) can't be hired — the backend
+    // refuses them (ROLE_NOT_IN_USE). An existing row keeps its own role.
+    const editingRole = String(editData?.role || '').toLowerCase()
+    const roleInUse = (value) => {
+        const key = value.toLowerCase()
+        if (!['waiter', 'captain', 'chef'].includes(key) || key === editingRole) return true
+        return operations?.modules?.[key] !== false
+    }
+    const roleOptions = (canAssignManager
         ? ROLE_OPTIONS
-        : ROLE_OPTIONS.filter(o => o.value !== 'Manager')
+        : ROLE_OPTIONS.filter(o => o.value !== 'Manager')).filter(o => roleInUse(o.value))
     const [currentStep, setCurrentStep] = useState(1)
     const [formData, setFormData] = useState({
         employeeId: '',
@@ -868,7 +878,7 @@ const AddStaffModal = ({ onClose, onSubmit, editData }) => {
                             <div className="w-[195px] flex-shrink-0">
                                 <Label>Staff Image</Label>
                                 <label className="border-2 border-dashed border-gray-200 rounded-xl h-[210px] flex flex-col items-center justify-center gap-2 bg-white cursor-pointer hover:border-orange-400 transition-colors overflow-hidden">
-                                    <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                                    <input type="file" className="hidden" accept={IMAGE_ACCEPT} onChange={handleImageUpload} />
                                     {formData.avatarUrl ? (
                                         <img src={resolveImageUrl(formData.avatarUrl) || formData.avatarUrl} alt="Avatar Preview" className="w-full h-full object-cover" />
                                     ) : (

@@ -2,8 +2,14 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import tailwindcss from '@tailwindcss/vite'
 import jsconfigPaths from 'vite-jsconfig-paths'
+import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// This config is ESM (package.json "type": "module"), so there is no
+// CommonJS __dirname; derive it from the module URL instead.
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /**
  * BestoDine frontend build config.
@@ -49,6 +55,100 @@ function resolveHttps() {
 const list = (value, fallback = []) => {
   if (!value) return fallback
   return String(value).split(',').map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * Installable PWA (DESKTOP_AND_PWA_PLAN.md, Part 1).
+ *
+ * What the service worker does: precache the built app shell (js / css /
+ * html / fonts / small images) so "Install app" works on Android Chrome
+ * and the shell loads instantly. What it must NEVER do: cache anything
+ * live. `/api`, `/socket.io`, `/uploads`, Cloudinary, Razorpay and Google
+ * are NetworkOnly — a cached order list or a cached payment page would be
+ * a real bug, so those are listed explicitly rather than left to the
+ * default. Offline-first is out of scope for this phase.
+ *
+ * `registerType: 'autoUpdate'` makes a new deploy take over on the next
+ * load; src/hooks/useServiceWorkerUpdate.js surfaces an "Update available"
+ * toast so a kitchen screen that never reloads can be refreshed by hand.
+ */
+function pwaPlugin() {
+  // Hosts that serve live data or third-party scripts. Never cached.
+  const NETWORK_ONLY_ORIGINS = /^https:\/\/([a-z0-9-]+\.)*(cloudinary\.com|razorpay\.com|google\.com|googleapis\.com|gstatic\.com|googleusercontent\.com)(\/|$)/i
+  const networkOnly = (pattern) => ({ urlPattern: pattern, handler: 'NetworkOnly' })
+
+  return VitePWA({
+    registerType: 'autoUpdate',
+    includeAssets: ['favicon.svg', 'favicon.ico', 'pwa/apple-touch-icon.png'],
+    manifest: {
+      name: 'BestoDine',
+      short_name: 'BestoDine',
+      description: 'Restaurant ordering, billing and kitchen display',
+      theme_color: '#FE8301',
+      background_color: '#ffffff',
+      display: 'standalone',
+      start_url: '/',
+      scope: '/',
+      icons: [
+        { src: '/pwa/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/pwa/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/pwa/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
+      shortcuts: [
+        { name: 'Staff login', url: '/staff-login', icons: [{ src: '/pwa/icon-192.png', sizes: '192x192' }] },
+        { name: 'Kitchen display', url: '/chef/dashboard', icons: [{ src: '/pwa/icon-192.png', sizes: '192x192' }] },
+        { name: 'Kiosk', url: '/kiosk', icons: [{ src: '/pwa/icon-192.png', sizes: '192x192' }] },
+      ],
+    },
+    workbox: {
+      // Only the app shell: the hashed bundles + index.html + the PWA
+      // icons (~5 MB). The loose images in public/ (marketing art,
+      // kiosk media — 27 MB+) are served normally but never precached;
+      // every install would otherwise download them.
+      // (favicons + apple-touch-icon come in via includeAssets above.)
+      globPatterns: [
+        'index.html',
+        'assets/**/*.{js,css,woff2,svg,png}',
+        'pwa/icon-*.png',
+      ],
+      globIgnores: ['**/kiosk/**', '**/node_modules/**'],
+      // The plugin fails the build when any matched file exceeds this.
+      // 3 MB keeps the largest vendor chunks in and catches a stray
+      // large asset landing in assets/.
+      maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+      // SPA deep links (/admin/orders, /chef/dashboard) resolve to the
+      // shell; backend-served paths never do.
+      navigateFallback: '/index.html',
+      navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io\//, /^\/uploads\//],
+      cleanupOutdatedCaches: true,
+      clientsClaim: true,
+      runtimeCaching: [
+        // Same-origin live endpoints.
+        networkOnly(({ url }) => url.pathname.startsWith('/api/')),
+        networkOnly(({ url }) => url.pathname.startsWith('/socket.io/')),
+        networkOnly(({ url }) => url.pathname.startsWith('/uploads/')),
+        // Third-party live / payment / auth origins (also Cloudinary — the
+        // plan keeps menu images uncached so edits show immediately).
+        networkOnly(NETWORK_ONLY_ORIGINS),
+        // The flaticon icon-font CSS + font files linked from index.html
+        // are versioned and immutable, so caching them is safe and makes
+        // the installed app's icons render without a network round-trip.
+        {
+          urlPattern: /^https:\/\/(cdn-uicons\.flaticon\.com|cdn\.jsdelivr\.net\/npm\/@flaticon)\//i,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'bestodine-icon-fonts',
+            expiration: { maxEntries: 20, maxAgeSeconds: 30 * 24 * 60 * 60 },
+            cacheableResponse: { statuses: [0, 200] },
+          },
+        },
+      ],
+    },
+    // Dev server stays plain Vite (no SW): HMR and the API proxy behave
+    // exactly as before. Build with `npm run build` + `npm run preview`
+    // to exercise the installed experience.
+    devOptions: { enabled: false },
+  })
 }
 
 export default defineConfig(({ mode }) => {
@@ -116,7 +216,7 @@ export default defineConfig(({ mode }) => {
     // Vite plugin IS the compiler. Remove it and every style in the app
     // disappears. jsconfigPaths() resolves the path aliases in
     // jsconfig.json; without it those imports fail to resolve.
-    plugins: [react(), tailwindcss(), jsconfigPaths()],
+    plugins: [react(), tailwindcss(), jsconfigPaths(), pwaPlugin()],
 
     server: {
       port: devPort,

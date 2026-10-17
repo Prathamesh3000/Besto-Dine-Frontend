@@ -28,6 +28,8 @@ import ChefHeader from './components/ChefHeader';
 import CompletedOrdersDrawer from './components/CompletedOrdersDrawer';
 import ChefOrderCard from './components/ChefOrderCard';
 import OrderDetailModal from './components/OrderDetailModal';
+import InstallAppBanner from '../../Components/Common/InstallAppBanner';
+import { capBuckets, KDS_MAX_CARDS } from './utils/kdsBoard';
 
 /**
  * ChefDashboard — Kitchen Display System (KDS).
@@ -199,6 +201,19 @@ const ChefDashboard = () => {
     // piped to each order card so the elapsed timer is drift-corrected.
     const [serverOffsetMs, setServerOffsetMs] = useState(0);
 
+    // ── Single shared clock ────────────────────────────────────
+    // ONE 1 s interval for the whole board. Every card derives its
+    // elapsed / countdown text from `serverNowMs`, so N cards cost one
+    // timer and one batched commit per second instead of N independent
+    // intervals each forcing their own re-render (the 2026-10-13 soak
+    // measured ~3 MB/card with per-card timers).
+    const [tickMs, setTickMs] = useState(() => Date.now());
+    useEffect(() => {
+        const id = setInterval(() => setTickMs(Date.now()), 1000);
+        return () => clearInterval(id);
+    }, []);
+    const serverNowMs = tickMs - serverOffsetMs;
+
     // Network state — kitchens often have flaky wifi.
     useEffect(() => {
         const onUp = () => setIsOnline(true);
@@ -261,14 +276,24 @@ const ChefDashboard = () => {
                 // other status) in this list created a class of bugs
                 // where a stale cached response inflated column counts
                 // without matching any visible card.
+                const kept = res.data.orders.filter((o) =>
+                    ['new', 'preparing', 'ready'].includes(o.status)
+                );
+                // The server caps the list (oldest first, default 150) and
+                // reports `meta.total`; anything beyond the cap is real
+                // backlog the chef must know about even though it was
+                // never sent — it feeds the "N more waiting" banner.
+                const meta = res.data.meta || {};
+                const serverHidden = meta.truncated && Number.isFinite(meta.total)
+                    ? Math.max(0, meta.total - res.data.orders.length)
+                    : 0;
                 return {
-                    orders: res.data.orders.filter((o) =>
-                        ['new', 'preparing', 'ready'].includes(o.status)
-                    ),
+                    orders: kept,
                     completedToday: res.data.completedToday || 0,
+                    serverHidden,
                 };
             }
-            return { orders: [], completedToday: 0 };
+            return { orders: [], completedToday: 0, serverHidden: 0 };
         },
         // Socket events are the primary path; this poll is the safety
         // net for the times the socket drops on flaky kitchen Wi-Fi.
@@ -520,8 +545,16 @@ const ChefDashboard = () => {
         },
     });
 
-    const handleStatusUpdate = (orderId, newStatus) =>
-        statusMutation.mutate({ orderId, newStatus });
+    // Stable card callback (React.memo on ChefOrderCard depends on it).
+    // The next status follows from the card's current status, which is
+    // the same mapping the columns used to hard-code: prepare_now
+    // ('new') → preparing, preparing → ready. Anything else is a no-op
+    // (upcoming/ready cards render no button anyway).
+    const { mutate: mutateStatus } = statusMutation;
+    const handleCardAction = useCallback((orderId, status) => {
+        if (status === 'preparing') mutateStatus({ orderId, newStatus: 'ready' });
+        else if (status === 'new' || !status) mutateStatus({ orderId, newStatus: 'preparing' });
+    }, [mutateStatus]);
 
     const handleLogout = () => {
         logout();
@@ -603,6 +636,16 @@ const ChefDashboard = () => {
         };
     }, [orders, searchTerm, typeFilter, dietFilter, urgentOnly, serverOffsetMs]);
 
+    // ── Render cap ─────────────────────────────────────────────
+    // Never mount more than KDS_MAX_CARDS cards at once; see
+    // utils/kdsBoard.js for the trimming rule (upcoming first, then
+    // proportional across active columns, most urgent kept). Column
+    // badges below still show the TRUE counts from `buckets`.
+    const { shown, hiddenByBucket, hiddenTotal } = useMemo(
+        () => capBuckets(buckets, KDS_MAX_CARDS),
+        [buckets]
+    );
+
     const urgentTotal = useMemo(
         () => orders.filter((o) => isOrderUrgent(o, serverOffsetMs)).length,
         [orders, serverOffsetMs]
@@ -657,6 +700,8 @@ const ChefDashboard = () => {
                 kitchenLoad={kitchenLoad}
                 isOnline={isOnline}
             />
+
+            <InstallAppBanner className="mx-4 mt-3" />
 
             {/* Connectivity banner — LAN offline wins over socket-only drop,
                 and a socket-only drop still shows "Reconnecting…" so the
@@ -813,19 +858,31 @@ const ChefDashboard = () => {
                   lg   : 3 cols (tablet landscape — was 2, too cramped)
                   xl+  : full 4-col layout */}
             <main className="max-w-480 mx-auto px-4 sm:px-6 lg:px-8 pb-12 pt-4">
+                {(hiddenTotal + (ordersData?.serverHidden || 0)) > 0 && (
+                    <div
+                        role="status"
+                        data-testid="kds-cap-banner"
+                        className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-amber-800 text-sm font-semibold"
+                    >
+                        <Layers size={16} strokeWidth={2.5} className="shrink-0" />
+                        <span>
+                            <span className="font-black tabular-nums">{hiddenTotal + (ordersData?.serverHidden || 0)}</span>
+                            {' '}more order{(hiddenTotal + (ordersData?.serverHidden || 0)) === 1 ? '' : 's'} waiting — complete tickets to see them.
+                            <span className="font-normal text-amber-700"> Showing the {KDS_MAX_CARDS} most urgent.</span>
+                        </span>
+                    </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 lg:gap-6">
                     {COLUMNS.map((col) => (
                         <KanbanColumn
                             key={col.key}
                             col={col}
-                            orders={buckets[col.key]}
+                            orders={shown[col.key]}
                             count={counts[col.key]}
+                            hiddenCount={hiddenByBucket[col.key]}
                             actionLoading={actionLoading}
-                            serverOffsetMs={serverOffsetMs}
-                            onAction={(orderId) => {
-                                if (col.key === 'prepare_now') handleStatusUpdate(orderId, 'preparing');
-                                else if (col.key === 'preparing') handleStatusUpdate(orderId, 'ready');
-                            }}
+                            nowMs={serverNowMs}
+                            onAction={handleCardAction}
                             onView={setViewOrder}
                             hiddenOnMobile={mobileColumn !== col.key}
                             appendedIds={appendedIds}
@@ -844,7 +901,7 @@ const ChefDashboard = () => {
 };
 
 // ─── KanbanColumn ────────────────────────────────────────────────────
-const KanbanColumn = ({ col, orders, count, actionLoading, serverOffsetMs, onAction, onView, hiddenOnMobile, appendedIds }) => {
+const KanbanColumn = ({ col, orders, count, hiddenCount = 0, actionLoading, nowMs, onAction, onView, hiddenOnMobile, appendedIds }) => {
     const ColIcon = col.icon;
     const EmptyIcon = col.EmptyIcon;
     return (
@@ -899,13 +956,21 @@ const KanbanColumn = ({ col, orders, count, actionLoading, serverOffsetMs, onAct
                         <ChefOrderCard
                             key={order._id}
                             order={order}
-                            actionLoading={actionLoading}
-                            serverOffsetMs={serverOffsetMs}
+                            isActionLoading={actionLoading === order._id}
+                            nowMs={nowMs}
                             onAction={onAction}
                             onView={onView}
                             justAppended={appendedIds?.has(order.id) || false}
                         />
                     ))
+                )}
+                {hiddenCount > 0 && (
+                    <p
+                        data-testid={`kds-cap-${col.key}`}
+                        className="text-center text-xs font-bold text-[#7D7380] py-2"
+                    >
+                        +{hiddenCount} more not shown
+                    </p>
                 )}
             </div>
         </section>

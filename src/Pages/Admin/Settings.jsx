@@ -10,7 +10,9 @@ import { SkeletonStatGrid, SkeletonRows } from '../../Components/Common/Skeleton
 import { useAuth } from '../../Context/AuthContext'
 import LandingPageSettings from './components/LandingPageSettings'
 import PrinterSettings from './components/PrinterSettings'
+import OperationsSummary from './components/OperationsSummary'
 import ParkingSettingsCard from './components/ParkingSettingsCard'
+import { IMAGE_ACCEPT } from '../../utils/imageFile'
 
 // First human-readable message from a failed settings save. The API
 // returns either { message, errors: { field: msg } } (mongoose validation)
@@ -50,7 +52,7 @@ const Settings = () => {
     // Landing Page is tenant-level (one public page per restaurant at
     // /<slug>); branch-pinned admins see it read-only (the backend
     // refuses their saves with INHERITED_FROM_MAIN).
-    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers']
+    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers', 'Operations']
 
     // Loading state
     const [loading, setLoading] = useState(true)
@@ -630,7 +632,7 @@ const Settings = () => {
                 </div>
                 {/* The Landing Page tab saves on its own (PATCH /settings/landingPage);
                     "Save All" doesn't include it, so hide it there. */}
-                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && (
+                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && activeTab !== 'Operations' && (
                 <button
                     disabled={isSaving}
                     onClick={() => {
@@ -822,7 +824,7 @@ const Settings = () => {
                                             <Upload size={24} className="text-[#6B7280] mb-3" strokeWidth={1.5} />
                                             <p className="text-[12px] text-[#374151] text-center px-4 leading-relaxed">
                                                 Click to upload or drag and drop<br />
-                                                <span className="text-[11px] text-[#6B7280]">PNG, JPG up to 5MB</span>
+                                                <span className="text-[11px] text-[#6B7280]">Any image up to 5MB</span>
                                             </p>
                                         </>
                                     )}
@@ -830,7 +832,7 @@ const Settings = () => {
                                         type="file" 
                                         id="logo-upload" 
                                         className="hidden" 
-                                        accept="image/*"
+                                        accept={IMAGE_ACCEPT}
                                         onChange={async (e) => {
                                             const file = e.target.files[0]
                                             if (!file) return
@@ -1062,13 +1064,13 @@ const Settings = () => {
                                 <Upload size={22} className="text-[#6B7280] mb-3" strokeWidth={1.5} />
                                 <p className="text-[12px] text-[#374151] text-center leading-relaxed">
                                     Click to upload or drag and drop<br />
-                                    <span className="text-[11px] text-[#6B7280]">PNG, JPG up to 5MB</span>
+                                    <span className="text-[11px] text-[#6B7280]">Any image up to 5MB</span>
                                 </p>
                                 <input
                                     type="file"
                                     id="banner-upload"
                                     className="hidden"
-                                    accept="image/*"
+                                    accept={IMAGE_ACCEPT}
                                     onChange={async (e) => {
                                         const file = e.target.files[0]
                                         if (!file) return
@@ -1110,6 +1112,9 @@ const Settings = () => {
                     onSave={(data) => saveSectionSettings('printers', data)}
                 />
             )}
+
+            {/* Content - Operations Tab — read-only; set by BestoDine (Super Admin) */}
+            {activeTab === 'Operations' && <OperationsSummary />}
 
             {/* Content - Taxes & Charges Tab */}
             {activeTab === 'Taxes & Charges' && (

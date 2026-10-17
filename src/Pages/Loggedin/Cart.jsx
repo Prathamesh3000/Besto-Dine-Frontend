@@ -26,7 +26,7 @@ import SpecialInstructionsPopup from "../../Components/Waiter/SpecialInstruction
 import { useCart } from "../../Context/CartContext";
 import { useMenu } from "../../Context/MenuContext";
 import api, { walletAPI, promotionsAPI, settingsAPI } from "../../utils/api";
-import { getActiveBranch, activeRestaurantPath } from "../../utils/tenant";
+import { getActiveBranch, activeRestaurantPath, setActiveTenantOperations } from "../../utils/tenant";
 import { geocodeAddress, reverseGeocode, getCurrentPosition } from "../../utils/geo";
 import { useDineInLock } from "../../utils/dineInSession";
 import { resolveUnitPrice, resolveLinePrice, formatPrice } from "../../utils/pricing";
@@ -36,6 +36,10 @@ import { isGuestSessionExpired, clearGuestSession } from "../../utils/guestSessi
 import { rememberOrderIds, getCustomerOrderSession } from "../../utils/customerOrderIds";
 import { toast } from "react-hot-toast";
 import { reportMissingFields } from "../../utils/requiredFields";
+import { getCustomerOperations } from "../../utils/operations";
+import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
+import QrMenuOnlyNote from "../../Components/Loggedin/QrMenuOnlyNote";
+import { QR_MENU_ONLY_NOTE, serviceSpotLabel, dineInPaymentChoice } from "../../utils/customerOrdering";
 
 // ─── Checkout idempotency key ────────────────────────────────────────────────
 // One key per checkout attempt. It survives a slow-network retry / double
@@ -503,6 +507,9 @@ function Cart() {
   // shows a clear "Re-scan QR" banner so the customer knows what
   // to do instead of tapping a dead button.
   const dineInLocked = useDineInLock();
+  // QR is menu-only (operations profile customerSelfOrder:false): no
+  // dine-in Place Order — the staff take the order. Takeaway untouched.
+  const selfOrderBlocked = useSelfOrderBlocked();
   const { cartItems: cartContextItems, updateQuantity: updateQtyContext, updateCartItem, clearCart: clearCartContext } = useCart();
   // Menu catalogue — used to compute "Complete your meal" suggestions
   // (drinks / breads / sides / desserts that pair with what's in cart).
@@ -666,6 +673,7 @@ function Cart() {
     () => localStorage.getItem("orderType") || "dine-in",
   );
   const isTakeaway = orderType === "takeaway";
+  const dineInOrderingOff = selfOrderBlocked && !isTakeaway;
 
   // Takeaway-specific state
   const [selectedDay, setSelectedDay] = useState(() => new Date().getHours() >= 12 ? "PM" : "AM");
@@ -1356,8 +1364,10 @@ function Cart() {
     setCustomizeItemIndex(null);
   };
 
-  // Handle Place Order
-  const handlePlaceOrder = async () => {
+  // Handle Place Order. `payChoice` ('payFirst' | 'payAfter') is the
+  // customer's pick when the operations profile says payment.dineIn is
+  // 'either' (two buttons); the single-button modes ignore it.
+  const handlePlaceOrder = async (payChoice) => {
     if (cartItems.length === 0 || isSubmitting) return;
 
     // GST-005 — 24h FE cap. Block guest checkout when guest_session_start
@@ -1373,6 +1383,12 @@ function Cart() {
       clearGuestSession();
       clearCart();
       navigate(activeRestaurantPath());
+      return;
+    }
+
+    // QR is menu-only — the backend would 403 SELF_ORDER_DISABLED.
+    if (dineInOrderingOff) {
+      toast(QR_MENU_ONLY_NOTE, { id: 'qr-menu-only', duration: 4000 });
       return;
     }
 
@@ -1608,10 +1624,65 @@ function Cart() {
       };
       // Same key for every retry of THIS cart (duplicate-order guard).
       const idemKey = getCheckoutIdempotencyKey(JSON.stringify(dineInPayload));
-      const { data } = await api.post('/orders', {
-        ...dineInPayload,
-        clientIdempotencyKey: idemKey,
-      }, { _silent: true, headers: { 'Idempotency-Key': idemKey } });
+
+      // Pay-first restaurant (operations profile): no order exists until
+      // the customer pays — hand the draft to the payment screen, which
+      // creates the order with (or right after) the payment.
+      const handOffToPayment = (key) => {
+        setIsSubmitting(false);
+        navigate('/customer/payment', {
+          state: {
+            payFirstDineIn: true,
+            orderPayload: { ...dineInPayload, clientIdempotencyKey: key },
+            total: dineInFinalTotal,
+            cartItemsForStorage: cartItems.map(item => ({
+              title: item.name || item.title,
+              name: item.name || item.title,
+              price: resolveUnitPrice(item),
+              unitPrice: resolveUnitPrice(item),
+              quantity: item.quantity,
+              image: item.image || item.images?.[0] || '',
+            })),
+          },
+        });
+      };
+      // 'either': the customer chose "Pay now" (pay-first path) or "Pay
+      // after the meal" (today's path). Without a pick, today's path.
+      const payMode = dineInPaymentChoice();
+      if (payMode === 'payFirst' || (payMode === 'either' && payChoice === 'payFirst')) {
+        handOffToPayment(idemKey);
+        return;
+      }
+
+      let data;
+      try {
+        ({ data } = await api.post('/orders', {
+          ...dineInPayload,
+          clientIdempotencyKey: idemKey,
+        }, { _silent: true, headers: { 'Idempotency-Key': idemKey } }));
+      } catch (postErr) {
+        // 402 PAYMENT_REQUIRED_FIRST — the restaurant switched to
+        // pay-first but this device's cached profile is stale. Store
+        // the fresh rule and take the same pay-first path as above.
+        // Nothing was created; the hand-off gets a fresh key (the
+        // server would replay this 402 for the old one).
+        if (postErr?.response?.status === 402 && postErr.response?.data?.code === 'PAYMENT_REQUIRED_FIRST') {
+          const ops = getCustomerOperations();
+          setActiveTenantOperations({
+            ...ops,
+            payment: {
+              ...ops.payment,
+              dineIn: 'payFirst',
+              methods: postErr.response.data.methods || ops.payment?.methods,
+            },
+          });
+          clearCheckoutIdempotencyKey();
+          toast('This restaurant asks you to pay first', { id: 'pay-first-required', duration: 4000 });
+          handOffToPayment(getCheckoutIdempotencyKey(JSON.stringify(dineInPayload)));
+          return;
+        }
+        throw postErr;
+      }
 
       if (data.success) {
         clearCheckoutIdempotencyKey();
@@ -1783,7 +1854,7 @@ function Cart() {
             </span>
           ) : (tableNumber && !dineInLocked) ? (
             <span className="text-[#666666] text-[14px] font-varela regular">
-              Table {tableNumber}
+              {serviceSpotLabel()} {tableNumber}
             </span>
           ) : null}
         </div>
@@ -1839,7 +1910,9 @@ function Cart() {
         {/* Add more items — sends the customer back to the menu without
             losing the cart (cart lives in context, not this page). The
             dashed style reads as an "append" action, distinct from the
-            solid orange Place Order CTA. */}
+            solid orange Place Order CTA. Hidden when the QR is
+            menu-only (nothing to add — the staff take the order). */}
+        {!dineInOrderingOff && (
         <button
           type="button"
           onClick={() => navigate('/customer/menu')}
@@ -1848,6 +1921,7 @@ function Cart() {
           <Plus size={18} strokeWidth={2.5} />
           Add more items
         </button>
+        )}
 
         {/* Complete your meal — horizontal-scroll strip of complementary
             items based on what's currently in cart (drinks for mains,
@@ -2472,7 +2546,9 @@ function Cart() {
             </section>
             )}
 
-            {/* Add Tip Section */}
+            {/* Add Tip Section — hidden when the restaurant's operations
+                profile has no tips (e.g. no waiters to receive them). */}
+            {getCustomerOperations().customerApp?.tips !== false && (
             <section className="bg-white rounded-[16px] border border-[#F6F6F6] p-4 shadow-[0px_4px_8.4px_0px_#D0C9F833]">
               <h2 className="text-[20px] leading-[28px] font-nunito font-semibold text-[#1A181B] mb-2">
                 Add Tip
@@ -2537,6 +2613,7 @@ function Cart() {
                 </div>
               )}
             </section>
+            )}
 
             {/* Bill Summary Section */}
             <section className="bg-white rounded-[16px] border border-[#F6F6F6] p-4 shadow-[0px_4px_8.4px_0px_#D0C9F833]">
@@ -2658,8 +2735,49 @@ function Cart() {
             </p>
           </div>
         )}
+        {/* QR is menu-only — no Place Order, just the note. */}
+        {dineInOrderingOff ? (
+          <QrMenuOnlyNote />
+        ) : !isTakeaway && dineInPaymentChoice() === 'either' ? (
+          /* Operations profile payment.dineIn:'either' — the customer
+             picks: pay now (hand-off to the payment screen, the order is
+             created once paid) or pay after the meal (today's path). */
+          <div className="flex flex-col gap-2" data-testid="pay-choice">
+            <button
+              type="button"
+              onClick={() => handlePlaceOrder('payFirst')}
+              disabled={cartItems.length === 0 || isSubmitting || dineInLocked}
+              className={`w-full py-3 rounded-xl semibold font-nunito text-[14px] shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-300 ${
+                isSubmitting || cartItems.length === 0 || dineInLocked
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-[#FE8301] text-white"
+              }`}
+            >
+              {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <ShoppingCart size={18} />}
+              <span>
+                {dineInLocked
+                  ? "Re-scan QR to order"
+                  : isSubmitting
+                  ? "Placing Order..."
+                  : `Pay now ₹${finalTakeawayTotal.toFixed(2)}`}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePlaceOrder('payAfter')}
+              disabled={cartItems.length === 0 || isSubmitting || dineInLocked}
+              className={`w-full py-2.5 rounded-xl semibold font-nunito text-[14px] border flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-300 ${
+                isSubmitting || cartItems.length === 0 || dineInLocked
+                  ? "border-gray-200 text-gray-400 cursor-not-allowed"
+                  : "border-[#FE8301] text-[#FE8301] bg-white"
+              }`}
+            >
+              Pay after the meal
+            </button>
+          </div>
+        ) : (
         <button
-          onClick={handlePlaceOrder}
+          onClick={() => handlePlaceOrder()}
           disabled={cartItems.length === 0 || isSubmitting || (dineInLocked && !isTakeaway)}
           className={`w-full py-3 rounded-xl semibold font-nunito text-[14px] shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-300 ${
             isSubmitting || cartItems.length === 0 || (dineInLocked && !isTakeaway)
@@ -2688,6 +2806,7 @@ function Cart() {
                 : `Place Order ₹${finalTakeawayTotal.toFixed(2)}`}
           </span>
         </button>
+        )}
       </div>
 
       {/* Special Instructions Popup */}

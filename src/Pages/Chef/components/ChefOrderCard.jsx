@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
     AlertTriangle,
     PlayCircle,
@@ -12,7 +12,7 @@ import {
     Clock,
 } from 'lucide-react';
 import ChefItemCard from './ChefItemCard';
-import useOrderTimer from '../../../hooks/useOrderTimer';
+import { formatElapsed } from '../utils/kdsBoard';
 
 /**
  * ChefOrderCard — single order tile in the Kanban board.
@@ -77,7 +77,17 @@ const STATUS_CONFIG = {
 const URGENT_AFTER = 10;
 const COOKING_TARGET_MIN = 15;
 
-const ChefOrderCard = ({ order, onAction, onView, actionLoading, serverOffsetMs = 0, justAppended = false }) => {
+/**
+ * Props are deliberately flat/stable so React.memo can skip re-renders:
+ *   nowMs            server-corrected "now" from the dashboard's single
+ *                    shared 1 s ticker (replaces a per-card setInterval —
+ *                    282 cards used to mean 282 intervals and 282
+ *                    independent re-renders per second).
+ *   isActionLoading  boolean for THIS card only, not the global id.
+ *   onAction(orderId, status)  stable callback; the dashboard decides
+ *                    the next status from the current one.
+ */
+const ChefOrderCard = ({ order, onAction, onView, isActionLoading = false, nowMs, justAppended = false }) => {
     const status = order.status || 'new';
     const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.new;
     const ActionIcon = cfg.ActionIcon;
@@ -101,7 +111,10 @@ const ChefOrderCard = ({ order, onAction, onView, actionLoading, serverOffsetMs 
         : status === 'ready'   ? (order.preparationCompletedAt || order.updatedAt || order.createdAt)
         : order.createdAt;
 
-    const elapsed = useOrderTimer(timerAnchor, serverOffsetMs);
+    // No Date.now() here: the clock is a prop so render stays pure and
+    // memoisable. Without a ticker the card simply shows 00:00.
+    const clockMs = Number.isFinite(nowMs) ? nowMs : NaN;
+    const elapsed = formatElapsed(timerAnchor, clockMs);
 
     const isUrgent = (status === 'new' && elapsed.minutes >= URGENT_AFTER) || order.isUrgent;
 
@@ -113,9 +126,9 @@ const ChefOrderCard = ({ order, onAction, onView, actionLoading, serverOffsetMs 
     const isScheduled = queueBucket === 'scheduled';
     const pickupAtMs = order.pickupAt ? new Date(order.pickupAt).getTime() : null;
     const prepStartAtMs = order.prepStartAt ? new Date(order.prepStartAt).getTime() : null;
-    const nowMs = Date.now() - serverOffsetMs;
-    const minsToPickup = pickupAtMs ? Math.round((pickupAtMs - nowMs) / 60000) : null;
-    const minsToPrep = prepStartAtMs ? Math.round((prepStartAtMs - nowMs) / 60000) : null;
+    const hasClock = Number.isFinite(clockMs);
+    const minsToPickup = pickupAtMs && hasClock ? Math.round((pickupAtMs - clockMs) / 60000) : null;
+    const minsToPrep = prepStartAtMs && hasClock ? Math.round((prepStartAtMs - clockMs) / 60000) : null;
     const formatTime = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const formatCountdown = (mins) => {
         if (mins === null || mins === undefined) return '';
@@ -153,122 +166,14 @@ const ChefOrderCard = ({ order, onAction, onView, actionLoading, serverOffsetMs 
         return parts.length > 1 ? parts[parts.length - 1] : String(order.id).slice(-4);
     })();
 
-    const isActionLoading = actionLoading === order._id;
-
-    // Split items into the original round vs anything appended later.
-    // Baseline = earliest item.addedAt among the order's items (NOT
-    // order.createdAt). Why: Mongoose's `default: Date.now` on the
-    // addedAt field can retroactively stamp pre-existing items with
-    // `now` during any save(), so a naive `order.createdAt` baseline
-    // would misclassify the entire original round as "added later" on
-    // orders that were first touched after the schema change. Using
-    // the min item timestamp as the baseline self-heals that case and
-    // still correctly flags genuine appends (which come in a later
-    // explicit batch). 60 s grace absorbs clock skew.
-    const ADDED_LATER_GRACE_MS = 60_000;
-    const allItems = order.items || [];
-    const addedTimes = allItems
-        .map(i => i?.addedAt ? new Date(i.addedAt).getTime() : null)
-        .filter(Number.isFinite);
-    const baselineMs = addedTimes.length
-        ? Math.min(...addedTimes)
-        : (order.createdAt ? new Date(order.createdAt).getTime() : 0);
-    const originalRaw = [];
-    const appendedRaw = [];
-    for (const it of allItems) {
-        const addedMs = it.addedAt ? new Date(it.addedAt).getTime() : baselineMs;
-        if (Number.isFinite(addedMs) && addedMs - baselineMs > ADDED_LATER_GRACE_MS) {
-            appendedRaw.push(it);
-        } else {
-            originalRaw.push(it);
-        }
-    }
-
-    // De-duplicate when the same item appears in BOTH buckets — e.g.
-    // customer originally ordered 2× Pineapple, then added 2× more
-    // Pineapple later. The naive split would render two cards: a 2×
-    // Pineapple in "Original" and another 2× Pineapple in "Added
-    // later", so the chef has to mentally add 2+2 to know they need
-    // 4 Pineapples total.
-    //
-    // Smarter rendering: merge the appended qty into the original
-    // line and stamp `addedLaterQty` so we can still show the "+2
-    // added later" hint inline. Only items not already present in
-    // the original round stay in the appendedItems list — those are
-    // the truly NEW dishes the chef hasn't started on yet.
-    //
-    // The merge key includes toppings + instructions + size so a
-    // "Pineapple, extra cheese" stays separate from a plain
-    // "Pineapple" — chef would otherwise lose the topping info on
-    // half the units when we collapsed them into one line.
-    const keyOf = (it) => {
-        const base = String(it.menuItem || it.name || '').trim().toLowerCase();
-        const toppings = Array.isArray(it.selectedToppings)
-            ? it.selectedToppings.map(t => String(t?.name || '').trim().toLowerCase()).filter(Boolean).sort().join(',')
-            : '';
-        const sizes = Array.isArray(it.selectedSizes)
-            ? it.selectedSizes.map(s => String(s?.name || '').trim().toLowerCase()).filter(Boolean).sort().join(',')
-            : '';
-        const instr = String(it.instructions || '').trim().toLowerCase();
-        return `${base}|${sizes}|${toppings}|${instr}`;
-    };
-    // Step 1 — collapse same-key items WITHIN each bucket. Customer
-    // re-ordering Crispy Corn twice (two separate Place Order taps)
-    // used to render as "×1 Crispy Corn" appearing twice in a row;
-    // chef has to mentally add them up. After this, it reads as
-    // a single "×2 Crispy Corn" line.
-    const collapseSameKeys = (list) => {
-        const byKey = new Map();
-        for (const it of list) {
-            const k = keyOf(it);
-            if (!k) {
-                // Items without a stable key (legacy / mock ids) bypass
-                // the merge — push each one through as-is so we don't
-                // collapse genuinely-different items by accident.
-                byKey.set(`__nokey-${byKey.size}`, { ...it });
-                continue;
-            }
-            const existing = byKey.get(k);
-            if (existing) {
-                existing.quantity = (Number(existing.quantity) || 0) + (Number(it.quantity) || 0);
-            } else {
-                byKey.set(k, { ...it });
-            }
-        }
-        return Array.from(byKey.values());
-    };
-
-    const originalItems = collapseSameKeys(originalRaw);
-    const appendedDeduped = collapseSameKeys(appendedRaw);
-
-    // Step 2 — merge appended items into matching original items.
-    // Customer originally ordered 2× Pineapple, then added 2× more
-    // Pineapple later. The naive split would render two cards: a 2×
-    // Pineapple in "Original" and another 2× Pineapple in "Added
-    // later", so the chef has to mentally add 2+2 to know they need
-    // 4 Pineapples total.
-    //
-    // Smarter rendering: merge the appended qty into the original
-    // line and stamp `addedLaterQty` so we can still show the "+2
-    // added later" hint inline. Only items not already present in
-    // the original round stay in the appendedItems list — those are
-    // the truly NEW dishes the chef hasn't started on yet.
-    const appendedItems = [];
-    for (const ap of appendedDeduped) {
-        const apKey = keyOf(ap);
-        if (!apKey) {
-            appendedItems.push(ap);
-            continue;
-        }
-        const match = originalItems.find(orig => keyOf(orig) === apKey);
-        if (match) {
-            const apQty = Number(ap.quantity) || 0;
-            match.quantity = (Number(match.quantity) || 0) + apQty;
-            match.addedLaterQty = (Number(match.addedLaterQty) || 0) + apQty;
-        } else {
-            appendedItems.push(ap);
-        }
-    }
+    // Item grouping only depends on the order's items, so it is memoised
+    // and NOT redone on every 1 s clock tick. This also keeps the item
+    // objects referentially stable so the memoised ChefItemCard rows skip
+    // re-rendering on ticks.
+    const { originalItems, appendedItems } = useMemo(
+        () => splitItems(order.items, order.createdAt),
+        [order.items, order.createdAt]
+    );
 
     return (
         <article
@@ -478,7 +383,7 @@ const ChefOrderCard = ({ order, onAction, onView, actionLoading, serverOffsetMs 
                 ) : (
                     <button
                         type="button"
-                        onClick={() => onAction?.(order._id)}
+                        onClick={() => onAction?.(order._id, status)}
                         disabled={isActionLoading}
                         className={`w-full h-14 sm:h-16 rounded-xl font-bold text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white focus-visible:ring-[#FE8301] ${cfg.action}`}
                     >
@@ -497,6 +402,129 @@ const ChefOrderCard = ({ order, onAction, onView, actionLoading, serverOffsetMs 
     );
 };
 
+// ─── Item grouping (pure) ────────────────────────────────────────────
+// Returns { originalItems, appendedItems } for a card. Pulled out of the
+// render body so it can be memoised per order instead of re-run on
+// every clock tick.
+function splitItems(items, createdAt) {
+    // Split items into the original round vs anything appended later.
+    // Baseline = earliest item.addedAt among the order's items (NOT
+    // order.createdAt). Why: Mongoose's `default: Date.now` on the
+    // addedAt field can retroactively stamp pre-existing items with
+    // `now` during any save(), so a naive `order.createdAt` baseline
+    // would misclassify the entire original round as "added later" on
+    // orders that were first touched after the schema change. Using
+    // the min item timestamp as the baseline self-heals that case and
+    // still correctly flags genuine appends (which come in a later
+    // explicit batch). 60 s grace absorbs clock skew.
+    const ADDED_LATER_GRACE_MS = 60_000;
+    const allItems = items || [];
+    const addedTimes = allItems
+        .map(i => i?.addedAt ? new Date(i.addedAt).getTime() : null)
+        .filter(Number.isFinite);
+    const baselineMs = addedTimes.length
+        ? Math.min(...addedTimes)
+        : (createdAt ? new Date(createdAt).getTime() : 0);
+    const originalRaw = [];
+    const appendedRaw = [];
+    for (const it of allItems) {
+        const addedMs = it.addedAt ? new Date(it.addedAt).getTime() : baselineMs;
+        if (Number.isFinite(addedMs) && addedMs - baselineMs > ADDED_LATER_GRACE_MS) {
+            appendedRaw.push(it);
+        } else {
+            originalRaw.push(it);
+        }
+    }
+
+    // De-duplicate when the same item appears in BOTH buckets — e.g.
+    // customer originally ordered 2× Pineapple, then added 2× more
+    // Pineapple later. The naive split would render two cards: a 2×
+    // Pineapple in "Original" and another 2× Pineapple in "Added
+    // later", so the chef has to mentally add 2+2 to know they need
+    // 4 Pineapples total.
+    //
+    // Smarter rendering: merge the appended qty into the original
+    // line and stamp `addedLaterQty` so we can still show the "+2
+    // added later" hint inline. Only items not already present in
+    // the original round stay in the appendedItems list — those are
+    // the truly NEW dishes the chef hasn't started on yet.
+    //
+    // The merge key includes toppings + instructions + size so a
+    // "Pineapple, extra cheese" stays separate from a plain
+    // "Pineapple" — chef would otherwise lose the topping info on
+    // half the units when we collapsed them into one line.
+    const keyOf = (it) => {
+        const base = String(it.menuItem || it.name || '').trim().toLowerCase();
+        const toppings = Array.isArray(it.selectedToppings)
+            ? it.selectedToppings.map(t => String(t?.name || '').trim().toLowerCase()).filter(Boolean).sort().join(',')
+            : '';
+        const sizes = Array.isArray(it.selectedSizes)
+            ? it.selectedSizes.map(s => String(s?.name || '').trim().toLowerCase()).filter(Boolean).sort().join(',')
+            : '';
+        const instr = String(it.instructions || '').trim().toLowerCase();
+        return `${base}|${sizes}|${toppings}|${instr}`;
+    };
+    // Step 1 — collapse same-key items WITHIN each bucket. Customer
+    // re-ordering Crispy Corn twice (two separate Place Order taps)
+    // used to render as "×1 Crispy Corn" appearing twice in a row;
+    // chef has to mentally add them up. After this, it reads as
+    // a single "×2 Crispy Corn" line.
+    const collapseSameKeys = (list) => {
+        const byKey = new Map();
+        for (const it of list) {
+            const k = keyOf(it);
+            if (!k) {
+                // Items without a stable key (legacy / mock ids) bypass
+                // the merge — push each one through as-is so we don't
+                // collapse genuinely-different items by accident.
+                byKey.set(`__nokey-${byKey.size}`, { ...it });
+                continue;
+            }
+            const existing = byKey.get(k);
+            if (existing) {
+                existing.quantity = (Number(existing.quantity) || 0) + (Number(it.quantity) || 0);
+            } else {
+                byKey.set(k, { ...it });
+            }
+        }
+        return Array.from(byKey.values());
+    };
+
+    const originalItems = collapseSameKeys(originalRaw);
+    const appendedDeduped = collapseSameKeys(appendedRaw);
+
+    // Step 2 — merge appended items into matching original items.
+    // Customer originally ordered 2× Pineapple, then added 2× more
+    // Pineapple later. The naive split would render two cards: a 2×
+    // Pineapple in "Original" and another 2× Pineapple in "Added
+    // later", so the chef has to mentally add 2+2 to know they need
+    // 4 Pineapples total.
+    //
+    // Smarter rendering: merge the appended qty into the original
+    // line and stamp `addedLaterQty` so we can still show the "+2
+    // added later" hint inline. Only items not already present in
+    // the original round stay in the appendedItems list — those are
+    // the truly NEW dishes the chef hasn't started on yet.
+    const appendedItems = [];
+    for (const ap of appendedDeduped) {
+        const apKey = keyOf(ap);
+        if (!apKey) {
+            appendedItems.push(ap);
+            continue;
+        }
+        const match = originalItems.find(orig => keyOf(orig) === apKey);
+        if (match) {
+            const apQty = Number(ap.quantity) || 0;
+            match.quantity = (Number(match.quantity) || 0) + apQty;
+            match.addedLaterQty = (Number(match.addedLaterQty) || 0) + apQty;
+        } else {
+            appendedItems.push(ap);
+        }
+    }
+
+    return { originalItems, appendedItems };
+}
+
 // ─── Internal helpers ────────────────────────────────────────────────
 const SectionLabel = ({ children, className = '' }) => (
     <div className={`text-[10px] font-bold uppercase tracking-widest text-[#7D7380] ${className}`}>
@@ -504,4 +532,4 @@ const SectionLabel = ({ children, className = '' }) => (
     </div>
 );
 
-export default ChefOrderCard;
+export default React.memo(ChefOrderCard);

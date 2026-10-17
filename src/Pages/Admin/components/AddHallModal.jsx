@@ -1252,7 +1252,7 @@ const AddHallModal = ({ isOpen, onClose, onSave, hallData }) => {
                                     <div className="w-[190px] h-[130px] border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 transition-colors">
                                         <Upload size={24} className="text-gray-400 mb-2" />
                                         <p className="text-[12px] text-gray-500 text-center px-3">Click to upload or drag and drop</p>
-                                        <p className="text-[10px] text-gray-400 mt-1">PNG, JPG up to 5MB</p>
+                                        <p className="text-[10px] text-gray-400 mt-1">Any image up to 5MB</p>
                                     </div>
                                     {/* Image thumbnails */}
                                     {[1, 2, 3, 4, 5, 6, 7].map(i => (

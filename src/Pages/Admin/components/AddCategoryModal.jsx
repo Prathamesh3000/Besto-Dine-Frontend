@@ -4,6 +4,7 @@ import api from '../../../utils/api'
 import toast from 'react-hot-toast'
 import { useMenu } from '../../../Context/MenuContext'
 import { FALLBACK_IMAGE, resolveImageUrl } from '../../../utils/image'
+import { IMAGE_ACCEPT, isImageFile } from '../../../utils/imageFile'
 
 const AddCategoryModal = ({ onClose, onRefresh }) => {
     const { categories: contextCategories, fetchCategories: refreshContextCategories } = useMenu();
@@ -58,7 +59,7 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
     const handleImageUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        if (!file.type.startsWith('image/')) {
+        if (!isImageFile(file)) {
             toast.error('Please upload a valid image file');
             return;
         }
@@ -346,7 +347,7 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                                         ref={fileInputRef}
                                         onChange={handleImageUpload}
                                         className="hidden"
-                                        accept="image/*"
+                                        accept={IMAGE_ACCEPT}
                                     />
                                     <div
                                         onClick={() => fileInputRef.current.click()}
@@ -357,7 +358,7 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                                         <p className="text-[13px] text-[#475467] font-semibold leading-snug">
                                             {isUploading ? 'Uploading...' : 'Click to upload'}
                                         </p>
-                                        <p className="text-[11px] text-[#98A2B3] mt-1 font-medium">PNG, JPG up to 5MB</p>
+                                        <p className="text-[11px] text-[#98A2B3] mt-1 font-medium">Any image up to 5MB</p>
                                     </div>
                                     <div className="w-[140px] h-[140px] flex-shrink-0 relative rounded-[16px] overflow-hidden group border border-[#EAECF0]">
                                         <img

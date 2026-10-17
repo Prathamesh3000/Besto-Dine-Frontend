@@ -32,6 +32,7 @@ function clearStaleSession() {
   localStorage.removeItem('cancelled_orders_v1');
   localStorage.removeItem('order_ratings');
   localStorage.removeItem('guest_bill_paid_at');
+  localStorage.removeItem('guest_session_ended');
   localStorage.removeItem('guest_session_start');
   localStorage.removeItem('guest_cart_reset');
   localStorage.removeItem('cart');
@@ -102,6 +103,7 @@ function ScanTable() {
             name: data.restaurant.name,
             _id: data.restaurant._id,
             features: data.restaurant.features || {},
+            operations: data.restaurant.operations || null,
             branch: data.branch || null,
             // Phase 7.4 — propagate branding so the customer's
             // session is themed immediately after the QR scan.
@@ -131,6 +133,9 @@ function ScanTable() {
         // request; backend createOrder validates it for guest dine-in.
         if (data.scanToken) {
           localStorage.setItem('scanToken', data.scanToken);
+          // A fresh table scan is a new visit — any "guest mode is over"
+          // from the previous visit no longer applies.
+          localStorage.removeItem('guest_session_ended');
         }
 
         // Anchor for the client-side inactivity watchdog in

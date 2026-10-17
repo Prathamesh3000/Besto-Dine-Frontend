@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useMemo, useEffect, useCall
 import { useAuth } from './AuthContext';
 import { isDineInLocked, needsTableScan, requestTableScan } from '../utils/dineInSession';
 import { CUSTOMER_DATA_CLEARED_EVENT } from '../utils/customerSession';
+import { isDineInSelfOrderBlocked, QR_MENU_ONLY_NOTE } from '../utils/customerOrdering';
 import { mergeLine, countDistinctLines, cartSubtotal } from '../utils/cart';
 import { getActiveTenantSlug, subscribeActiveTenant } from '../utils/tenant';
 import toast from 'react-hot-toast';
@@ -94,7 +95,7 @@ export const CartProvider = ({ children }) => {
     // The active restaurant — carts are kept per tenant.
     const tenantSlug = useSyncExternalStore(subscribeActiveTenant, getActiveTenantSlug);
 
-    const { user, isGuest, isLoading } = useAuth();
+    const { user, isGuest, isLoading, isStaff } = useAuth();
 
     // Effective slot key — activeTableId wins; else the shared default;
     // both scoped to the active tenant.
@@ -201,6 +202,15 @@ export const CartProvider = ({ children }) => {
         // without each call site needing its own guard.
         // Decrements still pass through so a customer can clean up
         // their stale cart if needed.
+        // ── QR is menu-only (operations profile) ─────────────────
+        // customerSelfOrder:false — dine-in customers browse but the
+        // staff take the order. Same single-source guard as the lock
+        // below; staff (waiter app) and takeaway are unaffected.
+        if (numericDelta > 0 && !isStaff && isDineInSelfOrderBlocked()) {
+            toast(QR_MENU_ONLY_NOTE, { id: 'qr-menu-only', icon: '🍽️', duration: 4000 });
+            return;
+        }
+
         if (numericDelta > 0 && isDineInLocked()) {
             toast(
                 'Bill settled. Re-scan the table QR to start a new order.',
@@ -235,7 +245,7 @@ export const CartProvider = ({ children }) => {
             }
             return { ...prev, [slotKey]: nextSlot };
         });
-    }, [slotKey]);
+    }, [slotKey, isStaff]);
 
     const updateCartItem = useCallback((itemId, updates) => {
         setCartsByTable(prev => {

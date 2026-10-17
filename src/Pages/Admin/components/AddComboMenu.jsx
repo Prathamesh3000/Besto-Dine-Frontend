@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Upload, ChevronDown, ChevronUp, X, Plus, Minus, Clock, Calendar, Check, Loader } from 'lucide-react'
 import { useMenu } from '../../../Context/MenuContext'
 import toast from 'react-hot-toast'
+import { IMAGE_ACCEPT } from '../../../utils/imageFile'
 
 const SERVE_OPTIONS = ['1-2 person', '2-3 person', '3-4 person', '4-6 person', '6+ person']
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -10,7 +11,11 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const AddComboMenu = () => {
     const navigate = useNavigate()
     const location = useLocation()
-    const editItem = location.state?.editItem || null
+    // Captured once: setSearchParams (step changes) navigates without the
+    // router state, so reading location.state on every render dropped the
+    // combo being edited after the first step change and Save then POSTed
+    // a brand-new combo instead of updating this one.
+    const [editItem] = useState(() => location.state?.editItem || null)
     const [searchParams, setSearchParams] = useSearchParams()
     
     const isEditMode = !!editItem
@@ -23,7 +28,8 @@ const AddComboMenu = () => {
     // Wrapper to update step and URL simultaneously
     const setCurrentStep = (step) => {
         setCurrentStepState(step)
-        setSearchParams({ step: step.toString() })
+        // Keep the router state so a reload mid-edit still knows the combo.
+        setSearchParams({ step: step.toString() }, { state: location.state })
     }
 
     // Handle back/forward browser navigation
@@ -120,12 +126,22 @@ const AddComboMenu = () => {
         )
     })).filter(c => c.items.length > 0)
 
+    // Identity of a selected entry. Items picked from the menu carry the
+    // menu item's _id; items loaded from a saved combo are combo sub-docs
+    // whose own _id is NOT a menu item id — their link is `menuItemId`
+    // (null for components that aren't on the menu).
+    const itemKey = (i) => String(
+        Object.prototype.hasOwnProperty.call(i, 'menuItemId')
+            ? (i.menuItemId || i._id || i.name)
+            : (i._id || i.id)
+    )
+
     const toggleItem = (categoryName, item) => {
         setSelectedItems(prev => {
             const catItems = prev[categoryName] || []
-            const exists = catItems.find(i => (i._id || i.id) === (item._id || item.id))
+            const exists = catItems.find(i => itemKey(i) === itemKey(item))
             if (exists) {
-                const updated = catItems.filter(i => (i._id || i.id) !== (item._id || item.id))
+                const updated = catItems.filter(i => itemKey(i) !== itemKey(item))
                 if (updated.length === 0) {
                     const { [categoryName]: _, ...rest } = prev
                     return rest
@@ -137,7 +153,7 @@ const AddComboMenu = () => {
     }
 
     const isItemSelected = (categoryName, itemId) =>
-        (selectedItems[categoryName] || []).some(i => (i._id || i.id) === itemId)
+        (selectedItems[categoryName] || []).some(i => itemKey(i) === String(itemId))
 
     const getCategoryTotal = (categoryName) =>
         (selectedItems[categoryName] || []).reduce((sum, item) => sum + (item.basePrice || item.price || 0), 0)
@@ -191,12 +207,15 @@ const AddComboMenu = () => {
     const buildPayload = (status = 'active') => {
         const categoriesPayload = Object.entries(selectedItems).map(([catName, items]) => ({
             name: catName,
-            items: items.map(item => ({
-                menuItemId: item._id || null,
-                name: item.name,
-                price: item.basePrice || item.price || 0,
-                isVeg: item.vegType === 'veg'
-            }))
+            items: items.map(item => {
+                const fromSavedCombo = Object.prototype.hasOwnProperty.call(item, 'menuItemId')
+                return {
+                    menuItemId: fromSavedCombo ? (item.menuItemId || null) : (item._id || null),
+                    name: item.name,
+                    price: item.basePrice || item.price || 0,
+                    isVeg: item.vegType ? item.vegType === 'veg' : item.isVeg !== false,
+                }
+            })
         }))
 
         const finalPriceCalculated = discountType === 'Percentage'
@@ -347,7 +366,7 @@ const AddComboMenu = () => {
                         Combo Image <span className="font-normal text-gray-400">(Max 5 images)</span>
                     </label>
                     <div className="flex gap-3">
-                        <input type="file" multiple ref={imageInputRef} onChange={handleImageUpload} className="hidden" accept="image/*" />
+                        <input type="file" multiple ref={imageInputRef} onChange={handleImageUpload} className="hidden" accept={IMAGE_ACCEPT} />
                         <div
                             onClick={() => !isUploading && imageInputRef.current.click()}
                             className="w-[228px] h-[110px] border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-orange-300 hover:bg-orange-50/30 transition-all flex-shrink-0"
@@ -358,7 +377,7 @@ const AddComboMenu = () => {
                             <p className="text-[11px] text-gray-500 font-manrope text-center leading-tight">
                                 {isUploading ? 'Uploading...' : 'Click to upload or drag and drop'}
                             </p>
-                            <p className="text-[10px] text-gray-400 font-manrope mt-0.5">PNG, JPG up to 5MB</p>
+                            <p className="text-[10px] text-gray-400 font-manrope mt-0.5">Any image up to 5MB</p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {comboImages.map((img, i) => (

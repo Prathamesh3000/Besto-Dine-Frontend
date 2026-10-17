@@ -253,6 +253,7 @@ async function _bootstrapKioskTenantImpl() {
                     name: r.name,
                     _id: r._id,
                     features: r.features || {},
+                    operations: r.operations || null,
                     branch: r.branch || cached?.branch || null,
                     branding: r.branding || cached?.branding || null,
                 });
