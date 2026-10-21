@@ -26,12 +26,13 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { isDineInLocked } from '../utils/dineInSession';
+import { isDineInLocked, isTablelessDineIn } from '../utils/dineInSession';
 import { isGuestSessionExpired } from '../utils/guestSession';
 
 /** Every key whose change should re-derive the session. */
 const WATCHED_KEYS = new Set([
     'dineInTable',
+    'dineInEntry',
     'tableNumber',
     'orderType',
     'scanToken',
@@ -66,6 +67,9 @@ export function readCustomerSession() {
     const guestExpired = isGuest && isGuestSessionExpired();
 
     const phase = settled ? 'settled' : (table ? 'seated' : 'browsing');
+    // Token-number restaurant (§12.2): dine-in with no table at all. The
+    // visit is 'browsing' (no table chrome) but ordering is allowed.
+    const tableless = !table && isTablelessDineIn();
 
     // A guest whose 24h window has lapsed has no usable session left —
     // the backend will 401 every action — so treat them as unable to
@@ -78,10 +82,12 @@ export function readCustomerSession() {
         orderType,
         isGuest,
         isDineIn: orderType === 'dine-in',
+        /** Dine-in without a table — orders get a token number instead. */
+        tableless,
 
         /** May they add items / place an order? */
         canOrder: sessionUsable && phase !== 'settled'
-            && (orderType !== 'dine-in' || Boolean(table)),
+            && (orderType !== 'dine-in' || Boolean(table) || tableless),
 
         /** May they call a waiter / ask for water? Dine-in only. */
         canRequestService: sessionUsable && phase === 'seated',

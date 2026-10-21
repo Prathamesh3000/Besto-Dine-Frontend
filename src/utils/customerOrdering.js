@@ -47,3 +47,38 @@ export function dineInPaymentChoice(ops = getCustomerOperations()) {
     const mode = ops?.payment?.dineIn;
     return mode === 'payFirst' || mode === 'either' ? mode : 'payAfter';
 }
+
+/**
+ * Token-number mode (OPERATIONS_CONTROL_PANEL_DESIGN.md §12.2): the
+ * restaurant does not use tables (`tables.useTables === false`). Dine-in
+ * orders are placed without a table and come back with a `tokenNumber`
+ * ("T-042") the customer collects against at the counter. The backend
+ * enforces it (a dine-in order needs no tableId); this only drives the
+ * customer UI. A missing profile means tables are in use (today).
+ */
+export function isTokenMode(ops = getCustomerOperations()) {
+    return ops?.tables?.useTables === false;
+}
+
+/** Banner shown on the menu for a tableless (token-mode) dine-in visit. */
+export const TOKEN_MODE_NOTE = 'Order from your seat — you\u2019ll get a token number to collect your food.';
+
+/**
+ * Customer-facing label for an order status when the restaurant has
+ * live tracking off (§12.3): the server collapses new/preparing/ready to
+ * `confirmed` and served to `completed`. Other statuses pass through
+ * capitalised so an uncollapsed order still reads well.
+ */
+export function tokenOrderStatusLabel(status) {
+    switch (String(status || '').toLowerCase()) {
+        case 'confirmed': return 'Confirmed';
+        case 'completed': return 'Completed';
+        case 'cancelled': return 'Cancelled';
+        case 'awaiting-payment': return 'Awaiting payment';
+        case '': return '';
+        default: {
+            const s = String(status);
+            return s.charAt(0).toUpperCase() + s.slice(1);
+        }
+    }
+}

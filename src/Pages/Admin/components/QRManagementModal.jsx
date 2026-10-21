@@ -1,12 +1,29 @@
 import React, { useState, useCallback } from 'react';
 import { getQrBaseOverride, setQrBaseOverride, getPublicAppOrigin, isLoopbackOrigin, normalizeBaseUrl, tableScanLink } from '../../../utils/customerLinks';
 import { createPortal } from 'react-dom';
-import { X, Download, Printer, CheckSquare, Square, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, Download, Printer, CheckSquare, Square, Loader2, RefreshCw, AlertTriangle, Store, ChevronDown } from 'lucide-react';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import api from '../../../utils/api';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../../Context/AuthContext';
+import { useAdminBranch } from '../../../Context/AdminBranchContext';
+
+/**
+ * Counter QR link (§12.2 token-number mode): the restaurant/branch entry
+ * link customers already get (`/<slug>[/<branchSlug>]`) with `?counter=1`,
+ * which the customer app reads as "dine-in at the counter, no table" —
+ * the order comes back with a token number instead of a table.
+ * Returns '' when the restaurant has no public slug yet.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function counterEntryLink(slug, branchSlug, base) {
+    if (!slug) return '';
+    let path = `/${encodeURIComponent(slug)}`;
+    if (branchSlug) path += `/${encodeURIComponent(branchSlug)}`;
+    return `${String(base || '').replace(/\/+$/, '')}${path}?counter=1`;
+}
 
 /**
  * QRManagementModal Component
@@ -23,8 +40,19 @@ import toast from 'react-hot-toast';
  * @param {string} props.baseUrl - Base URL for QR code generation (defaults to the per-browser
  *   override, else VITE_PUBLIC_APP_URL, else the current origin — see utils/customerLinks)
  * @param {Function} props.onTableUpdate - Callback to refresh parent data if token is regenerated
+ * @param {boolean} props.counterMode - Token-number mode (tables off): show ONLY the
+ *   per-branch Counter QR. Off, the Counter QR is still offered as a section above
+ *   the table codes.
  */
-const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: baseUrlProp, onTableUpdate }) => {
+const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: baseUrlProp, onTableUpdate, counterMode = false }) => {
+    // Counter QR — one per branch. Restaurant slug from the auth snapshot,
+    // branch slug from the admin's selected branch (else Main).
+    const { tenant } = useAuth();
+    const { branches: adminBranches, selectedBranchId } = useAdminBranch();
+    const counterBranch = (Array.isArray(adminBranches) ? adminBranches : []).find(b => selectedBranchId && String(b._id) === String(selectedBranchId))
+        || (Array.isArray(adminBranches) ? adminBranches : []).find(b => b.slug === 'main')
+        || null;
+    const [showCounterSection, setShowCounterSection] = useState(counterMode);
     // QR base URL: explicit prop > admin's saved override > public app origin.
     // A code pointing at localhost cannot be opened by a phone, so the
     // admin can override it here (remembered per browser) before printing.
@@ -59,6 +87,9 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
 
     // Determine if we're in single table mode or bulk mode
     const isBulkMode = !table;
+
+    const counterUrl = counterEntryLink(tenant?.slug, counterBranch?.slug, baseUrl);
+    const counterLabel = counterBranch?.name ? `Counter · ${counterBranch.name}` : 'Counter';
 
     // State for bulk mode table selection
     const [selectedTables, setSelectedTables] = useState([]);
@@ -124,7 +155,7 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
      * @param {string} qrUrl - The URL to encode
      * @returns {Promise<Blob>} The PNG blob
      */
-    const generateQRPng = useCallback((tableId, qrUrl) => {
+    const generateQRPng = useCallback((tableId, qrUrl, label = `Table: ${tableId}`) => {
         return new Promise((resolve) => {
             // Create a temporary canvas for QR generation
             const canvas = document.createElement('canvas');
@@ -167,7 +198,7 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
                         ctx.fillStyle = '#101828';
                         ctx.font = 'bold 16px Manrope, sans-serif';
                         ctx.textAlign = 'center';
-                        ctx.fillText(`Table: ${tableId}`, size / 2, size + 30);
+                        ctx.fillText(label, size / 2, size + 30);
 
                         // Convert to blob
                         canvas.toBlob((blob) => {
@@ -205,15 +236,15 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
 
         const qrUrl = getQRCodeUrl(table);
         const tableName = table.name || table.id;
-        // `table.area` is either a populated object ({ _id, name }) or an
-        // unpopulated ObjectId. Falling back to the raw value printed a
-        // 24-char hex string on the QR sheet — guard with typeof to drop
-        // it cleanly to 'N/A' when only the ObjectId is available.
-        const areaName = (table.area && typeof table.area === 'object' && table.area.name) || 'N/A';
-        const capacity = table.capacity || 'N/A';
 
         // Generate the QR image blob first
         const blob = await generateQRPng(tableName, qrUrl);
+        await printQrBlob(blob, `QR Code - Table ${tableName}`);
+    };
+
+    /** Print a QR PNG blob through a hidden iframe — shared by the table
+     *  codes and the per-branch Counter QR. */
+    const printQrBlob = async (blob, title) => {
         const qrImageDataUrl = await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result);
@@ -235,7 +266,7 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
             <!DOCTYPE html>
             <html>
             <head>
-                <title>QR Code - Table ${tableName}</title>
+                <title>${title}</title>
                 <style>
                     @page { margin: 0; }
                     body {
@@ -279,6 +310,19 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
             </html>
         `);
         iframeDoc.close();
+    };
+
+    /** Counter QR — Download PNG / Print, same pipeline as the table codes. */
+    const counterFileName = `QR-Counter${counterBranch?.slug ? `-${counterBranch.slug}` : ''}`;
+    const handleCounterDownload = async () => {
+        if (!counterUrl) return;
+        const blob = await generateQRPng('counter', counterUrl, counterLabel);
+        saveAs(blob, `${counterFileName}.png`);
+    };
+    const handleCounterPrint = async () => {
+        if (!counterUrl) return;
+        const blob = await generateQRPng('counter', counterUrl, counterLabel);
+        await printQrBlob(blob, `QR Code - ${counterLabel}`);
     };
 
     /**
@@ -351,12 +395,14 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
                 <div className="flex items-center justify-between p-6 pb-4 border-b border-[#F2F4F7] bg-[#FFF8F6] rounded-t-2xl">
                     <div>
                         <h2 className="text-[20px] leading-[28px] font-[700] text-[#1D2939] font-manrope">
-                            {isBulkMode ? 'Download All QR Codes' : `QR Code - ${table?.name || table?.id}`}
+                            {counterMode ? 'Counter QR' : isBulkMode ? 'Download All QR Codes' : `QR Code - ${table?.name || table?.id}`}
                         </h2>
                         <p className="text-[14px] text-[#667085] mt-1">
-                            {isBulkMode
-                                ? 'Select tables to download their QR codes as a ZIP file'
-                                : 'View, download, or print the QR code for this table'
+                            {counterMode
+                                ? 'One code for the branch — customers scan it at the counter and get a token number'
+                                : isBulkMode
+                                    ? 'Select tables to download their QR codes as a ZIP file'
+                                    : 'View, download, or print the QR code for this table'
                             }
                         </p>
                     </div>
@@ -427,7 +473,69 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
                             </form>
                         )}
                     </div>
-                    {isBulkMode ? (
+                    {/* Counter QR — always offered; the whole modal in token mode. */}
+                    <section
+                        data-testid="counter-qr-section"
+                        className={`mb-5 rounded-[12px] border ${counterMode ? 'border-[#FE8301] bg-[#FFF8F6]' : 'border-[#EAECF0] bg-white'} ${counterMode ? 'p-6' : 'p-3'}`}
+                    >
+                        {!counterMode && (
+                            <button
+                                type="button"
+                                onClick={() => setShowCounterSection(v => !v)}
+                                aria-expanded={showCounterSection}
+                                className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
+                            >
+                                <span className="flex items-center gap-2 text-[14px] font-[600] text-[#101828]">
+                                    <Store size={16} className="text-[#FE8301]" /> Counter QR
+                                    <span className="text-[12px] font-[500] text-[#667085]">— one code for the whole branch, no table</span>
+                                </span>
+                                <ChevronDown size={16} className={`text-[#98A2B3] transition-transform ${showCounterSection ? 'rotate-180' : ''}`} />
+                            </button>
+                        )}
+                        {showCounterSection && (
+                            <div className={`flex flex-col items-center ${counterMode ? '' : 'mt-4'}`}>
+                                <div className="bg-white p-6 rounded-[16px] border-2 border-dashed border-[#D0D5DD] mb-4">
+                                    {counterUrl ? (
+                                        <QRCodeSVG
+                                            value={counterUrl}
+                                            size={counterMode ? 250 : 180}
+                                            level="H"
+                                            bgColor="#FFFFFF"
+                                            fgColor="#101828"
+                                            includeMargin={true}
+                                        />
+                                    ) : (
+                                        <div className="w-[180px] h-[180px] flex flex-col items-center justify-center text-center gap-2 px-3">
+                                            <AlertTriangle size={22} className="text-amber-500" />
+                                            <p className="text-[13px] font-[600] text-[#101828]">No public link yet</p>
+                                            <p className="text-[12px] text-[#667085]">The restaurant needs a public page slug before a counter code can be issued.</p>
+                                        </div>
+                                    )}
+                                </div>
+                                <h3 className="text-[20px] font-[700] text-[#101828] font-manrope mb-1">{counterLabel}</h3>
+                                <p className="text-[12px] text-[#667085] mb-3 text-center">
+                                    Scanning opens the menu without a table; the order gets a token number.
+                                </p>
+                                <div className="w-full max-w-[400px] p-3 bg-[#F9FAFB] rounded-[10px]">
+                                    <p className="text-[12px] text-[#667085] mb-1 font-manrope">Counter link:</p>
+                                    <p className="text-[13px] text-[#101828] font-mono break-all" data-testid="counter-qr-link">
+                                        {counterUrl || '— no public slug —'}
+                                    </p>
+                                </div>
+                                {!counterMode && (
+                                    <div className="flex gap-2 mt-3">
+                                        <button type="button" onClick={handleCounterPrint} disabled={!counterUrl} className="px-4 py-2 text-[13px] font-[600] text-[#FE8301] bg-white border border-[#FE8301] rounded-[10px] hover:bg-orange-50 disabled:opacity-50 flex items-center gap-2 cursor-pointer">
+                                            <Printer size={16} /> Print
+                                        </button>
+                                        <button type="button" onClick={handleCounterDownload} disabled={!counterUrl} className="px-4 py-2 text-[13px] font-[600] text-white bg-[#FE8301] rounded-[10px] hover:bg-[#DC6803] disabled:opacity-50 flex items-center gap-2 cursor-pointer">
+                                            <Download size={16} /> Download PNG
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </section>
+                    {counterMode ? null : isBulkMode ? (
                         /* Bulk Mode - Table Selection Grid */
                         <>
                             {/* Select All Header */}
@@ -568,7 +676,36 @@ const QRManagementModal = ({ onClose, table = null, allTables = [], baseUrl: bas
 
                 {/* Footer Section */}
                 <div className="p-6 border-t border-[#F2F4F7] bg-white rounded-b-2xl">
-                    {isBulkMode ? (
+                    {counterMode ? (
+                        /* Counter QR Actions */
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="flex-1 py-3 text-[14px] font-[600] text-[#344054] bg-white border border-[#D0D5DD] rounded-[10px] hover:bg-[#F9FAFB] transition-all font-manrope cursor-pointer"
+                            >
+                                Close
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCounterPrint}
+                                disabled={!counterUrl}
+                                className="flex-1 py-3 text-[14px] font-[600] text-[#FE8301] bg-white border border-[#FE8301] rounded-[10px] hover:bg-orange-50 transition-all font-manrope cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                <Printer size={18} />
+                                Print
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCounterDownload}
+                                disabled={!counterUrl}
+                                className="flex-1 py-3 text-[14px] font-[600] text-white bg-[#FE8301] rounded-[10px] hover:bg-[#DC6803] shadow-lg shadow-orange-500/30 transition-all font-manrope cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                <Download size={18} />
+                                Download PNG
+                            </button>
+                        </div>
+                    ) : isBulkMode ? (
                         /* Bulk Mode Actions */
                         <div className="flex gap-3">
                             <button

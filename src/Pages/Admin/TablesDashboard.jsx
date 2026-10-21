@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
-import { CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload } from 'lucide-react'
+import { useLocation, Link as RouterLink } from 'react-router-dom'
+import { CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload, Ticket } from 'lucide-react'
+import TokenBoard from './components/TokenBoard'
 import SeatedCount, { seatInfo } from '../../Components/Common/SeatedCount'
 import AddReservationModal from './components/AddReservationModal'
 import AddAreaModal from './components/AddAreaModal'
@@ -116,6 +117,10 @@ const TablesDashboard = () => {
   const operations = useOperations()
   const mergeTablesEnabled = operations?.tables?.mergeTables !== false
   const assignWaitersEnabled = operations?.tables?.assignWaiters !== false
+  // Token-number mode (§12.2): the branch has no tables at all — dine-in
+  // orders carry a token ("T-042") instead. The whole dashboard becomes
+  // a Token board; see the early return below the hooks.
+  const tokenMode = operations?.tables?.useTables === false
   // Track only the ID of the open drawer's table — the live table
   // object is derived from processedTablesData below. Storing the
   // full object snapshot was the bug behind "alert drawer doesn't
@@ -931,6 +936,44 @@ const TablesDashboard = () => {
       toast.error(`Table "${highlight}" not found`)
     }
   }, [location.key, location.state?.highlightTable, tablesData, loading])
+
+  // ── Token board (tables.useTables:false) ───────────────────────────────
+  // No areas, merge, waiter assignment, reservations or per-table QR:
+  // none of them exist without tables (the server answers
+  // 400 TABLES_DISABLED). The cashier works the open token orders and
+  // prints the one counter QR customers scan instead of a table code.
+  if (tokenMode) {
+    return (
+      <div className="h-full flex flex-col" data-testid="tables-token-mode">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+          <div>
+            <h1 className="font-manrope font-[700] text-[20px] leading-[26px] text-[#1A181B] flex items-center gap-2">
+              <Ticket size={22} className="text-[#FE8301]" />
+              Token numbers — tables are off for this branch
+            </h1>
+            <p className="font-manrope font-[600] text-[14px] leading-[22px] text-[#645E66] mt-1">
+              Dine-in orders are collected by token at the counter. Tables can be turned back on under{' '}
+              <RouterLink to="/admin/settings?tab=Operations" className="text-[#FE8301] hover:underline">Settings → Operations</RouterLink>.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => { setSelectedQRTable(null); setShowQRModal(true) }}
+              className="flex items-center gap-2 px-4 py-2.5 text-[#FE8301] font-[600] border border-[#FE8301] rounded-[10px] hover:bg-orange-50 transition-colors font-manrope text-[14px]"
+            >
+              <QrCode size={18} />
+              Counter QR
+            </button>
+          </div>
+        </div>
+        <TokenBoard />
+        {showQRModal && (
+          <QRManagementModal counterMode onClose={() => { setShowQRModal(false); setSelectedQRTable(null) }} table={null} allTables={[]} onTableUpdate={fetchDashboardData} />
+        )}
+      </div>
+    )
+  }
 
   // ── Merge Tables view ──────────────────────────────────────────────────
   if (showMergeTables && mergeTablesEnabled) {

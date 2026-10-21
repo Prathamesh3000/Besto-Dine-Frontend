@@ -37,7 +37,7 @@ import useExitConfirmation from "../../hooks/useExitConfirmation";
 import api, { waiterAPI } from "../../utils/api";
 import toast from "react-hot-toast";
 import { useMenu } from "../../Context/MenuContext";
-import { useDineInLock as useDineInLockState } from "../../utils/dineInSession";
+import { useDineInLock as useDineInLockState, markTablelessDineIn } from "../../utils/dineInSession";
 import { sizedImage, ALL_CATEGORY_IMAGE, COMBO_CATEGORY_IMAGE } from "../../utils/image";
 import { resolveUnitPrice, formatPrice } from "../../utils/pricing";
 import BestoDineMark from "../../assets/BestoDineMark";
@@ -46,7 +46,7 @@ import useCustomerSession from "../../hooks/useCustomerSession";
 import { getCustomerOperations } from '../../utils/operations';
 import useSelfOrderBlocked from '../../hooks/useSelfOrderBlocked';
 import QrMenuOnlyNote from '../../Components/Loggedin/QrMenuOnlyNote';
-import { serviceSpotLabel } from '../../utils/customerOrdering';
+import { serviceSpotLabel, isTokenMode, TOKEN_MODE_NOTE } from '../../utils/customerOrdering';
 
 // Consistent horizontal padding value
 const SECTION_PADDING = "px-4";
@@ -852,6 +852,19 @@ function Home() {
   // bill is settled: a disabled "🔒 Locked" button invites tapping and
   // explains nothing. See hooks/useCustomerSession.
   const customerSession = useCustomerSession();
+  // Token-number restaurant (§12.2): a dine-in visit with no table. True
+  // for the counter-QR entry (session.tableless) and for a token-mode
+  // profile that arrived with the menu bootstrap after entry — in which
+  // case stamp the tableless entry now so the table-scan gates stand down.
+  const tokenModeProfile = isTokenMode(getCustomerOperations());
+  const tokenModeVisit = !isStaff && orderType !== 'takeaway'
+    && (customerSession.tableless || (tokenModeProfile && !customerSession.table));
+  useEffect(() => {
+    if (!isStaff && tokenModeProfile && orderType !== 'takeaway'
+        && !customerSession.table && !customerSession.tableless) {
+      markTablelessDineIn();
+    }
+  }, [isStaff, tokenModeProfile, orderType, customerSession.table, customerSession.tableless]);
 
   const handleServiceRequest = async (type) => {
     // Dine-in lock — once the bill is settled, no more service
@@ -1346,6 +1359,18 @@ function Home() {
 
       <main className={`flex flex-col px-4 ${isStaff ? 'gap-3 pt-1' : 'gap-4 pt-3'}`}>
         {selfOrderBlocked && <QrMenuOnlyNote />}
+        {/* Token-number restaurant (§12.2): dine-in with no table — say so
+            once, where the table pill would otherwise be. */}
+        {tokenModeVisit && !selfOrderBlocked && (
+          <div
+            role="status"
+            data-testid="token-mode-note"
+            className="flex items-start gap-2 bg-[#EAF1FF] border border-[#C7D9FF] rounded-xl px-3 py-2"
+          >
+            <span className="text-[16px] leading-none mt-0.5" aria-hidden="true">🎟️</span>
+            <p className="text-[12px] font-varela text-[#1D4ED8] leading-snug">{TOKEN_MODE_NOTE}</p>
+          </div>
+        )}
         {(isStaff || routeCategoryId) && (
           /* Horizontal Categories — staff / item-route browsing view.
              Matches the customer Home CategoriesCarousel responsive scale

@@ -15,6 +15,8 @@ import { useCart } from '../../Context/CartContext';
 import { getSocket, joinStaffRoom } from '../../utils/socket';
 import { useAuth } from '../../Context/AuthContext';
 import useSocketEvent from '../../hooks/useSocketEvent';
+import useOperations from '../../hooks/useOperations';
+import TokenBoard from '../Admin/components/TokenBoard';
 import toast from 'react-hot-toast';
 
 const WaiterHomePage = () => {
@@ -25,7 +27,11 @@ const WaiterHomePage = () => {
     const location = useLocation();
     const navArea = location.state?.area || null;
     const { setActiveTable } = useCart();
-    const { user, hasPermission } = useAuth();
+    const { user, hasPermission, isCaptain } = useAuth();
+    // Token-number mode (tables.useTables:false): no areas or table grid —
+    // the floor works a list of open token orders instead (TokenBoard).
+    // Captains settle cash; waiters hand orders over.
+    const tokenMode = useOperations()?.tables?.useTables === false;
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [activeFloor, setActiveFloor] = useState(null); // Will store area ID
     const [areas, setAreas] = useState([]);
@@ -509,6 +515,18 @@ const WaiterHomePage = () => {
                     </div>
                 </header>
 
+                {tokenMode ? (
+                    /* Token-number mode — no areas, no table grid, no merge.
+                       The floor is the list of open token orders. */
+                    <section className="px-4 sm:px-6 py-5" data-testid="waiter-token-mode">
+                        <div className="py-3 sm:py-4 px-4 sm:px-6 -mx-4 sm:-mx-6 bg-[#FAF5F0] mb-4">
+                            <h2 className="text-lg sm:text-xl font-semibold text-[#1A181B]">Token orders</h2>
+                            <p className="text-xs sm:text-sm font-semibold text-gray-500">Tables are off for this branch — orders are collected by token.</p>
+                        </div>
+                        <TokenBoard canMarkPaid={!!isCaptain} canComplete serveVia="pickup" showDetails={false} />
+                    </section>
+                ) : (
+                <>
                 {/* Summary Stats Cards. Takeaway is NOT here — it lives as a
                     chip beside the area pills in the header (counter orders
                     aren't area/table bound). Keeps these three about the
@@ -660,6 +678,8 @@ const WaiterHomePage = () => {
                     );
                 })}
             </main>
+                )}
+                </>
                 )}
             </div>
 

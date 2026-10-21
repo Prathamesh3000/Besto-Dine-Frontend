@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { X, UserCircle, Utensils, Bell, History, CircleDollarSign, LogOut, ChevronRight, Home, ClipboardList, BellRing, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../../Context/AuthContext';
 import { useStaffOrderOff } from '../RequireStaffOrder';
+import useOperations from '../../hooks/useOperations';
 
 const Sidebar = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
@@ -11,6 +12,9 @@ const Sidebar = ({ isOpen, onClose }) => {
     // /waiter/menu is gated off when the restaurant turns staff
     // ordering off (operations profile) — don't link to it.
     const staffOrderOff = useStaffOrderOff();
+    // Token-number mode (tables.useTables:false): the home screen lists
+    // token orders instead of a table grid, so the entry is "Tokens".
+    const tokenMode = useOperations()?.tables?.useTables === false;
 
     const handleNavigate = (path) => {
         navigate(path);
@@ -36,7 +40,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     // and the permission gates stay in sync. Items without
     // `requirePermission` are visible to everyone.
     const navItems = [
-        { icon: Home,            label: 'Tables',         path: '/waiter/home' },
+        { icon: Home,            label: tokenMode ? 'Tokens' : 'Tables', path: '/waiter/home' },
         // Captain-only floor command screen — workload, delayed orders,
         // table-to-waiter assignment, escalation. Hidden for plain waiters.
         ...(isCaptain ? [

@@ -310,9 +310,11 @@ const OrderDetailsModal = ({ order, onClose }) => {
                 {/* Customer + table summary */}
                 <div className="px-5 py-4 grid grid-cols-2 gap-3 border-b border-gray-100">
                     <div>
-                        <p className="text-[11px] uppercase font-bold text-[#8D848F] tracking-wider">Table</p>
+                        <p className="text-[11px] uppercase font-bold text-[#8D848F] tracking-wider">{order.tokenNumber && order.type !== 'takeaway' ? 'Token' : 'Table'}</p>
                         <p className="text-[15px] font-semibold text-[#1A181B] mt-0.5">
-                            {order.table?.name || (order.type === 'takeaway' ? 'Takeaway' : 'TA')}
+                            {order.tokenNumber && order.type !== 'takeaway'
+                                ? order.tokenNumber
+                                : (order.table?.name || (order.type === 'takeaway' ? 'Takeaway' : 'TA'))}
                         </p>
                     </div>
                     <div className="min-w-0">
@@ -736,7 +738,7 @@ const WaiterOrders = () => {
                                     <ReadyOrderCard
                                         key={order.id}
                                         orderId={order.id}
-                                        tableId={order.tableId}
+                                        tableId={order.tokenNumber || order.tableId}
                                         items={order.items}
                                         time={order.time}
                                         isUrgent={order.isUrgent}
@@ -766,7 +768,7 @@ const WaiterOrders = () => {
                                     <ServedOrderCard
                                         key={order.id}
                                         orderId={order.id}
-                                        tableId={order.tableId}
+                                        tableId={order.tokenNumber || order.tableId}
                                         totalItems={order.totalItems}
                                         customerName={order.user}
                                         note={order.note}

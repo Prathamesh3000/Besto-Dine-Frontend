@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import { useAuth, CAPTAIN_ROLES } from '../../Context/AuthContext';
 import { getWaiterScope } from '../../utils/waiterScope';
 import { useStaffOrderOff } from '../../Components/RequireStaffOrder';
+import useOperations from '../../hooks/useOperations';
 
 /**
  * Human labels for Request.type. The model's enum is
@@ -44,6 +45,9 @@ const TableDetails = () => {
     // Operations profile orderFlow.staffOrder:false — waiters / captains
     // don't enter orders, so the Menu / Browse Menu entry points hide.
     const staffOrderOff = useStaffOrderOff();
+    // Token-number mode (tables.useTables:false): there are no tables to
+    // open — the home screen lists token orders instead.
+    const tokenMode = useOperations()?.tables?.useTables === false;
     // Billing is a captain-only action (per CLAUDE.md: Captain "finalizes
     // a bill" while Waiter cannot). The button used to render for every
     // staff member, but clicking it as a Waiter just bounced back to
@@ -322,6 +326,22 @@ const TableDetails = () => {
         }
     };
 
+    // Token mode wins over the loading spinner — there is no table to load.
+    if (tokenMode) {
+        return (
+            <div className="min-h-[60vh] flex items-center justify-center p-6" data-testid="table-details-token-mode">
+                <div className="max-w-md w-full bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
+                    <h1 className="text-xl font-bold text-slate-800 mb-2">Tables are off for this branch</h1>
+                    <p className="text-sm text-slate-600 leading-relaxed mb-6">
+                        Dine-in orders are collected by token number. Open the Tokens screen to see and serve them.
+                    </p>
+                    <button type="button" onClick={() => navigate('/waiter/home')} className="min-h-11 px-5 rounded-xl bg-[#FE8301] text-white font-bold text-sm">
+                        Go to Tokens
+                    </button>
+                </div>
+            </div>
+        );
+    }
     if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
     if (!tableId) return <div className="p-10 text-center">No Table Selected. <button onClick={() => navigate('/waiter/home')}>Go Back</button></div>
 

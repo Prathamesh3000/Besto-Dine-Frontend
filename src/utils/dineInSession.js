@@ -72,9 +72,70 @@ export const SCAN_REQUIRED_EVENT = 'dineInScanRequired';
 export function needsTableScan() {
     try {
         if (readDineInActive()) return false;
+        // Token-number restaurant (§12.2): dine-in needs no table at all.
+        if (isTablelessDineIn()) return false;
         if (localStorage.getItem('isGuest') !== 'true') return false;
         return localStorage.getItem('orderType') !== 'takeaway';
     } catch { return false; }
+}
+
+// ── Tableless (token-number) dine-in entry ──────────────────────────────
+// OPERATIONS_CONTROL_PANEL_DESIGN.md §12.2: a restaurant with
+// `tables.useTables:false` seats nobody at a numbered table. The customer
+// enters through the branch "counter QR" (`/<slug>?counter=1`) and orders
+// dine-in with no table; the order comes back with a token number. The
+// visit is remembered here as `dineInEntry = { dineIn:true, tableless:true }`
+// next to the other visit keys (`dineInTable`, `orderType`), and every
+// "you need a table" gate (needsTableScan, useCustomerSession.canOrder)
+// consults it. Scanning a real table QR clears it (ScanTable.jsx).
+const ENTRY_KEY = 'dineInEntry';
+
+function readEntry() {
+    try {
+        const raw = localStorage.getItem(ENTRY_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch { return null; }
+}
+
+/**
+ * True while the customer is in a tableless dine-in visit: the entry is
+ * set, the order type is still dine-in and no real table is bound (a
+ * table scan always wins over the counter entry).
+ */
+export function isTablelessDineIn() {
+    try {
+        const entry = readEntry();
+        if (!entry || entry.tableless !== true || entry.dineIn !== true) return false;
+        if (localStorage.getItem('orderType') === 'takeaway') return false;
+        return !readDineInActive();
+    } catch { return false; }
+}
+
+/**
+ * Start a tableless dine-in visit (counter QR / token-mode restaurant).
+ * Drops any stale table binding, pins the order type to dine-in and marks
+ * the session as QR-entered (`fromQrScan`) so the login screen keeps
+ * dine-in instead of pinning the guest to takeaway. Idempotent.
+ */
+export function markTablelessDineIn() {
+    try {
+        localStorage.setItem(ENTRY_KEY, JSON.stringify({ dineIn: true, tableless: true }));
+        localStorage.removeItem('dineInTable');
+        localStorage.removeItem('tableNumber');
+        localStorage.setItem('orderType', 'dine-in');
+        localStorage.setItem('fromQrScan', 'true');
+        localStorage.removeItem(FLAG);
+    } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event(EVT)); } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event('guestSessionChange')); } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event('storage_sync')); } catch { /* ignore */ }
+}
+
+/** Forget the tableless entry (a real table was scanned / tenant changed). */
+export function clearTablelessDineIn() {
+    try { localStorage.removeItem(ENTRY_KEY); } catch { /* ignore */ }
 }
 
 /** Ask the app to send the customer to the scan screen. */

@@ -11,7 +11,9 @@
  * same entry points the customer app already uses.
  */
 import { setActiveTenant, getActiveTenant } from './tenant';
-import { clearDineInLock } from './dineInSession';
+import { clearDineInLock, markTablelessDineIn, clearTablelessDineIn } from './dineInSession';
+import { mergePublicOperations } from './operations';
+import { isTokenMode } from './customerOrdering';
 
 /**
  * Tenant-bound session state that must not survive a move to a
@@ -38,6 +40,9 @@ export function clearTenantBoundSession() {
     // X-Scan-Token to the next order.
     localStorage.removeItem('scanToken');
     clearDineInLock();
+    // A tableless (token-mode) entry belongs to the restaurant it was
+    // made at — the next one may well seat people at tables.
+    clearTablelessDineIn();
 }
 
 /**
@@ -50,10 +55,15 @@ export function clearTenantBoundSession() {
  * items still resolve. MenuContext namespaces its caches by slug and so
  * self-invalidates; only the localStorage blobs need a sweep.
  *
- * restaurant: { slug, name, _id, features?, city?, phone? }
+ * restaurant: { slug, name, _id, features?, operations?, city?, phone? }
  * branch:     { _id, name, slug, addressLine1?, addressLine2?, city?, contactPhone? } | null
+ * options.counter: true when the visitor came in through the branch
+ *   "counter QR" (`/<slug>/<branchSlug>?counter=1`, §12.2) — a dine-in
+ *   visit with NO table. The same tableless dine-in session is started
+ *   when the restaurant's profile says it uses no tables at all
+ *   (`tables.useTables:false`), whichever link brought the visitor in.
  */
-export function enterRestaurant(restaurant, branch = null, previousTenant = getActiveTenant()) {
+export function enterRestaurant(restaurant, branch = null, previousTenant = getActiveTenant(), { counter = false } = {}) {
     if (!restaurant?.slug) throw new Error('enterRestaurant requires a restaurant with a slug');
 
     if (previousTenant?.slug && previousTenant.slug !== String(restaurant.slug).toLowerCase()) {
@@ -68,6 +78,13 @@ export function enterRestaurant(restaurant, branch = null, previousTenant = getA
         operations: restaurant.operations || null,
         branch: branch || null,
     });
+
+    // Token-number mode: remember `{ dineIn:true, tableless:true }` so the
+    // table-scan gates stand down and the menu explains the token flow.
+    // Done after the tenant sweep above, which clears any previous entry.
+    if (counter || (restaurant.operations && isTokenMode(mergePublicOperations(restaurant.operations)))) {
+        markTablelessDineIn();
+    }
 
     localStorage.setItem('selectedBranch', JSON.stringify({
         id: branch?._id || restaurant._id,
@@ -119,12 +136,23 @@ function leaveTable() {
  *  - 'booking'  → /customer/booking-type (login required — the route is
  *                 a plain ProtectedRoute), via /login with `next` when
  *                 not signed in as a customer.
+ *  - 'counter'  → tableless dine-in (counter QR, §12.2): dine-in mode,
+ *                 then the menu. Customers and guests go straight in;
+ *                 everyone else via /login, flagged like a QR scan so the
+ *                 login screen keeps dine-in instead of pinning takeaway.
+ *                 The table binding is left alone: enterRestaurant() has
+ *                 already dropped it and stamped the tableless entry.
  *
  * `auth` = { isLoggedIn, isGuest, role }.
  */
 export function landingActionTarget(action, auth = {}, { itemId } = {}) {
     const isCustomer = Boolean(auth.isLoggedIn) && auth.role === 'customer';
     switch (action) {
+        case 'counter': {
+            localStorage.setItem('orderType', 'dine-in');
+            if (isCustomer || auth.isGuest) return { to: '/customer/home' };
+            return { to: '/login', state: { from: 'qr-scan', next: '/customer/home' } };
+        }
         case 'takeaway': {
             localStorage.setItem('orderType', 'takeaway');
             leaveTable();

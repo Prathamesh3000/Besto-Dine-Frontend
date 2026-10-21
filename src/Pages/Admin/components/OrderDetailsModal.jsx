@@ -136,7 +136,13 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
     cancelled: 'bg-[#FEF2F2] border-red-100',
   }
 
-  const tableStr = typeof order.table === 'string' ? order.table : (order.tableId || order.table?.name || 'Takeaway');
+  // Token-number mode: a table-less dine-in order is identified by its
+  // token ("T-042") everywhere the table would be shown.
+  const isTokenOrder = !!order.tokenNumber && order.type !== 'takeaway';
+  const tableStr = isTokenOrder
+    ? `Token ${order.tokenNumber}`
+    : (typeof order.table === 'string' ? order.table : (order.tableId || order.table?.name || 'Takeaway'));
+  const placeLabel = isTokenOrder ? 'Token' : 'Table No.';
   const isMerged = tableStr.includes('🌿');
 
   return (
@@ -148,7 +154,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h2 className="text-[18px] leading-[24px] tracking-normal font-[800] font-manrope text-gray-900">
-                Order Details ({tableStr.replace(/🌿/g, '-').replace(/\s+/g, '')})
+                Order Details ({isTokenOrder ? tableStr : tableStr.replace(/🌿/g, '-').replace(/\s+/g, '')})
               </h2>
               {isMerged && (
                 <span className="flex items-center gap-1 px-2.5 py-0.5 bg-[#F3E8FF] text-[#9333EA] text-[12px] font-[700] font-manrope rounded-full border border-[#E9D5FF]">
@@ -282,7 +288,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
                     <span className="text-[13px] leading-[18px] font-[600] font-manrope text-gray-900 truncate">{order.id || order.orderId}</span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[11px] leading-[16px] font-[500] font-manrope text-gray-400 uppercase tracking-wide">Table No.</span>
+                    <span className="text-[11px] leading-[16px] font-[500] font-manrope text-gray-400 uppercase tracking-wide">{placeLabel}</span>
                     <span className="text-[13px] leading-[18px] font-[600] font-manrope text-gray-900 truncate">{tableStr.split('🌿')[0].trim()}</span>
                   </div>
                   <div className="flex flex-col">
@@ -532,7 +538,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
                       <span className="text-[13px] leading-[18px] font-[600] font-manrope text-gray-900 truncate">{order.id || order.orderId}</span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[11px] leading-[16px] font-[500] font-manrope text-gray-400 uppercase tracking-wide">Table No.</span>
+                      <span className="text-[11px] leading-[16px] font-[500] font-manrope text-gray-400 uppercase tracking-wide">{placeLabel}</span>
                       <span className="text-[13px] leading-[18px] font-[600] font-manrope text-gray-900 truncate">{tableStr.split('🌿')[0].trim()}</span>
                     </div>
                     <div className="flex flex-col">

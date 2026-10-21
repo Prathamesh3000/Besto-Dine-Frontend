@@ -5,6 +5,7 @@ import { waiterAPI } from '../../utils/api';
 import useSocketEvent from '../../hooks/useSocketEvent';
 import { useAuth } from '../../Context/AuthContext';
 import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
+import useOperations from '../../hooks/useOperations';
 
 const BottomNav = () => {
     const navigate = useNavigate();
@@ -63,12 +64,14 @@ const BottomNav = () => {
     useSocketEvent('request:new', refreshAllCounts);
     useSocketEvent('request:updated', refreshAllCounts);
 
+    // Token-number mode (operations profile: tables off) renames the home tab, like the Sidebar.
+    const tokenMode = useOperations()?.tables?.useTables === false;
     const allTabs = [
         {
             id: 'tables',
             path: '/waiter/home',
             icon: <LayoutGrid size={26} />,
-            label: 'Tables',
+            label: tokenMode ? 'Tokens' : 'Tables',
             badge: null,
             permission: 'tables'
         },
