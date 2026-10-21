@@ -8,6 +8,8 @@ import StaffProfileMenu from '../../Components/Waiter/StaffProfileMenu';
 import NotificationBell from '../../Components/Waiter/NotificationBell';
 import { captainAPI } from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
+import useOperations from '../../hooks/useOperations';
+import TokenBoard from '../Admin/components/TokenBoard';
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent';
 import toast from 'react-hot-toast';
 
@@ -23,9 +25,13 @@ import toast from 'react-hot-toast';
 // linked from the waiter sidebar for captains/admins.
 const CaptainFloor = () => {
     const { user } = useAuth();
+    // Token-number mode (tables.useTables:false): no tables to assign —
+    // the floor section becomes the open token orders.
+    const tokenMode = useOperations()?.tables?.useTables === false;
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
+    const [tokenCount, setTokenCount] = useState(0);
 
     // Assign-waiter modal state
     const [assignTable, setAssignTable] = useState(null);
@@ -223,7 +229,9 @@ const CaptainFloor = () => {
 
                 {/* Summary stat cards */}
                 <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 my-5 px-4 sm:px-6">
-                    <StatCard label="Tables" value={`${summary.occupied || 0}/${summary.totalTables || 0}`} sub="occupied" color="#702083" />
+                    {tokenMode
+                        ? <StatCard label="Tokens" value={tokenCount} sub="open" color="#702083" />
+                        : <StatCard label="Tables" value={`${summary.occupied || 0}/${summary.totalTables || 0}`} sub="occupied" color="#702083" />}
                     <StatCard label="Active" value={summary.activeOrders || 0} sub="in kitchen" color="#FF7A00" />
                     <StatCard label="Ready" value={summary.readyOrders || 0} sub="to serve" color="#10B981" />
                     <StatCard label="Delayed" value={summary.delayedOrders || 0} sub="need attention" color="#FF3B30" />
@@ -298,6 +306,15 @@ const CaptainFloor = () => {
                     action — previously the assign button doubled as the
                     waiter label, so it wasn't obvious it was tappable. */}
                 <section className="px-4 sm:px-6">
+                    {tokenMode ? (
+                        /* Token-number mode — no tables to assign; the captain
+                           works the open token orders (cash + hand over). */
+                        <>
+                            <SectionTitle icon={<LayoutGrid size={16} strokeWidth={2.4} />} title="Token orders" count={tokenCount} accent="#FE8301" />
+                            <TokenBoard canMarkPaid canComplete serveVia="pickup" showDetails={false} onCountChange={setTokenCount} />
+                        </>
+                    ) : (
+                    <>
                     <SectionTitle icon={<LayoutGrid size={16} strokeWidth={2.4} />} title="Tables & Sessions" count={summary.totalTables || 0} accent="#FE8301" />
                     {(data?.tables || []).length === 0 ? (
                         <WaiterEmptyState
@@ -398,6 +415,8 @@ const CaptainFloor = () => {
                                     );
                                 })}
                         </>
+                    )}
+                    </>
                     )}
                 </section>
             </div>

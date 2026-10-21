@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate, useLocation, useParams } from "react-router-dom";
+import { useNavigate, useLocation, useParams, Navigate } from "react-router-dom";
 import {
   ChevronLeft,
   Check,
@@ -332,7 +332,10 @@ const OrderTracking = () => {
 
   // Derive timeline from real order status
   const currentStatus = (order?.status || 'new').toLowerCase();
-  const statusMap = { 'awaiting-payment': 0, new: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 };
+  // `confirmed` / `completed` are the §12.3 collapsed statuses (tracking
+  // off) — this page redirects on `trackingDisabled` below, the mapping
+  // only keeps a stray collapsed payload from rendering a wrong step.
+  const statusMap = { 'awaiting-payment': 0, new: 0, confirmed: 0, preparing: 1, ready: 2, served: 3, completed: 3, cancelled: -1 };
   const currentStep = statusMap[currentStatus] ?? 0;
 
   // Counter-only orders (water, packaged ice cream, etc.) skip the chef
@@ -487,6 +490,30 @@ const OrderTracking = () => {
           Go to Orders
         </button>
       </div>
+    );
+  }
+
+  // §12.3 — the restaurant has customer tracking off: the server sent a
+  // collapsed status (confirmed / completed) and `trackingDisabled`. There
+  // are no kitchen stages to show, so hand over to the confirmation page,
+  // which renders the token number and the collapsed status.
+  if (order?.trackingDisabled === true) {
+    const id = order.orderId || order.id || orderIdRef.current;
+    return (
+      <Navigate
+        to="/customer/order-confirmed"
+        replace
+        state={{
+          orderId: id,
+          tokenNumber: order.tokenNumber || null,
+          items: order.items || [],
+          total: order.total,
+          isTakeaway: order.type === 'takeaway',
+          paymentMethod: order.paymentMethod,
+          tracking: false,
+          trackingDisabled: true,
+        }}
+      />
     );
   }
 

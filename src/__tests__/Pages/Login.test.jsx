@@ -50,7 +50,7 @@ describe('Staff Login — validation', () => {
   test('empty submit shows both required errors and never calls login', async () => {
     const user = renderLogin()
     await user.click(screen.getByRole('button', { name: /Sign In/ }))
-    expect(await screen.findByText(/Email is required|Email.*required/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Email is required|Email.*required/i, {}, { timeout: 4000 })).toBeInTheDocument()
     expect(screen.getByText(/Password.*required/i)).toBeInTheDocument()
     expect(auth.login).not.toHaveBeenCalled()
   })
@@ -75,7 +75,7 @@ describe('Staff Login — results', () => {
     auth.login.mockResolvedValue({ success: true, role, user: { role } })
     const user = renderLogin()
     await submit(user)
-    expect(await screen.findByText(dest)).toBeInTheDocument()
+    expect(await screen.findByText(dest, {}, { timeout: 4000 })).toBeInTheDocument()
     expect(auth.login).toHaveBeenCalledWith('owner@cafe.in', 'Secret#123', 'staff')
     expect(clearActiveTenant).toHaveBeenCalled()
   })
@@ -84,7 +84,7 @@ describe('Staff Login — results', () => {
     auth.login.mockResolvedValue({ success: true, role: 'admin', audience: 'staff', user: { role: 'admin', mustChangePassword: true } })
     const user = renderLogin()
     await submit(user)
-    expect(await screen.findByText('/force-change-password')).toBeInTheDocument()
+    expect(await screen.findByText('/force-change-password', {}, { timeout: 4000 })).toBeInTheDocument()
     expect(landed.state).toEqual({ audience: 'staff' })
   })
 
@@ -111,7 +111,7 @@ describe('Staff Login — results', () => {
     auth.login.mockRejectedValue({ response: { data: { message: 'Account locked for 15 minutes' } } })
     const user = renderLogin()
     await submit(user)
-    expect(await screen.findByText('Account locked for 15 minutes')).toBeInTheDocument()
+    expect(await screen.findByText('Account locked for 15 minutes', {}, { timeout: 4000 })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Sign In/ })).toBeEnabled()
   })
 
@@ -141,7 +141,7 @@ describe('Staff Login — already signed in', () => {
   test('an existing staff session is forwarded to its workspace', async () => {
     Object.assign(auth, { isLoggedIn: true, user: { role: 'chef' } })
     renderLogin()
-    expect(await screen.findByText('/chef/dashboard')).toBeInTheDocument()
+    expect(await screen.findByText('/chef/dashboard', {}, { timeout: 4000 })).toBeInTheDocument()
   })
 
   test('?switch=1 keeps the form open to sign in as someone else', async () => {

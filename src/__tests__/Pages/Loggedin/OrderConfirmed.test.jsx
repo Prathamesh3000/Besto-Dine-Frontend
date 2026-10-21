@@ -78,3 +78,48 @@ describe('OrderConfirmed — pay-first dine-in', () => {
     expect(track()).not.toBeInTheDocument()
   })
 })
+
+describe('OrderConfirmed — token-number mode (§12.2) and tracking off (§12.3)', () => {
+  test('tokenNumber from navigation state is shown big with the collect note', () => {
+    renderPage({ ...BASE, tokenNumber: 'T-042', tracking: true })
+    const token = screen.getByTestId('token-number')
+    expect(token).toHaveTextContent('Your token')
+    expect(token).toHaveTextContent('T-042')
+    expect(token).toHaveTextContent(/collect your order at the counter/i)
+    expect(screen.getByText(/Listen for token/)).toHaveTextContent('T-042')
+    expect(track()).toBeInTheDocument() // tracking still on
+  })
+
+  test('tokenNumber from the authoritative detail fetch; trackingDisabled hides Track Order and shows the collapsed status', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        order: {
+          orderId: 'ORD-DI-7', tokenNumber: 'T-007', trackingDisabled: true, status: 'confirmed',
+          items: [{ name: 'Thali', price: 240.25, quantity: 2 }], total: 480.5, type: 'dine-in',
+        },
+      },
+    })
+    renderPage({ ...BASE })
+    expect(await screen.findByTestId('token-number')).toHaveTextContent('T-007')
+    expect(screen.getByTestId('collapsed-status')).toHaveTextContent('Status: Confirmed')
+    expect(track()).not.toBeInTheDocument()
+  })
+
+  test('completed collapsed status reads "Completed"', async () => {
+    api.get.mockResolvedValue({
+      data: { success: true, order: { orderId: 'ORD-DI-7', trackingDisabled: true, status: 'completed', items: [], total: 10 } },
+    })
+    renderPage({ ...BASE })
+    expect(await screen.findByTestId('collapsed-status')).toHaveTextContent('Status: Completed')
+    expect(screen.queryByTestId('token-number')).not.toBeInTheDocument()
+    expect(track()).not.toBeInTheDocument()
+  })
+
+  test('no token / tracking on: nothing token-related is rendered', () => {
+    renderPage({ ...BASE })
+    expect(screen.queryByTestId('token-number')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('collapsed-status')).not.toBeInTheDocument()
+    expect(screen.getByText(/arrive at the pickup location/)).toBeInTheDocument()
+  })
+})

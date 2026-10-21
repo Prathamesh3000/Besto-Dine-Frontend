@@ -16,7 +16,8 @@ import {
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import { setActiveTenant, clearActiveTenant, activeRestaurantPath } from '../../utils/tenant';
-import { clearDineInLock } from '../../utils/dineInSession';
+import { clearDineInLock, clearTablelessDineIn, markTablelessDineIn } from '../../utils/dineInSession';
+import { isTokenMode } from '../../utils/customerOrdering';
 import { resolveImageUrl } from '../../utils/image';
 
 // Clear any stale session data when the QR page loads. Must NOT run
@@ -121,6 +122,8 @@ function ScanTable() {
         }));
         localStorage.setItem('orderType', 'dine-in');
         localStorage.setItem('fromQrScan', 'true');
+        // A real table now — a tableless (token-mode) entry no longer applies.
+        clearTablelessDineIn();
         // Fresh QR scan starts a NEW dine-in session — clear any
         // residual "bill settled" lock from the previous customer
         // who used this table. Without this the new customer's UI
@@ -195,12 +198,23 @@ function ScanTable() {
   // ── Scan Required (no table bound) ─────────────────────────────────────────
   if (status === 'needScan') {
     const reason = location.state?.reason;
-    const heading = reason === 'table_removed'
+    // Token-number restaurant (§12.2): there is no table to scan — offer
+    // the tableless dine-in entry instead of a dead end.
+    const tokenMode = isTokenMode();
+    const heading = tokenMode
+      ? 'No table needed here'
+      : reason === 'table_removed'
       ? 'This table is no longer available'
       : 'Scan your table to order';
-    const body = reason === 'table_removed'
+    const body = tokenMode
+      ? 'This restaurant works with token numbers. Order from the menu and collect your food at the counter when your token is called.'
+      : reason === 'table_removed'
       ? 'The restaurant has removed the table you were seated at. Please scan the QR code on your current table to continue ordering.'
       : 'Dine-in orders are sent to a specific table. Scan the QR code placed on your table with your phone camera to start ordering.';
+    const continueTableless = () => {
+      markTablelessDineIn();
+      navigate('/customer/home', { replace: true });
+    };
     return (
       <div className="min-h-screen font-manrope flex flex-col relative overflow-hidden selection:bg-orange-100"
            style={{ background: 'radial-gradient(circle at 50% 0%, #FFF4E6 0%, #FDFDFD 55%)' }}>
@@ -234,12 +248,21 @@ function ScanTable() {
         </div>
 
         <div className="fixed bottom-0 left-0 right-0 xl:left-[300px] xl:right-[300px] bg-white/85 backdrop-blur-md p-4 sm:p-5 flex flex-col gap-2.5 shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.06)] border-t border-[#F2F4F7] z-50">
-          <button
-            onClick={() => navigate('/customer/home')}
-            className="w-full bg-[#F5F5F7] text-[#1A181B] font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] active:scale-[0.98] transition-all"
-          >
-            Keep browsing the menu
-          </button>
+          {tokenMode ? (
+            <button
+              onClick={continueTableless}
+              className="w-full bg-[#FE8301] text-white font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] active:scale-[0.98] transition-all"
+            >
+              Continue to the menu
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/customer/home')}
+              className="w-full bg-[#F5F5F7] text-[#1A181B] font-nunito font-semibold text-[14px] py-3.5 rounded-[16px] active:scale-[0.98] transition-all"
+            >
+              Keep browsing the menu
+            </button>
+          )}
         </div>
       </div>
     );

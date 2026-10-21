@@ -29,6 +29,7 @@ import { sizedImage } from '../../utils/image';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import useCustomerSession from '../../hooks/useCustomerSession';
 import { getCustomerOperations } from '../../utils/operations';
+import { tokenOrderStatusLabel } from '../../utils/customerOrdering';
 import {
   CUSTOMER_ORDERS_ROOT,
   getCustomerOrderSession,
@@ -68,6 +69,11 @@ function mapOrderStatus(status) {
     case 'cancelled': return 'Cancelled';
     case 'preparing': return 'Preparing';
     case 'ready': return 'Ready';
+    // §12.3 collapsed statuses (customer tracking off). They slot into
+    // the same buckets the tabs / payment logic already understand; the
+    // card pill shows the friendly label (statusLabel) instead.
+    case 'confirmed': return 'Order Placed';
+    case 'completed': return 'Delivered';
     default: return status; // return as-is if already mapped
   }
 }
@@ -93,10 +99,18 @@ const OrderCard = React.memo(
         boxShadow: "2px 4px 4px 0px #7020830F",
       }}
     >
-      {/* Order header: date + status pill */}
+      {/* Order header: date (+ token number in token mode) + status pill */}
       <div className="flex items-start justify-between mb-3 gap-2">
-        <span className="text-[#645E66] text-[12px] font-regular font-varela">
+        <span className="text-[#645E66] text-[12px] font-regular font-varela flex items-center gap-2 min-w-0">
           {order.formattedDate}
+          {order.tokenNumber && (
+            <span
+              className="text-[#1D4ED8] bg-[#EAF1FF] font-nunito font-semibold text-[11px] px-2 py-0.5 rounded-full shrink-0 tabular-nums"
+              data-testid="order-token"
+            >
+              Token {order.tokenNumber}
+            </span>
+          )}
         </span>
         {!isCancelled && (
           <span
@@ -125,7 +139,7 @@ const OrderCard = React.memo(
                 }`}
               />
             </span>
-            {order.status}
+            {order.statusLabel || order.status}
           </span>
         )}
       </div>
@@ -884,6 +898,11 @@ function formatServerOrder(o) {
     timestamp: o.createdAt || new Date().toISOString(),
     status: mapOrderStatus(o.status),
     rawStatus: o.status || '',
+    // §12.3: collapsed statuses read "Confirmed" / "Completed" on the card.
+    statusLabel: ['confirmed', 'completed'].includes(o.status) ? tokenOrderStatusLabel(o.status) : null,
+    // §12.2 token-number mode: shown where the table would be.
+    tokenNumber: o.tokenNumber || null,
+    trackingDisabled: o.trackingDisabled === true,
     type: o.type || 'dine-in',
     isTakeaway: o.type === 'takeaway',
     total: o.total,
@@ -2019,6 +2038,11 @@ function Orders() {
                   {new Date(selectedOrderDetails.timestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
                   {' '}
                   {new Date(selectedOrderDetails.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {selectedOrderDetails.tokenNumber && (
+                    <span className="ml-2 text-[#1D4ED8] font-nunito font-semibold tabular-nums" data-testid="order-detail-token">
+                      · Token {selectedOrderDetails.tokenNumber}
+                    </span>
+                  )}
                 </span>
                 <span className="shrink-0 whitespace-nowrap">{payMethod} · {payStatus}</span>
               </div>

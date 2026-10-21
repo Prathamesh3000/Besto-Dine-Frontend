@@ -23,6 +23,8 @@
  * if not. Either way the UX is broken.
  */
 
+import { clearGuestOrderAccess } from './guestOrderAccess';
+
 const GUEST_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const SESSION_EVENT = 'guestSessionChange';
@@ -64,6 +66,8 @@ export function clearGuestSession() {
         localStorage.removeItem('orderType');
         localStorage.removeItem('cafe_orders_v2');
     } catch { /* ignore */ }
+    // Token-mode counter orders: their one-off access tokens go too.
+    clearGuestOrderAccess();
     try { window.dispatchEvent(new Event(SESSION_EVENT)); } catch { /* ignore */ }
     try { window.dispatchEvent(new Event('storage_sync')); } catch { /* ignore */ }
 }

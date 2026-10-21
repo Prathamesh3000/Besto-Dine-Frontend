@@ -5,7 +5,13 @@ import toast from 'react-hot-toast'
 import { computeBill, toTaxConfig } from '../../../utils/billing'
 
 // ─── Main Modal ─────────────────────────────────────────────────────────────
-const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBranchId, isBranchLocked }) => {
+// `mode`: 'takeaway' (default) or 'dine-in-token' — token-number mode
+// (operations tables.useTables:false): a dine-in order with NO tableId;
+// the server assigns a token ("T-042") which the success popup shows
+// when onPlaceOrder resolves to the created order.
+const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBranchId, isBranchLocked, mode = 'takeaway' }) => {
+    const isTokenOrder = mode === 'dine-in-token'
+    const [placedToken, setPlacedToken] = useState(null)
     // Order type
     const [orderType, setOrderType] = useState('new-customer') // 'new-customer' | 'admin'
 
@@ -132,7 +138,7 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
     const bill = computeBill({
         subtotal: cartItems.reduce((s, c) => s + (c.menuItem.finalPrice || c.menuItem.basePrice) * c.qty, 0),
         taxConfig,
-        orderType: 'takeaway',
+        orderType: isTokenOrder ? 'dine-in' : 'takeaway',
     })
     const { subtotal, serviceCharge, gst: gstAmount, gstPct, serviceChargePct } = bill
     const manualDiscount = Math.min(Math.max(0, Number(discountAmt) || 0), bill.total)
@@ -173,10 +179,12 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
         // branchId so the order is properly linked on the per-
         // branch dashboard, not just labelled.
         const orderPayload = {
-            type: 'takeaway',
+            // Token mode: a dine-in order with NO tableId — the server
+            // assigns the token (tables.useTables:false).
+            type: isTokenOrder ? 'dine-in' : 'takeaway',
             customerName: customerName || 'Guest',
             phone: customerMobile,
-            pickupLocation: selectedBranchName,
+            ...(isTokenOrder ? {} : { pickupLocation: selectedBranchName }),
             ...(selectedBranchObj?._id ? { branchId: selectedBranchObj._id } : {}),
             items: cartItems.map(c => ({
                 menuItem: c.menuItem._id,
@@ -192,8 +200,13 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
             ...(manualDiscount > 0 ? { manualDiscount: Math.round(manualDiscount * 100) / 100 } : {}),
             note: orderType === 'admin' ? 'Admin Order' : '',
         }
-        onPlaceOrder?.(orderPayload)
+        const result = onPlaceOrder?.(orderPayload)
         setOrderPlaced(true)
+        // Token mode: the parent resolves with the created order so the
+        // popup can show the token the customer collects by.
+        if (isTokenOrder && result && typeof result.then === 'function') {
+            result.then((order) => { if (order?.tokenNumber) setPlacedToken(order.tokenNumber) }).catch(() => {})
+        }
     }
 
     return (
@@ -230,9 +243,17 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
                     </h2>
 
                     {/* Subtitle */}
-                    <p className="text-[14px] font-[400] font-manrope text-[#645E66] leading-[20px]">
-                        Your order has been successfully placed.
-                    </p>
+                    {isTokenOrder && placedToken ? (
+                        <>
+                            <p className="text-[12px] uppercase tracking-wider font-[700] font-manrope text-[#98A2B3] mt-1">Token</p>
+                            <p className="text-[36px] leading-[40px] font-[800] font-manrope text-[#1A181B] tabular-nums" data-testid="placed-token">{placedToken}</p>
+                            <p className="text-[13px] font-[400] font-manrope text-[#645E66] leading-[20px] mt-2">Tell the customer this token — the order is collected by it.</p>
+                        </>
+                    ) : (
+                        <p className="text-[14px] font-[400] font-manrope text-[#645E66] leading-[20px]">
+                            {isTokenOrder ? 'Placing the order and fetching its token…' : 'Your order has been successfully placed.'}
+                        </p>
+                    )}
                 </div>
             ) : (
                 <div
@@ -242,9 +263,9 @@ const AddTakeawayOrderModal = ({ onClose, onPlaceOrder, adminBranches, activeBra
                     {/* ── Header ── */}
                     <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                         <div className="flex items-center gap-3">
-                            <h2 className="text-[18px] font-[700] font-manrope text-[#1A181B]">Add New Order</h2>
-                            <span className="px-3 py-1 bg-[#FFF3E6] text-[#FE8301] text-[12px] font-[600] font-manrope rounded-full border border-[#FE8301]">
-                                Takeaway
+                            <h2 className="text-[18px] font-[700] font-manrope text-[#1A181B]">{isTokenOrder ? 'New dine-in (token) order' : 'Add New Order'}</h2>
+                            <span className={`px-3 py-1 text-[12px] font-[600] font-manrope rounded-full border ${isTokenOrder ? 'bg-[#EFF6FF] text-[#1D72E8] border-[#1D72E8]' : 'bg-[#FFF3E6] text-[#FE8301] border-[#FE8301]'}`}>
+                                {isTokenOrder ? 'Dine-in · Token' : 'Takeaway'}
                             </span>
                         </div>
                         <button

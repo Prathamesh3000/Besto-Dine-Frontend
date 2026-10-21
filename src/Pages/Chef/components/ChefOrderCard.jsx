@@ -146,7 +146,11 @@ const ChefOrderCard = ({ order, onAction, onView, isActionLoading = false, nowMs
         order.note?.toLowerCase()?.match(/allerg|nut|gluten|lactose|dairy/) ||
         (order.items || []).some(i => i.allergen || (i.instructions || '').toLowerCase().match(/allerg|nut/));
 
-    const isTakeaway = order.tableId === 'TA' || order.type === 'takeaway';
+    // Token-number mode (tables off): a table-less dine-in order carries
+    // tokenNumber ("T-042") — show it where the table name would be, and
+    // never confuse it with a takeaway just because tableId is 'TA'.
+    const isTokenOrder = !!order.tokenNumber && order.type !== 'takeaway';
+    const isTakeaway = !isTokenOrder && (order.tableId === 'TA' || order.type === 'takeaway');
     // Use the populated table name + area object directly. The
     // previous `.replace(/\D/g, '')` stripped non-digits from the
     // table id which broke alphanumeric / merged-group names ("5, 6,
@@ -156,9 +160,11 @@ const ChefOrderCard = ({ order, onAction, onView, isActionLoading = false, nowMs
     // services multiple seating zones.
     const rawTableName = order.table?.name || (order.tableId !== 'TA' ? order.tableId : '') || '—';
     const areaName = order.table?.area?.name || '';
-    const tableLabel = isTakeaway
-        ? 'Takeaway'
-        : `Table ${rawTableName}${areaName ? ` · ${areaName}` : ''}`;
+    const tableLabel = isTokenOrder
+        ? `Token ${order.tokenNumber}`
+        : isTakeaway
+            ? 'Takeaway'
+            : `Table ${rawTableName}${areaName ? ` · ${areaName}` : ''}`;
 
     const displayId = (() => {
         if (!order.id) return '—';

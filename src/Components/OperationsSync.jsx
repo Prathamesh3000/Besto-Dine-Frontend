@@ -7,6 +7,10 @@ import useSocketEvent from '../hooks/useSocketEvent';
  * `tenant:operations-updated` to the tenant's staff rooms and we refetch
  * /auth/me (which carries the resolved profile). Renders nothing.
  *
+ * The payload may name a `branchId` (a per-branch override changed,
+ * design §12.1). No filtering on it: /auth/me resolves the profile for
+ * this user's effective branch, so a refetch is right either way.
+ *
  * The listener only mounts for tenant staff — getSocket() opens a
  * connection, and visitors / customers must not get one from here.
  */

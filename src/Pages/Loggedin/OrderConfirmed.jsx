@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import api, { settingsAPI } from "../../utils/api";
 import useBlockBackNav from "../../hooks/useBlockBackNav";
 import { billFromOrder, toTaxConfig } from '../../utils/billing';
+import { tokenOrderStatusLabel } from '../../utils/customerOrdering';
 
 function OrderConfirmed() {
   const navigate = useNavigate();
@@ -30,6 +31,11 @@ function OrderConfirmed() {
     payFirstDineIn = false,
     payAtCounter = false,
     tracking = true,
+    // Token-number mode (§12.2): the order was placed without a table
+    // and carries a token ("T-042") the customer collects on. The
+    // authoritative detail fetch below overrides both of these.
+    tokenNumber: stateTokenNumber = null,
+    trackingDisabled: stateTrackingDisabled = false,
   } = location.state || {};
 
   const [cafePhone, setCafePhone] = useState("");
@@ -77,6 +83,13 @@ function OrderConfirmed() {
   const amountPaid = Number(order?.amountPaid) || grandTotal;
   const paymentStatus = order?.paymentStatus || "Paid";
   const pickupTime = order?.pickupTime || selectedTime;
+  const tokenNumber = order?.tokenNumber || stateTokenNumber || null;
+  // §12.3: with customer tracking off the server collapses the status
+  // to confirmed/completed and flags `trackingDisabled` — there is no
+  // live timeline to follow, so Track Order is hidden and the collapsed
+  // status is shown as plain text instead.
+  const trackingDisabled = order?.trackingDisabled === true || stateTrackingDisabled || !tracking;
+  const collapsedStatus = trackingDisabled && order?.status ? tokenOrderStatusLabel(order.status) : '';
 
   // Placed order: show the breakdown the server stamped on it. Only a
   // legacy order without one (or the pre-fetch state fallback) is
@@ -140,6 +153,34 @@ function OrderConfirmed() {
           </p>
         )}
       </div>
+
+      {/* Token number (token-mode restaurant) — the one thing the
+          customer needs from this screen, so it is big and first. */}
+      {tokenNumber && (
+        <div
+          className="mx-4 mb-4 rounded-2xl border border-[#C7D9FF] bg-[#EAF1FF] px-4 py-5 text-center"
+          data-testid="token-number"
+          role="status"
+        >
+          <p className="text-[12px] font-varela uppercase tracking-wide text-[#1D4ED8]">Your token</p>
+          <p className="text-[40px] leading-none font-nunito font-bold text-[#1D4ED8] tabular-nums mt-1">
+            {tokenNumber}
+          </p>
+          <p className="text-[13px] font-varela text-[#1E3A8A] mt-2">
+            Collect your order at the counter when this number is called.
+          </p>
+          {collapsedStatus && (
+            <p className="text-[12px] font-nunito font-semibold text-[#1E3A8A] mt-2" data-testid="collapsed-status">
+              Status: {collapsedStatus}
+            </p>
+          )}
+        </div>
+      )}
+      {!tokenNumber && collapsedStatus && (
+        <p className="mx-4 mb-4 text-center text-[13px] font-nunito font-semibold text-[#645E66]" data-testid="collapsed-status">
+          Status: {collapsedStatus}
+        </p>
+      )}
 
       {/* Order Summary */}
       <div className="mx-4 bg-white rounded-2xl border border-[#EEEEEE] px-4 pt-4 pb-5 mb-4">
@@ -320,7 +361,7 @@ function OrderConfirmed() {
           OrderConfirmed drops out of history — back from Home doesn't
           loop back here. */}
       <div className="mx-4 flex gap-3 mb-3">
-        {tracking && !payAtCounter && (
+        {!trackingDisabled && !payAtCounter && (
         <button
           onClick={() => navigate(`/customer/order-tracking/${orderId}`, { replace: true })}
           className="flex-1 py-3 rounded-xl font-semibold font-nunito text-[14px] bg-[#FE8301] text-white active:scale-[0.98] transition-transform"
@@ -398,13 +439,20 @@ function OrderConfirmed() {
           Important Instructions
         </h3>
         <ul className="space-y-2">
+          {tokenNumber ? (
+            <li className="flex gap-2 text-[13px] text-[#645E66] font-varela">
+              <span className="shrink-0">•</span>
+              <span>Listen for token <span className="font-semibold text-[#1A181B]">{tokenNumber}</span> — collect your food at the counter when it is called</span>
+            </li>
+          ) : (
+            <li className="flex gap-2 text-[13px] text-[#645E66] font-varela">
+              <span className="shrink-0">•</span>
+              <span>Please arrive at the pickup location 5 minutes before your selected time</span>
+            </li>
+          )}
           <li className="flex gap-2 text-[13px] text-[#645E66] font-varela">
             <span className="shrink-0">•</span>
-            <span>Please arrive at the pickup location 5 minutes before your selected time</span>
-          </li>
-          <li className="flex gap-2 text-[13px] text-[#645E66] font-varela">
-            <span className="shrink-0">•</span>
-            <span>Show your Order ID or QR code to the staff at the pickup counter</span>
+            <span>Show your {tokenNumber ? "token or Order ID" : "Order ID or QR code"} to the staff at the pickup counter</span>
           </li>
           <li className="flex gap-2 text-[13px] text-[#645E66] font-varela">
             <span className="shrink-0">•</span>

@@ -101,6 +101,28 @@ describe('request interceptor — headers', () => {
     })
   })
 
+  test('X-Guest-Access is attached only to calls about a remembered token-mode guest order (URL id or Razorpay cafeOrderId)', async () => {
+    localStorage.setItem('activeTenant', JSON.stringify({ slug: 'spice' }))
+    const { rememberGuestOrderAccess } = await import('@/utils/guestOrderAccess')
+    rememberGuestOrderAccess(['ORD-7', '65f000000000000000000007'], 'guest-access-token-0123456789abcdef', new Date(Date.now() + 3600_000).toISOString())
+    const { default: api } = await loadApi()
+    on('get', /^\/orders\//, (c) => reply(c, 200, {}))
+    on('post', /^\/razorpay\//, (c) => reply(c, 200, {}))
+    on('get', '/menu', (c) => reply(c, 200, {}))
+
+    await api.get('/orders/ORD-7/detail')
+    await api.get('/orders/track/65f000000000000000000007')
+    await api.post('/razorpay/verify-payment', { razorpay_payment_id: 'p', cafeOrderId: 'ORD-7' })
+    await api.get('/orders/ORD-8/detail')
+    await api.get('/orders/my-orders')
+    await api.get('/menu')
+    const headers = requests.map((r) => r.headers['X-Guest-Access'])
+    expect(headers.slice(0, 3)).toEqual(Array(3).fill('guest-access-token-0123456789abcdef'))
+    expect(headers.slice(3)).toEqual([undefined, undefined, undefined])
+    // the other headers are untouched
+    expect(requests[0].headers['X-Restaurant-Slug']).toBe('spice')
+  })
+
   test('_skipBranchHeader suppresses X-Branch-Id only', async () => {
     localStorage.setItem('activeTenant', JSON.stringify({ slug: 'spice', branch: { _id: 'b1' } }))
     const { default: api } = await loadApi()

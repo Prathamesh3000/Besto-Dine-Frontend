@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Clock, Info, MapPin, Store, Sparkles, Images, Share2, Building2, RefreshCw, Phone, Mail, UtensilsCrossed } from 'lucide-react';
@@ -115,6 +115,12 @@ const RestaurantLandingPage = () => {
     const slug = String(params.slug || '').trim().toLowerCase();
     const branchSlug = params.branchSlug ? String(params.branchSlug).trim().toLowerCase() : null;
     const reserved = isReservedSlug(slug);
+    // Branch "counter QR" (§12.2 token-number mode): `?counter=1` enters
+    // the restaurant + branch as a tableless dine-in visit and goes
+    // straight to the menu — no landing-page tap needed.
+    const [searchParams] = useSearchParams();
+    const counterEntry = searchParams.get('counter') === '1';
+    const counterFiredRef = useRef(false);
 
     const [busyAction, setBusyAction] = useState(null);
     // { action, opts, branches } while the branch picker is open
@@ -141,11 +147,20 @@ const RestaurantLandingPage = () => {
     const go = useCallback((branch, action, opts) => {
         if (!data?.restaurant) return;
         enterRestaurant(
-            { ...data.restaurant, features: data.features || {}, phone: data.contact?.phone || '' },
+            {
+                ...data.restaurant,
+                features: data.features || {},
+                // Public operations blob (design §12): lets a plain /<slug>
+                // link detect token-number mode before any bootstrap.
+                operations: data.operations || null,
+                phone: data.contact?.phone || '',
+            },
             branch,
+            undefined,
+            { counter: action === 'counter' },
         );
         const { to, state } = landingActionTarget(action, { isLoggedIn, isGuest, role: user?.role }, opts);
-        navigate(to, state ? { state } : undefined);
+        navigate(to, state ? { state, replace: action === 'counter' } : { replace: action === 'counter' });
     }, [data, isLoggedIn, isGuest, user?.role, navigate]);
 
     const handleAction = useCallback(async (action, opts = {}) => {
@@ -174,6 +189,14 @@ const RestaurantLandingPage = () => {
     }, [data, busyAction, queryClient, go]);
 
     const closePicker = useCallback(() => setPicker(null), []);
+
+    // Counter QR: fire the tableless entry once the landing payload is in
+    // (a multi-branch link without a branch still asks which branch).
+    useEffect(() => {
+        if (!counterEntry || counterFiredRef.current || !data?.restaurant) return;
+        counterFiredRef.current = true;
+        handleAction('counter', { counter: true });
+    }, [counterEntry, data, handleAction]);
 
     const handleShare = async () => {
         // Public origin (VITE_PUBLIC_APP_URL) so a share from a localhost

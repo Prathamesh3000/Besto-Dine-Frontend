@@ -9,6 +9,7 @@ import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../ho
 import { useAdminBranch } from '../../Context/AdminBranchContext'
 import { withAdminTenant } from '../../hooks/queries/queryKeys'
 import toast from 'react-hot-toast'
+import useOperations from '../../hooks/useOperations'
 import {
   useAdminDineInArchive,
   usePastOrdersPage,
@@ -307,6 +308,13 @@ const OrdersDashboard = () => {
   // Branch switcher selection — Branch Admins are locked to their branch,
   // tenant owner can pick or "All Branches" (selectedBranchId=null).
   const { selectedBranchId, branches: adminBranches, isLocked: isBranchLocked } = useAdminBranch()
+  // Token-number mode (operations tables.useTables:false): dine-in
+  // orders have no table, so the cashier creates them here — "New token
+  // order" posts a dine-in order without tableId and the server answers
+  // with the token the customer collects by.
+  const operations = useOperations()
+  const tokenMode = operations?.tables?.useTables === false
+  const [showAddTokenModal, setShowAddTokenModal] = useState(false)
 
   const setActiveTab = (tab) => {
     setActiveTabState(tab)
@@ -717,6 +725,7 @@ const OrdersDashboard = () => {
     const matchSearch = !searchTerm ||
       (order.user || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (order.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (order.tokenNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       tableStr.toLowerCase().includes(searchTerm.toLowerCase())
 
     const matchFilter = activeFilter === 'All' || matchesStatusPill(order.status, activeFilter)
@@ -1148,6 +1157,32 @@ const OrdersDashboard = () => {
         </div>
       )}
 
+      {/* Token-number mode: the cashier's counter order entry. Sibling of
+          the Takeaway tab's "Add Order"; posts type 'dine-in' with NO
+          tableId and surfaces the token the server assigns. */}
+      {showAddTokenModal && (
+        <AddTakeawayOrderModal
+          mode="dine-in-token"
+          onClose={() => setShowAddTokenModal(false)}
+          adminBranches={adminBranches}
+          activeBranchId={selectedBranchId}
+          isBranchLocked={isBranchLocked}
+          onPlaceOrder={async (orderPayload) => {
+            try {
+              const { data } = await api.post('/orders', orderPayload)
+              const token = data?.order?.tokenNumber
+              toast.success(token ? `Order placed — token ${token}` : 'Dine-in order placed')
+              fetchOrders()
+              return data?.order || null
+            } catch (error) {
+              console.error('API Error saving token order:', error)
+              toast.error(error.response?.data?.message || 'Failed to place order')
+              return null
+            }
+          }}
+        />
+      )}
+
       {/* Search & View Toggle */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex-1 relative">
@@ -1156,13 +1191,23 @@ const OrdersDashboard = () => {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by customer name, order ID"
+            placeholder={tokenMode && activeTab === 'live' ? 'Search by customer name, order ID, token' : 'Search by customer name, order ID'}
             className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-orange-500 font-inter font-medium text-[14px] leading-[20px] tracking-normal focus:ring-2 focus:ring-orange-500/10 transition-all placeholder:text-gray-400"
           />
         </div>
         <button className="w-9 h-9 flex items-center justify-center bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">
           <Search size={20} />
         </button>
+        {tokenMode && activeTab === 'live' && (
+          <button
+            type="button"
+            onClick={() => setShowAddTokenModal(true)}
+            className="flex items-center gap-2 bg-[#FE8301] hover:bg-[#e07400] text-white px-5 py-[9px] rounded-[12px] text-[14px] font-manrope font-semibold transition-colors shadow-sm whitespace-nowrap"
+          >
+            <Plus size={18} strokeWidth={2.5} />
+            New token order
+          </button>
+        )}
 
         {activeTab === 'past' && (
           <>
@@ -1289,6 +1334,18 @@ const OrdersDashboard = () => {
                               ? order.table
                               : (order.tableId || order.table?.name || '');
                             const hasRealTable = tableLabel && tableLabel.toLowerCase() !== 'takeaway';
+                            // Token-number mode: a table-less dine-in
+                            // order shows its token where the table goes.
+                            if (order.tokenNumber && order.type !== 'takeaway') {
+                              return (
+                                <>
+                                  <span>Token {order.tokenNumber}</span>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-[700] uppercase tracking-wide border bg-[#EFF6FF] text-[#1D72E8] border-[#1D72E8]/40">
+                                    Dine-In
+                                  </span>
+                                </>
+                              );
+                            }
                             const isTakeaway = !hasRealTable || order.type === 'takeaway';
                             if (isTakeaway) {
                               return (
@@ -1377,6 +1434,17 @@ const OrdersDashboard = () => {
                           ? order.table
                           : (order.tableId || order.table?.name || '');
                         const hasRealTable = tableLabel && tableLabel.toLowerCase() !== 'takeaway';
+                        // Token-number mode: token where the table goes.
+                        if (order.tokenNumber && order.type !== 'takeaway') {
+                          return (
+                            <>
+                              <span className="text-base font-[600] text-[#4A4A4A] font-manrope">Token {order.tokenNumber}</span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-[700] uppercase tracking-wide border bg-[#EFF6FF] text-[#1D72E8] border-[#1D72E8]/40">
+                                Dine-In
+                              </span>
+                            </>
+                          );
+                        }
                         const isTakeaway = !hasRealTable || order.type === 'takeaway';
                         if (isTakeaway) {
                           return (

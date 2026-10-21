@@ -95,10 +95,10 @@ const SUBTOTAL = computeSubtotal(LINES) // 499 + 105.75 = 604.75
 let landed = null
 function Probe({ name }) { landed = { name, state: useLocation().state }; return <div>{name}</div> }
 
-function renderCart({ lines = LINES, orderType = 'dine-in', wallet = 0, coupons = [] } = {}) {
+function renderCart({ lines = LINES, orderType = 'dine-in', wallet = 0, coupons = [], table = true } = {}) {
   cartStore.set(lines)
   localStorage.setItem('orderType', orderType)
-  localStorage.setItem('dineInTable', JSON.stringify({ _id: 'tbl1', name: '7' }))
+  if (table) localStorage.setItem('dineInTable', JSON.stringify({ _id: 'tbl1', name: '7' }))
   walletAPI.getWallet.mockResolvedValue({ data: { success: true, balance: wallet } })
   promotionsAPI.getActiveCoupons.mockResolvedValue({ data: { success: true, coupons } })
   render(
@@ -109,6 +109,7 @@ function renderCart({ lines = LINES, orderType = 'dine-in', wallet = 0, coupons 
         <Route path="/bill-preview" element={<Probe name="bill-preview" />} />
         <Route path="/login" element={<Probe name="login-page" />} />
         <Route path="/customer/payment" element={<Probe name="payment-page" />} />
+        <Route path="/customer/order-confirmed" element={<Probe name="order-confirmed" />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -463,5 +464,99 @@ describe('Cart — operations profile (pay-first dine-in, tips)', () => {
     renderCart()
     await settle()
     expect(screen.queryByText('Add Tip')).not.toBeInTheDocument()
+  })
+})
+
+describe('Cart — token-number mode (§12.2, tables.useTables:false)', () => {
+  const TOKEN_OPS = { tables: { useTables: false } }
+
+  test('dine-in order is placed with NO tableId and lands on the confirmation with the token', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: TOKEN_OPS }
+    api.post.mockResolvedValue({ data: { success: true, order: { orderId: 'ORD-20261019-0042', tokenNumber: 'T-042', paymentMethod: 'cash' } } })
+    const expected = computeBill({ subtotal: SUBTOTAL, taxConfig: TAX_CONFIG, orderType: 'dine-in' })
+    const user = renderCart({ table: false })
+    await settle()
+    expect(screen.getByTestId('token-mode-note')).toHaveTextContent(/token number/)
+    expect(screen.getByTestId('token-order-chip')).toHaveTextContent('Token order')
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('order-confirmed')
+    const [, body] = api.post.mock.calls.find((c) => c[0] === '/orders')
+    expect(body).toMatchObject({ type: 'dine-in', tableId: null, total: expected.total })
+    expect(landed.state).toMatchObject({ orderId: 'ORD-20261019-0042', tokenNumber: 'T-042', isTakeaway: false, tracking: true, total: expected.total })
+    expect(screen.queryByText('orders-page')).not.toBeInTheDocument()
+  })
+
+  test('a guest counter order keeps the server\'s one-off guestAccessToken under both ids (orderId + _id)', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: TOKEN_OPS }
+    const expiresAt = new Date(Date.now() + 24 * 3600_000).toISOString()
+    api.post.mockResolvedValue({ data: {
+      success: true,
+      order: { _id: '65f000000000000000000042', orderId: 'ORD-42', tokenNumber: 'T-042' },
+      guestAccessToken: 'guest-access-token-0123456789abcdef',
+      guestAccessExpiresAt: expiresAt,
+    } })
+    const user = renderCart({ table: false })
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('order-confirmed')
+    const { guestOrderAccessFor } = await import('@/utils/guestOrderAccess')
+    expect(guestOrderAccessFor('ORD-42')).toBe('guest-access-token-0123456789abcdef')
+    expect(guestOrderAccessFor('65f000000000000000000042')).toBe('guest-access-token-0123456789abcdef')
+    expect(JSON.parse(localStorage.getItem('guest_order_access_v1'))['ORD-42'].expiresAt).toBe(Date.parse(expiresAt))
+  })
+
+  test('without a guestAccessToken in the response (logged-in customer / tenant with tables) nothing is stored', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: TOKEN_OPS }
+    api.post.mockResolvedValue({ data: { success: true, order: { _id: '65f000000000000000000043', orderId: 'ORD-43', tokenNumber: 'T-043' } } })
+    const user = renderCart({ table: false })
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('order-confirmed')
+    expect(localStorage.getItem('guest_order_access_v1')).toBeNull()
+  })
+
+  test('a stale table binding is ignored in token mode (tableId still null)', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: TOKEN_OPS }
+    api.post.mockResolvedValue({ data: { success: true, order: { orderId: 'ORD-1', tokenNumber: 'T-001' } } })
+    const user = renderCart({ table: true })
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('order-confirmed')
+    const [, body] = api.post.mock.calls.find((c) => c[0] === '/orders')
+    expect(body.tableId).toBeNull()
+  })
+
+  test('tracking off (§12.3) travels to the confirmation as tracking:false', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: { ...TOKEN_OPS, orderFlow: { customerTracking: false } } }
+    api.post.mockResolvedValue({ data: { success: true, order: { orderId: 'ORD-2', tokenNumber: 'T-002' } } })
+    const user = renderCart({ table: false })
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('order-confirmed')
+    expect(landed.state).toMatchObject({ tokenNumber: 'T-002', tracking: false })
+  })
+
+  test('pay-first in token mode still hands the draft (without a table) to the payment screen', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: { ...TOKEN_OPS, payment: { dineIn: 'payFirst' } } }
+    const user = renderCart({ table: false })
+    await settle()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('payment-page')
+    expect(landed.state.payFirstDineIn).toBe(true)
+    expect(landed.state.orderPayload).toMatchObject({ type: 'dine-in', tableId: null })
+    expect(api.post).not.toHaveBeenCalledWith('/orders', expect.anything(), expect.anything())
+  })
+
+  test('outside token mode today\'s behaviour: the scanned table travels on the order and the list page follows', async () => {
+    tenantBlob = { slug: 'cafe-uno', operations: { tables: { useTables: true } } }
+    const user = renderCart()
+    await settle()
+    expect(screen.queryByTestId('token-mode-note')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('token-order-chip')).not.toBeInTheDocument()
+    expect(screen.getByText('Table 7')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Place Order ₹/ }))
+    await screen.findByText('orders-page')
+    const [, body] = api.post.mock.calls.find((c) => c[0] === '/orders')
+    expect(body.tableId).toBe('tbl1')
   })
 })

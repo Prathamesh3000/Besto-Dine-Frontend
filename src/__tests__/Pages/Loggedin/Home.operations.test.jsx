@@ -47,9 +47,10 @@ vi.mock('@/Components/Loggedin/ExitConfirmModal', () => ({ default: () => null }
 vi.mock('@/Components/Loggedin/QrMenuOnlyNote', () => ({ default: () => null }))
 vi.mock('@/hooks/useExitConfirmation', () => ({ default: () => ({ show: false, confirm: () => {}, cancel: () => {} }) }))
 vi.mock('@/hooks/useSelfOrderBlocked', () => ({ default: () => false }))
-const session = { canRequestService: true }
+const session = { canRequestService: true, table: null, tableless: false }
 vi.mock('@/hooks/useCustomerSession', () => ({ default: () => session }))
-vi.mock('@/utils/dineInSession', () => ({ useDineInLock: () => false, isDineInLocked: () => false }))
+const markTablelessDineIn = vi.fn()
+vi.mock('@/utils/dineInSession', () => ({ useDineInLock: () => false, isDineInLocked: () => false, markTablelessDineIn: (...a) => markTablelessDineIn(...a) }))
 vi.mock('@/utils/favorites', () => ({ useFavorites: () => ({ has: () => false, toggle: () => {} }) }))
 vi.mock('react-hot-toast', () => {
   const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() })
@@ -78,6 +79,9 @@ const waiter = () => screen.queryByRole('button', { name: 'Call a waiter to your
 beforeEach(() => {
   opsProfile = null
   session.canRequestService = true
+  session.table = null
+  session.tableless = false
+  markTablelessDineIn.mockClear()
   localStorage.setItem('orderType', 'dine-in')
 })
 
@@ -106,5 +110,43 @@ describe('Home — service quick-actions vs operations profile', () => {
     localStorage.setItem('orderType', 'takeaway')
     renderHome()
     expect(water()).not.toBeInTheDocument()
+  })
+})
+
+describe('Home — token-number mode banner (§12.2)', () => {
+  const note = () => screen.queryByTestId('token-mode-note')
+
+  test('default tenant with no table: no banner, no tableless stamp', () => {
+    renderHome()
+    expect(note()).not.toBeInTheDocument()
+    expect(markTablelessDineIn).not.toHaveBeenCalled()
+  })
+
+  test('counter-QR session (session.tableless): banner with the token wording', () => {
+    session.tableless = true
+    renderHome()
+    expect(note()).toHaveTextContent('Order from your seat — you’ll get a token number to collect your food.')
+  })
+
+  test('token-mode profile arriving after entry: banner shown and the tableless entry is stamped once', () => {
+    opsProfile = { tables: { useTables: false } }
+    renderHome()
+    expect(note()).toBeInTheDocument()
+    expect(markTablelessDineIn).toHaveBeenCalledTimes(1)
+  })
+
+  test('token-mode profile but a real table is bound: no banner', () => {
+    opsProfile = { tables: { useTables: false } }
+    session.table = { id: 't1', name: '4' }
+    renderHome()
+    expect(note()).not.toBeInTheDocument()
+    expect(markTablelessDineIn).not.toHaveBeenCalled()
+  })
+
+  test('takeaway never shows the banner', () => {
+    session.tableless = true
+    localStorage.setItem('orderType', 'takeaway')
+    renderHome()
+    expect(note()).not.toBeInTheDocument()
   })
 })

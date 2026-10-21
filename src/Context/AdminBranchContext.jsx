@@ -77,7 +77,7 @@ function writePickedFlag(flag) {
 }
 
 export function AdminBranchProvider({ children }) {
-    const { user } = useAuth();
+    const { user, refreshUser } = useAuth();
     const queryClient = useQueryClient();
     const [selectedBranchId, _setSelectedBranchId] = useState(() => readStoredBranchId());
     const [hasPicked, setHasPicked] = useState(() => readPickedFlag());
@@ -95,7 +95,12 @@ export function AdminBranchProvider({ children }) {
         _setSelectedBranchId(value);
         setHasPicked(true);
         writePickedFlag(true);
-    }, []);
+        // The operations profile on /auth/me is resolved for the caller's
+        // effective branch (per-branch overrides, design §12.1), and the
+        // api interceptor injects the branch just persisted above — so
+        // refetch the user now rather than wait for the next live event.
+        refreshUser?.();
+    }, [refreshUser]);
 
     // Branch-pinned admin/manager is locked to their branch (set during login)
     const isLocked = !!(user?.branch && ADMIN_LIKE_ROLES.includes(user?.role));

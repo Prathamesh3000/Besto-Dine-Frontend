@@ -1,21 +1,20 @@
 {
     "compilerOptions": {
-        "baseUrl": ".",
         "paths": {
             "@/*": [
-                "src/*"
+                "./src/*"
             ],
             "@components/*": [
-                "src/Components/*"
+                "./src/Components/*"
             ],
             "@hooks/*": [
-                "src/hooks/*"
+                "./src/hooks/*"
             ],
             "@assets/*": [
-                "src/assets/*"
+                "./src/assets/*"
             ],
             "@admin/*": [
-                "src/Pages/Admin/*"
+                "./src/Pages/Admin/*"
             ]
         }
     },

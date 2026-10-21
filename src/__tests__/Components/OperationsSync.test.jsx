@@ -40,6 +40,16 @@ describe('OperationsSync', () => {
     expect(refreshUser).toHaveBeenCalledTimes(1)
   })
 
+  test('a per-branch change (payload with branchId) refreshes too — no filtering on branch', () => {
+    const refreshUser = vi.fn()
+    auth.value = { user: { role: 'waiter', tenant: { _id: 'r1' }, branch: { _id: 'b1' } }, refreshUser }
+    render(<OperationsSync />)
+    act(() => sock.handlers['tenant:operations-updated']({ restaurant: 'r1', branchId: 'b2' }))
+    act(() => sock.handlers['tenant:operations-updated']({ restaurant: 'r1', branchId: 'b1' }))
+    act(() => sock.handlers['tenant:operations-updated']({ restaurant: 'r1', branchId: null }))
+    expect(refreshUser).toHaveBeenCalledTimes(3)
+  })
+
   test.each([
     ['guest', { user: null }],
     ['customer', { user: { role: 'customer', tenant: { _id: 'r1' } } }],

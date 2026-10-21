@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach } from 'vitest'
 import {
   QR_MENU_ONLY_NOTE, isCustomerSelfOrderOff, isDineInSelfOrderBlocked, serviceSpotLabel, dineInPaymentChoice,
+  isTokenMode, TOKEN_MODE_NOTE, tokenOrderStatusLabel,
 } from '@/utils/customerOrdering'
 import { setActiveTenant, clearActiveTenant } from '@/utils/tenant'
 
@@ -71,5 +72,44 @@ describe('dineInPaymentChoice', () => {
   test('reads the active tenant profile by default', () => {
     setActiveTenant({ slug: 'hotel', operations: { payment: { dineIn: 'either' } } })
     expect(dineInPaymentChoice()).toBe('either')
+  })
+})
+
+describe('isTokenMode (§12.2 token-number mode)', () => {
+  test('only tables.useTables === false is token mode', () => {
+    expect(isTokenMode({ tables: { useTables: false } })).toBe(true)
+    expect(isTokenMode({ tables: { useTables: true } })).toBe(false)
+    expect(isTokenMode({ tables: {} })).toBe(false)
+    expect(isTokenMode({})).toBe(false)
+    expect(isTokenMode(null)).toBe(false)
+  })
+
+  test('default tenants (no profile) use tables', () => {
+    expect(isTokenMode()).toBe(false)
+    setActiveTenant({ slug: 'cafe' })
+    expect(isTokenMode()).toBe(false)
+  })
+
+  test('reads the active tenant profile by default', () => {
+    setActiveTenant({ slug: 'counter-cafe', operations: { tables: { useTables: false } } })
+    expect(isTokenMode()).toBe(true)
+  })
+
+  test('TOKEN_MODE_NOTE copy', () => {
+    expect(TOKEN_MODE_NOTE).toBe('Order from your seat — you’ll get a token number to collect your food.')
+  })
+})
+
+describe('tokenOrderStatusLabel (§12.3 collapsed statuses)', () => {
+  test.each([
+    ['confirmed', 'Confirmed'],
+    ['completed', 'Completed'],
+    ['cancelled', 'Cancelled'],
+    ['awaiting-payment', 'Awaiting payment'],
+    ['preparing', 'Preparing'],
+    ['', ''],
+    [undefined, ''],
+  ])('%s → %s', (raw, label) => {
+    expect(tokenOrderStatusLabel(raw)).toBe(label)
   })
 })

@@ -22,6 +22,9 @@ vi.mock('@/hooks/useSocketEvent', () => ({
 vi.mock('@/Context/AdminBranchContext', () => ({
   useAdminBranch: () => ({ selectedBranchId: null, branches: [], isLocked: false }),
 }))
+// Default operations profile (tables on) — the dashboard reads it for
+// token-number mode; no AuthProvider in this test.
+vi.mock('@/hooks/useOperations', () => ({ default: () => null, useOperations: () => null }))
 vi.mock('@/Pages/Admin/components/OrderDetailsModal', () => ({ default: () => null }))
 vi.mock('@/Pages/Admin/components/AddTakeawayOrderModal', () => ({ default: () => null }))
 vi.mock('@/utils/api', () => {

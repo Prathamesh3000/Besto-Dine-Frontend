@@ -139,3 +139,28 @@ describe('useAdminBranch without a provider', () => {
     expect(() => { result.current.setSelectedBranchId('x'); result.current.refetchBranches() }).not.toThrow()
   })
 })
+
+describe('branch switch refreshes the operations profile (design §12.1)', () => {
+  test('an explicit switch calls refreshUser() after persisting the branch the api interceptor will inject', async () => {
+    let branchSeenByRefresh = 'not called'
+    const refreshUser = vi.fn(() => { branchSeenByRefresh = localStorage.getItem('adminActiveBranch') })
+    authState.current = { user: { _id: 'o', role: 'admin', branch: null }, refreshUser }
+    const { result } = mount()
+    await waitFor(() => expect(result.current.selectedBranchId).toBe('main1'))
+    // the system default-to-Main is not a switch
+    expect(refreshUser).not.toHaveBeenCalled()
+    act(() => result.current.setSelectedBranchId('fc2'))
+    expect(refreshUser).toHaveBeenCalledTimes(1)
+    expect(branchSeenByRefresh).toBe(JSON.stringify('fc2'))
+    act(() => result.current.setSelectedBranchId(null))
+    expect(refreshUser).toHaveBeenCalledTimes(2)
+  })
+
+  test('an AuthContext without refreshUser (older mocks / fallbacks) does not break switching', async () => {
+    authState.current = { user: { _id: 'o', role: 'admin', branch: null } }
+    const { result } = mount()
+    await waitFor(() => expect(result.current.branches).toHaveLength(2))
+    expect(() => act(() => result.current.setSelectedBranchId('fc2'))).not.toThrow()
+    expect(result.current.selectedBranchId).toBe('fc2')
+  })
+})

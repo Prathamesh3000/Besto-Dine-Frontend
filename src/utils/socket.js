@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 import { getToken, identityMismatch } from './authStorage';
 import { configuredApiUrl } from './apiOrigin';
+import { guestAccessJoinPayload } from './guestOrderAccess';
 
 // Derive the Socket.io server URL from the API URL (strip /api/v1 suffix).
 // configuredApiUrl swaps a localhost host for the page's LAN hostname
@@ -153,7 +154,7 @@ export function getSocket() {
         // AND on every reconnect, so re-request per-resource rooms here.
         socket.on('connect', () => {
             authFailures = 0;
-            _rooms.forEach((room) => socket.emit('join', room));
+            _rooms.forEach((room) => socket.emit('join', guestAccessJoinPayload(room)));
             _connected = true;
             _connectCount += 1;
             notify();
@@ -192,7 +193,10 @@ export function joinRoom(room) {
     if (!room) return;
     const s = getSocket();
     _rooms.add(room);
-    if (s.connected) s.emit('join', room);
+    // An `order:<id>` room of a token-mode guest order is joined as
+    // `{ room, guestAccess }` (utils/guestOrderAccess.js); every other room
+    // is still the plain name.
+    if (s.connected) s.emit('join', guestAccessJoinPayload(room));
     // else: the 'connect' handler above joins everything in _rooms.
 }
 

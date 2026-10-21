@@ -25,6 +25,8 @@ vi.mock('@/hooks/useSocketEvent', () => ({
 vi.mock('@/Context/AdminBranchContext', () => ({
   useAdminBranch: () => ({ selectedBranchId: 'b1', branches: [{ _id: 'b1', name: 'MG Road' }], isLocked: false }),
 }))
+// Default operations profile (tables on); no AuthProvider in this test.
+vi.mock('@/hooks/useOperations', () => ({ default: () => null, useOperations: () => null }))
 const DINE = { data: [], isLoading: false, isError: false, refetch: vi.fn() }
 const PAST = { data: undefined, isLoading: false, isError: false, refetch: vi.fn() }
 vi.mock('@/hooks/queries/adminQueries', () => ({

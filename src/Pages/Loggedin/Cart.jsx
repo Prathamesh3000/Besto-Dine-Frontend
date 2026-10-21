@@ -33,13 +33,14 @@ import { resolveUnitPrice, resolveLinePrice, formatPrice } from "../../utils/pri
 import { computeBill, computeSubtotal, toTaxConfig } from "../../utils/billing";
 import { lineUnitPrice, lineTotal as cartLineTotal } from "../../utils/cart";
 import { isGuestSessionExpired, clearGuestSession } from "../../utils/guestSession";
+import { rememberGuestOrderAccess } from "../../utils/guestOrderAccess";
 import { rememberOrderIds, getCustomerOrderSession } from "../../utils/customerOrderIds";
 import { toast } from "react-hot-toast";
 import { reportMissingFields } from "../../utils/requiredFields";
 import { getCustomerOperations } from "../../utils/operations";
 import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
 import QrMenuOnlyNote from "../../Components/Loggedin/QrMenuOnlyNote";
-import { QR_MENU_ONLY_NOTE, serviceSpotLabel, dineInPaymentChoice } from "../../utils/customerOrdering";
+import { QR_MENU_ONLY_NOTE, serviceSpotLabel, dineInPaymentChoice, isTokenMode } from "../../utils/customerOrdering";
 
 // ─── Checkout idempotency key ────────────────────────────────────────────────
 // One key per checkout attempt. It survives a slow-network retry / double
@@ -673,6 +674,9 @@ function Cart() {
     () => localStorage.getItem("orderType") || "dine-in",
   );
   const isTakeaway = orderType === "takeaway";
+  // Token-number restaurant (§12.2, `tables.useTables:false`): a dine-in
+  // order is placed with NO table and comes back with a token number.
+  const tokenOrderMode = !isTakeaway && isTokenMode(getCustomerOperations());
   const dineInOrderingOff = selfOrderBlocked && !isTakeaway;
 
   // Takeaway-specific state
@@ -1578,9 +1582,11 @@ function Cart() {
     // Dine-in order path
     setIsSubmitting(true);
     try {
-      // Read table ID from localStorage (set by QR scan in ScanTable.jsx)
+      // Read table ID from localStorage (set by QR scan in ScanTable.jsx).
+      // Token mode: the restaurant has no tables — the order goes without
+      // one (the server allots a token number); a stale binding is ignored.
       const dineInTable = JSON.parse(localStorage.getItem('dineInTable') || '{}');
-      const dineInTableId = dineInTable._id || null;
+      const dineInTableId = tokenOrderMode ? null : (dineInTable._id || null);
 
       // Dine-in total = the server's bill (utils/billing mirrors
       // Backend/utils/billing): subtotal + GST + service charge +
@@ -1703,9 +1709,41 @@ function Cart() {
         const placedIds = [data.order?.orderId];
         if (wasSplit) placedIds.push(data.splitOrder?.orderId);
         rememberOrderIds(getCustomerOrderSession(authUser, isLoggedIn), placedIds.filter(Boolean).map(String));
+        // Token mode, guest counter order: the server's one-off access
+        // token (no scan session exists) — kept under both ids so the
+        // confirmation / tracking / pay calls can present it (X-Guest-Access).
+        if (data.guestAccessToken) {
+          rememberGuestOrderAccess(
+            [...placedIds, data.order?._id, wasSplit ? data.splitOrder?._id : null],
+            data.guestAccessToken,
+            data.guestAccessExpiresAt,
+          );
+        }
         window.dispatchEvent(new Event("storage_sync"));
 
         clearCart();
+        if (tokenOrderMode) {
+          // Token mode: the confirmation screen shows the token number big
+          // and clear ("Your token: T-042") — the customer collects on it.
+          navigate("/customer/order-confirmed", {
+            replace: true,
+            state: {
+              orderId: data.order?.orderId,
+              tokenNumber: data.order?.tokenNumber || null,
+              items: cartItems.map(item => ({
+                name: item.name || item.title,
+                price: resolveUnitPrice(item),
+                quantity: item.quantity,
+                image: item.image || item.images?.[0] || '',
+              })),
+              total: dineInFinalTotal,
+              isTakeaway: false,
+              paymentMethod: data.order?.paymentMethod || 'cash',
+              tracking: getCustomerOperations().orderFlow?.customerTracking !== false,
+            },
+          });
+          return;
+        }
         navigate("/customer/orders");
       }
     } catch (error) {
@@ -1851,6 +1889,10 @@ function Cart() {
           {isTakeaway ? (
             <span className="text-[#FE8301] text-[14px] font-varela font-normal bg-orange-50 px-3 py-1 rounded-[10px]">
               Takeaway
+            </span>
+          ) : tokenOrderMode ? (
+            <span className="text-[#1D4ED8] text-[13px] font-varela bg-[#EAF1FF] px-3 py-1 rounded-[10px]" data-testid="token-order-chip">
+              Token order
             </span>
           ) : (tableNumber && !dineInLocked) ? (
             <span className="text-[#666666] text-[14px] font-varela regular">
@@ -2732,6 +2774,16 @@ function Cart() {
             <span className="text-[16px] leading-none mt-0.5">🔒</span>
             <p className="text-[12px] font-varela text-[#7A4504] leading-snug">
               Your bill is settled. Please <span className="font-semibold">re-scan the table QR</span> to start a new order.
+            </p>
+          </div>
+        )}
+        {/* Token-number restaurant: no table on this order — say what
+            happens next before the customer taps Place Order. */}
+        {tokenOrderMode && !dineInOrderingOff && (
+          <div className="mb-2 flex items-start gap-2 bg-[#EAF1FF] border border-[#C7D9FF] rounded-xl px-3 py-2" data-testid="token-mode-note">
+            <span className="text-[16px] leading-none mt-0.5" aria-hidden="true">🎟️</span>
+            <p className="text-[12px] font-varela text-[#1D4ED8] leading-snug">
+              No table needed — you'll get a <span className="font-semibold">token number</span> to collect your food at the counter.
             </p>
           </div>
         )}

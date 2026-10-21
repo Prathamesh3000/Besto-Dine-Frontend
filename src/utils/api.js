@@ -8,6 +8,7 @@ import {
     AUDIENCES, identityMismatch, loginPathForAudience,
 } from './authStorage';
 import { clearDineInTable, requestTableScan } from './dineInSession';
+import { guestAccessForRequest } from './guestOrderAccess';
 import { isReservedSlug } from './reservedSlugs';
 import { configuredApiUrl } from './apiOrigin';
 import { startActivityTracking, msSinceActivity, CUSTOMER_IDLE_TIMEOUT_MS } from './customerActivity';
@@ -396,6 +397,14 @@ api.interceptors.request.use(
         // they never scanned. Staff tokens override this on the server.
         const scanToken = localStorage.getItem('scanToken');
         if (scanToken) config.headers['X-Scan-Token'] = scanToken;
+
+        // Guest access token (token-number mode, §12.2): a guest counter
+        // order has no scan session, so POST /orders handed back a one-off
+        // token that the detail / tracking / pay calls about THAT order
+        // (and a Razorpay checkout naming it) send back as X-Guest-Access.
+        // Nothing is stored for tenants with tables — no header then.
+        const guestAccess = guestAccessForRequest(config.url, config.data);
+        if (guestAccess) config.headers['X-Guest-Access'] = guestAccess;
 
         return config;
     },
@@ -789,6 +798,18 @@ export const settingsAPI = {
     getSettings: (opts = {}) => api.get('/settings', opts),
     updateSettings: (data) => api.put('/settings', data),
     updateSection: (section, data) => api.patch(`/settings/${section}`, data),
+};
+
+// Super Admin → Restaurant → Operations, per-branch overrides (design
+// §12.1; Backend/controllers/operationsController.js). GET returns the
+// tenant profile plus `branches[]`; PUT/DELETE on a branch return the same
+// shape (PUT answers 409 OPERATIONS_STALE when `expectedUpdatedAt` is old).
+export const superadminOperationsAPI = {
+    get:         (restaurantId) => api.get(`/superadmin/restaurants/${restaurantId}/operations`),
+    saveBranch:  (restaurantId, branchId, { overrides, expectedUpdatedAt }) =>
+        api.put(`/superadmin/restaurants/${restaurantId}/operations/branches/${branchId}`, { overrides, expectedUpdatedAt }),
+    resetBranch: (restaurantId, branchId) =>
+        api.delete(`/superadmin/restaurants/${restaurantId}/operations/branches/${branchId}`),
 };
 
 // Thermal printing (Backend/routes/printRoute.js). Printer rows themselves
