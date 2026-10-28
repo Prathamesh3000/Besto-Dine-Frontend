@@ -9,6 +9,11 @@ const Sidebar = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, isCaptain, hasPermission, logout } = useAuth();
+    // Floor Overview follows the route guard (CAPTAIN_ROLES = admin, manager,
+    // captain). AuthContext.isCaptain deliberately excludes manager (it also
+    // drives captain-only actions elsewhere), so don't use it for this link.
+    const canSeeFloor = isCaptain || user?.role === 'manager';
+    const roleHeading = { captain: 'Captain', manager: 'Manager', admin: 'Admin' }[user?.role] || 'Waiter';
     // /waiter/menu is gated off when the restaurant turns staff
     // ordering off (operations profile) — don't link to it.
     const staffOrderOff = useStaffOrderOff();
@@ -43,7 +48,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         { icon: Home,            label: tokenMode ? 'Tokens' : 'Tables', path: '/waiter/home' },
         // Captain-only floor command screen — workload, delayed orders,
         // table-to-waiter assignment, escalation. Hidden for plain waiters.
-        ...(isCaptain ? [
+        ...(canSeeFloor ? [
             { icon: LayoutDashboard, label: 'Floor Overview', path: '/waiter/floor' },
         ] : []),
         { icon: ClipboardList,   label: 'Active Orders',  path: '/waiter/orders' },
@@ -78,7 +83,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                 {/* Header — close + branding strip. Sticky-style top so
                     the close button stays reachable while the nav scrolls. */}
                 <div className="flex items-center justify-between px-5 pt-6 pb-4">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#FE8301]">Waiter</span>
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#FE8301]">{roleHeading}</span>
                     <button
                         onClick={onClose}
                         aria-label="Close menu"

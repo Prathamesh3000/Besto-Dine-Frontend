@@ -10,6 +10,7 @@ import { resolveImageUrl } from '../../utils/image'
 import { getSocket } from '../../utils/socket'
 import { useAdminPrefetch } from '../../hooks/queries/useAdminPrefetch'
 import { openUpgradePrompt } from '../../utils/upgradePromptBus'
+import { buildAdminNavItems } from '../../utils/adminNav'
 import InstallAppBanner from '../../Components/Common/InstallAppBanner'
 
 
@@ -129,19 +130,17 @@ const AdminLayoutInner = () => {
     { name: 'CRM',        path: '/admin/crm',       icon: 'fi fi-rr-circle-user',        permission: 'crm',          feature: 'crm' },
     { name: 'Inventory',  path: '/admin/inventory', icon: 'fi fi-rr-box',                permission: null,           feature: 'inventory' },
     { name: 'Bookings',   path: '/admin/bookings',  icon: 'fi fi-rr-calendar-check',     permission: 'reservation',  feature: 'advanceBookingTable' },
+    // Incentives: hidden (not PRO-badged) when the plan lacks the module,
+    // and only for an admin or staff holding the `incentives` permission.
+    { name: 'Incentives', path: '/admin/incentives', icon: 'fi fi-rr-gift',              permission: 'incentives',   feature: 'incentives', hideWhenLocked: true },
     // Phase 6 — branch management is an owner-only feature. A branch-pinned
     // Branch Admin has nothing to do here; the whole tab is hidden for them.
     { name: 'Branches',   path: '/admin/branches',  icon: 'fi fi-rr-building',           permission: null,           feature: 'multiBranch', ownerOnly: true },
   ]
 
-  const navItems = allNavItems
-    .filter(item => !item.ownerOnly || isTenantOwner)
-    .filter(item => !item.permission || hasPermission(item.permission))
-    // Cross-branch peek: only the Dashboard tab is reachable. Every
-    // other tab is hidden so the owner can't accidentally make a
-    // change against the sub-branch they're just viewing.
-    .filter(item => !isCrossBranchReadOnly || item.path === '/admin/dashboard')
-    .map(item => ({ ...item, locked: item.feature ? !hasFeature(item.feature) : false }))
+  const navItems = buildAdminNavItems(allNavItems, {
+    isTenantOwner, hasPermission, hasFeature, isCrossBranchReadOnly,
+  })
 
   // Hard guard for deep links — if the URL points anywhere other than
   // /admin/dashboard while we're in read-only sub-branch mode, bounce

@@ -2,12 +2,13 @@ import React from 'react'
 import { Edit2, Eye, Star, Clock, Trash2 } from 'lucide-react'
 import ToggleSwitch from '../../../Components/Common/ToggleSwitch'
 import VegBadge from '../../../Components/Common/VegBadge'
-import { FALLBACK_IMAGE } from '../../../utils/image'
+import { getItemImage, hideBrokenImage } from '../../../utils/image'
 
 const ComboCard = ({ item, onView, onToggle, onEdit, onDelete, viewMode = 'grid', serialNumber }) => {
 
     // ── Normalise real backend fields ────────────────────────────────────────
-    const image      = item.images?.[0] || item.image || FALLBACK_IMAGE
+    // null when the admin never uploaded an image → the image box stays blank.
+    const image      = getItemImage(item)
     const isVeg      = item.vegType === 'veg'
     const isVisible  = item.status === 'active'
     const isDraft    = item.status === 'draft'
@@ -33,13 +34,17 @@ const ComboCard = ({ item, onView, onToggle, onEdit, onDelete, viewMode = 'grid'
                 <div className="flex items-center gap-3">
                     <VegBadge isVeg={isVeg} size="sm" className="flex-shrink-0" />
 
-                    <img
-                        src={image}
-                        alt={item.name}
-                        loading="lazy"
-                        className="w-12 h-12 rounded-lg object-cover object-center flex-shrink-0"
-                        onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                    />
+                    {image ? (
+                        <img
+                            src={image}
+                            alt={item.name}
+                            loading="lazy"
+                            className="w-12 h-12 rounded-lg object-cover object-center flex-shrink-0"
+                            onError={hideBrokenImage}
+                        />
+                    ) : (
+                        <div className="w-12 h-12 rounded-lg bg-gray-50 flex-shrink-0" data-testid="combo-no-image" aria-hidden="true" />
+                    )}
                     <div>
                         <h3 className="text-[14px] font-bold text-[#1A181B] line-clamp-1">{item.name}</h3>
                         <div className="flex items-center gap-1 mt-0.5">
@@ -109,14 +114,18 @@ const ComboCard = ({ item, onView, onToggle, onEdit, onDelete, viewMode = 'grid'
         <div className={`rounded-2xl border border-gray-100 overflow-hidden transition-all duration-300 flex flex-col font-manrope ${!isVisible ? 'bg-white opacity-70' : isDraft ? 'bg-[#FFFDF5]' : 'bg-white'} ${isVisible ? 'shadow-[0px_2px_8px_0px_#00000014] hover:-translate-y-1 hover:shadow-[0px_8px_16px_0px_#00000029]' : ''}`}>
             {/* Image Section */}
             <div className="relative h-[200px]">
-                <div className="relative h-full rounded-2xl overflow-hidden">
-                    <img
-                        src={image}
-                        alt={item.name}
-                        loading="lazy"
-                        className="w-full h-full object-cover object-center"
-                        onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                    />
+                <div className="relative h-full rounded-2xl overflow-hidden bg-gray-50">
+                    {image ? (
+                        <img
+                            src={image}
+                            alt={item.name}
+                            loading="lazy"
+                            className="w-full h-full object-cover object-center"
+                            onError={hideBrokenImage}
+                        />
+                    ) : (
+                        <div className="w-full h-full bg-gray-50" data-testid="combo-no-image" aria-hidden="true" />
+                    )}
                     {/* Gradient overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
 

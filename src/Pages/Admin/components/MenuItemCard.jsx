@@ -2,7 +2,7 @@ import React from 'react'
 import { Edit2, Eye, Star, Leaf, AlertTriangle } from 'lucide-react'
 import ToggleSwitch from '../../../Components/Common/ToggleSwitch'
 import VegBadge from '../../../Components/Common/VegBadge'
-import { FALLBACK_IMAGE, getItemImage, handleImageError } from '../../../utils/image'
+import { getItemImage, hideBrokenImage } from '../../../utils/image'
 
 // Visual style + label for an inventory issue on a menu item.
 const ISSUE_META = {
@@ -16,6 +16,7 @@ const MenuItemCard = ({ item, viewMode = 'grid', index, isHealthMode = false, is
   const isVisible = item.status === 'active' || item.isVisible;
   const unitLabel = item.unit ? `/${item.unit}` : '';
   const isDraft = item.status === 'draft' || item.isDraft;
+  // null when the admin never uploaded an image → the image box stays blank.
   const itemImage = getItemImage(item);
 
   // Inventory issue (out / low / config) — drives the card alert badge + ring.
@@ -59,14 +60,18 @@ const MenuItemCard = ({ item, viewMode = 'grid', index, isHealthMode = false, is
             <div className={`absolute w-2.5 h-2.5 rounded-full opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none ${isVeg ? 'bg-green-500' : 'bg-red-500'}`}></div>
           </label>
 
-           {/* Image */}
-          <img
-            src={itemImage}
-            alt={item.name}
-            loading="lazy"
-            onError={handleImageError}
-            className="w-10 h-10 rounded-lg object-cover object-center"
-          />
+          {/* Image — blank box when none was uploaded */}
+          {itemImage ? (
+            <img
+              src={itemImage}
+              alt={item.name}
+              loading="lazy"
+              onError={hideBrokenImage}
+              className="w-10 h-10 rounded-lg object-cover object-center flex-shrink-0"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-lg bg-gray-50 flex-shrink-0" data-testid="menu-item-no-image" aria-hidden="true" />
+          )}
 
           {/* Name */}
           <h3 className="text-sm font-bold text-[#101828] font-manrope truncate" title={item.name}>{item.name}</h3>
@@ -193,14 +198,18 @@ const MenuItemCard = ({ item, viewMode = 'grid', index, isHealthMode = false, is
             {issueMeta.label}
           </button>
         )}
-        <div className="relative w-full h-full overflow-hidden">
-          <img
-            src={itemImage}
-            alt={item.name}
-            loading="lazy"
-            onError={handleImageError}
-            className="w-full h-full object-cover object-center"
-          />
+        <div className="relative w-full h-full overflow-hidden bg-gray-50">
+          {itemImage ? (
+            <img
+              src={itemImage}
+              alt={item.name}
+              loading="lazy"
+              onError={hideBrokenImage}
+              className="w-full h-full object-cover object-center"
+            />
+          ) : (
+            <div className="w-full h-full" data-testid="menu-item-no-image" aria-hidden="true" />
+          )}
           {/* Disabled Image Overlay */}
           {!isVisible && (
             <div className="absolute inset-0 bg-[#DDDDDDCC] z-10"></div>

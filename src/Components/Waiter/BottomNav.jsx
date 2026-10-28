@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { waiterAPI } from '../../utils/api';
 import useSocketEvent from '../../hooks/useSocketEvent';
 import { useAuth } from '../../Context/AuthContext';
-import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
+import { getWaiterScope, inWaiterScope, countReadyOrders } from '../../utils/waiterScope';
 import useOperations from '../../hooks/useOperations';
 
 const BottomNav = () => {
@@ -23,7 +23,7 @@ const BottomNav = () => {
         try {
             const res = await waiterAPI.getLiveOrders();
             if (res.data?.success) {
-                setReadyOrders((res.data.orders || []).filter(o => o.status === 'ready' && inWaiterScope(scope, o)).length);
+                setReadyOrders(countReadyOrders(res.data.orders, scope));
             }
         } catch { /* keep last value on transient failure */ }
     }, [scope]);
@@ -38,7 +38,7 @@ const BottomNav = () => {
                 setPendingRequests((reqRes.data.requests || []).filter(r => inWaiterScope(scope, r)).length);
             }
             if (ordRes.data?.success) {
-                setReadyOrders((ordRes.data.orders || []).filter(o => o.status === 'ready' && inWaiterScope(scope, o)).length);
+                setReadyOrders(countReadyOrders(ordRes.data.orders, scope));
             }
         } catch { /* badges stay at last known value */ }
     }, [scope]);

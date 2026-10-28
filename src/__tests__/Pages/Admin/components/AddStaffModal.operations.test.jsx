@@ -16,7 +16,15 @@ vi.mock('@/utils/api', () => {
 })
 
 import api from '@/utils/api'
-import AddStaffModal from '@/Pages/Admin/components/AddStaffModal'
+import AddStaffModal, { PERMISSION_CATALOG } from '@/Pages/Admin/components/AddStaffModal'
+
+describe('AddStaffModal - incentives permission', () => {
+  test('catalog lists incentives as an admin-only toggle', () => {
+    const entry = PERMISSION_CATALOG.find((p) => p.key === 'incentives')
+    expect(entry).toBeTruthy()
+    expect(entry.adminOnly).toBe(true)
+  })
+})
 
 const MODULES_ALL_ON = { qrOrdering: true, waiter: true, captain: true, chef: true, customerPayment: true }
 

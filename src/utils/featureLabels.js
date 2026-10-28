@@ -26,6 +26,7 @@ export const FEATURE_LABELS = {
     whiteLabelBranding:  'Own Branding',
     kiosk:               'Self-Order Kiosk',
     revenueAnalytics:    'Revenue Analytics',
+    incentives:          'Staff Incentives',
 };
 
 // Levels of the tiered revenueAnalytics module.

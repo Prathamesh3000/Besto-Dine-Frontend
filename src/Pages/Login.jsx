@@ -41,6 +41,11 @@ const Login = () => {
     const [formError, setFormError] = useState('');
     // SIGNUP_PENDING / SIGNUP_REJECTED from a self-registered hotel owner.
     const [signupStatus, setSignupStatus] = useState(null); // { code, message }
+    // TENANT_DISAMBIGUATION_REQUIRED: this email exists at several
+    // restaurants. { restaurants: [{name, slug}] | null } — null means the
+    // server did not list them, so we ask for the restaurant code instead.
+    const [tenantChoice, setTenantChoice] = useState(null);
+    const [restaurantCode, setRestaurantCode] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [rememberEmail, setRememberEmail] = useState(false);
@@ -89,8 +94,10 @@ const Login = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    // `chosen` ({ slug, name }) is set only on the retry after the user picked
+    // a restaurant; the first attempt never sends a tenant.
+    const handleSubmit = async (e, chosen) => {
+        e?.preventDefault?.();
         setFormError('');
         setSignupStatus(null);
         if (!form.validateAll()) return;
@@ -103,11 +110,17 @@ const Login = () => {
                 localStorage.removeItem(REMEMBER_EMAIL_KEY);
             }
 
-            // No restaurant picker — the staff member's tenant is detected
+            // First attempt: the staff member's tenant is detected
             // server-side from their account. Clear any stale tenant left by
             // a previous customer session so we don't send a misleading
-            // X-Restaurant-Slug header on the login request.
-            clearActiveTenant();
+            // X-Restaurant-Slug header on the login request. Only the retry
+            // after a 409 TENANT_DISAMBIGUATION_REQUIRED sends the slug the
+            // user picked.
+            if (chosen?.slug) {
+                setActiveTenant({ slug: chosen.slug, name: chosen.name });
+            } else {
+                clearActiveTenant();
+            }
 
             // Role + tenant are auto-detected from the user record
             // server-side. We pass only loginType so the staff-vs-customer
@@ -135,9 +148,15 @@ const Login = () => {
                 else if (userRole === USER_ROLES.CHEF) navigate('/chef/dashboard');
                 else if (userRole === USER_ROLES.ADMIN || userRole === USER_ROLES.MANAGER) navigate('/admin/dashboard');
                 else navigate('/');
+            } else if (result.code === 'TENANT_DISAMBIGUATION_REQUIRED') {
+                // Don't leave the picked (wrong-password etc.) tenant behind.
+                clearActiveTenant();
+                setTenantChoice({ restaurants: result.restaurants?.length ? result.restaurants : null });
+                setFormError(result.restaurants?.length ? '' : (result.message || ''));
             } else if (result.code === 'SIGNUP_PENDING' || result.code === 'SIGNUP_REJECTED') {
                 setSignupStatus({ code: result.code, message: result.message, reason: result.reason });
             } else {
+                if (chosen?.slug) clearActiveTenant();
                 setFormError(result.message || 'Login failed. Please check your credentials.');
             }
         } catch (err) {
@@ -274,6 +293,51 @@ const Login = () => {
                                 reason={signupStatus.reason}
                                 onDismiss={() => { setSignupStatus(null); form.focusField('email'); }}
                             />
+                        )}
+
+                        {tenantChoice && (
+                            <div className="bg-[#FFF3E6] border border-[#FE8301]/30 rounded-xl px-4 py-4 space-y-3" data-testid="tenant-picker">
+                                <p className="text-sm font-semibold text-[#1A181B]">
+                                    This email is registered at more than one restaurant. Choose where to sign in.
+                                </p>
+                                {tenantChoice.restaurants ? (
+                                    <ul className="space-y-2">
+                                        {tenantChoice.restaurants.map((r) => (
+                                            <li key={r.slug}>
+                                                <button
+                                                    type="button"
+                                                    disabled={loading}
+                                                    onClick={() => handleSubmit(null, r)}
+                                                    className="w-full min-h-11 flex items-center gap-2 px-3 rounded-lg bg-white border border-gray-200 hover:border-[#FE8301] text-left text-sm font-semibold text-[#1A181B] disabled:opacity-60"
+                                                >
+                                                    <Building2 className="w-4 h-4 text-[#FE8301] shrink-0" />
+                                                    <span className="truncate">{r.name || r.slug}</span>
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={restaurantCode}
+                                            onChange={(e) => setRestaurantCode(e.target.value)}
+                                            placeholder="Restaurant code"
+                                            aria-label="Restaurant code"
+                                            autoCapitalize="none"
+                                            className="flex-1 min-h-11 px-3 rounded-lg border border-gray-200 text-sm"
+                                        />
+                                        <button
+                                            type="button"
+                                            disabled={loading || !restaurantCode.trim()}
+                                            onClick={() => handleSubmit(null, { slug: restaurantCode.trim().toLowerCase() })}
+                                            className="min-h-11 px-4 rounded-lg bg-[#FE8301] text-white text-sm font-semibold disabled:opacity-60"
+                                        >
+                                            Continue
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         )}
 
                         {/* Login Form */}

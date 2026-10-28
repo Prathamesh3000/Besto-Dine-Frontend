@@ -67,8 +67,11 @@ const CustomerLayout = () => {
             navigate(SCAN_TABLE_PATH, { replace: true, state: { reason: 'no_table' } });
         }
     }, [pathname, navigate]);
-    const { exitGuestMode, user, isLoggedIn } = useAuth();
+    const { exitGuestMode, logout, user, isLoggedIn } = useAuth();
     const [expired, setExpired] = useState(false);
+    // true when staff closed the table (free table / free all) — different
+    // wording, and a logged-in customer is signed out for real on exit.
+    const [staffClosed, setStaffClosed] = useState(false);
     const [countdown, setCountdown] = useState(10);
     const [graceMinutes, setGraceMinutes] = useState(GRACE_MINUTES_DEFAULT);
 
@@ -137,13 +140,42 @@ const CustomerLayout = () => {
     }, [user, isLoggedIn]);
 
     // ── Path (a): socket push from the backend sweeper ────────────
+    // Staff freed this diner's table (single table or all tables). Works for
+    // guests (scan session) and logged-in customers alike.
+    const handleStaffClosed = useCallback(() => {
+        // Drop the table binding / scan token right away so nothing keeps
+        // sending a revoked token; the auth sign-out happens when the
+        // overlay is dismissed (see finishExit).
+        clearDineInTable();
+        setStaffClosed(true);
+        setExpired(true);
+    }, []);
+
+    // ── Path (a): socket push from the backend sweeper / staff ────
     useSocketEvent('session:ended', (payload = {}) => {
+        if (payload.reason === 'table-freed' || payload.reason === 'all-tables-freed') {
+            // Per-user push has no tableId: accept. A table-room push for a
+            // different table is not ours.
+            const myTableId = currentTableId();
+            if (payload.tableId && myTableId && String(payload.tableId) !== String(myTableId)) return;
+            if (!payload.tableId && !hasScanSession() && !isLoggedIn) return;
+            handleStaffClosed();
+            return;
+        }
         if (!hasScanSession()) return;
         const myTableId = currentTableId();
         if (payload.tableId && myTableId && String(payload.tableId) !== String(myTableId)) return;
         if (payload.graceMinutes) setGraceMinutes(Number(payload.graceMinutes));
         setExpired(true);
     });
+
+    // API fallback: a request with a revoked scan token got 401
+    // TABLE_SESSION_ENDED (utils/api.js dispatches this event).
+    useEffect(() => {
+        const onEnded = () => handleStaffClosed();
+        window.addEventListener('bd:table-session-ended', onEnded);
+        return () => window.removeEventListener('bd:table-session-ended', onEnded);
+    }, [handleStaffClosed]);
 
     // ── QA #14: the admin deleted / disabled this table ───────────
     // Lock ordering the moment it happens instead of letting the diner
@@ -202,23 +234,28 @@ const CustomerLayout = () => {
     }, [expired, graceMinutes, hasScanSession, currentTableId, hasPlacedAnyOrder, socketLive]);
 
     // Countdown + redirect once the overlay is up.
+    const finishExit = () => {
+        if (staffClosed && user?.role === 'customer' && isLoggedIn && typeof logout === 'function') {
+            try { logout(); } catch { /* ignore */ }
+        }
+        exitGuestMode();
+        clearDineInTable();
+        try { localStorage.removeItem('scanSessionStart'); } catch { /* ignore */ }
+        navigate(activeRestaurantPath(), { replace: true });
+    };
+
     useEffect(() => {
         if (!expired) return;
         if (countdown <= 0) {
-            exitGuestMode();
-            try { localStorage.removeItem('scanSessionStart'); } catch { /* ignore */ }
-            navigate(activeRestaurantPath(), { replace: true });
+            finishExit();
             return;
         }
         const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
         return () => clearTimeout(t);
-    }, [expired, countdown, exitGuestMode, navigate]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [expired, countdown]);
 
-    const handleLeaveNow = () => {
-        exitGuestMode();
-        try { localStorage.removeItem('scanSessionStart'); } catch { /* ignore */ }
-        navigate(activeRestaurantPath(), { replace: true });
-    };
+    const handleLeaveNow = () => finishExit();
 
     return (
         <div className="w-full min-h-screen xl:px-[300px] bg-white">
@@ -232,8 +269,9 @@ const CustomerLayout = () => {
                         </div>
                         <h2 className="text-[20px] font-[700] text-gray-900">Session ended</h2>
                         <p className="text-[14px] text-gray-500 mt-2 leading-relaxed">
-                            No order was placed for {graceMinutes} minutes, so your dine-in session has ended.
-                            Scan the QR code again when you're ready.
+                            {staffClosed
+                                ? 'Your table has been closed by the restaurant. Thank you for dining with us!'
+                                : `No order was placed for ${graceMinutes} minutes, so your dine-in session has ended. Scan the QR code again when you're ready.`}
                         </p>
                         <p className="text-[12px] text-gray-400 mt-4">
                             Redirecting in {countdown}…

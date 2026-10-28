@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, Plus, Minus, ShoppingCart, Bookmark, ChevronRight, CircleCheck, MessageSquare } from 'lucide-react';
 import { useCart } from '../../Context/CartContext';
 import { menuSearchAPI } from '../../utils/api';
+import { getItemImage, hideBrokenImage } from '../../utils/image';
 import SpecialInstructionsPopup from '../../Components/Waiter/SpecialInstructionsPopup';
 import ProductDetails from '../../Components/Waiter/ProductDetails';
 import WaiterEmptyState from '../../Components/Waiter/WaiterEmptyState';
@@ -224,20 +225,28 @@ const CartPage = () => {
                             <h2 className="text-lg sm:text-xl font-bold text-[#1A181B]">You will love pairing it with!</h2>
                         </div>
                         <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 no-scrollbar">
-                            {recommendations.map((item) => (
+                            {recommendations.map((item) => {
+                                // null when no image was uploaded → blank box, no placeholder.
+                                const recImage = getItemImage(item);
+                                return (
                                 <div key={item._id || item.id} className="min-w-36 sm:min-w-44 bg-white rounded-2xl p-2 shadow-sm border border-[#F2F2F2]">
-                                    <div className="w-full aspect-square rounded-xl overflow-hidden mb-2">
-                                        <img
-                                            src={item.image || 'https://placehold.co/200x200?text=Item'}
-                                            alt={item.name}
-                                            className="w-full h-full object-cover"
-                                            onError={(e) => { e.target.src = 'https://placehold.co/200x200?text=Item'; }}
-                                        />
+                                    <div className="w-full aspect-square rounded-xl overflow-hidden mb-2 bg-gray-50">
+                                        {recImage ? (
+                                            <img
+                                                src={recImage}
+                                                alt={item.name}
+                                                className="w-full h-full object-cover"
+                                                onError={hideBrokenImage}
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                                        )}
                                     </div>
                                     <h3 className="text-sm font-bold text-[#1A181B] line-clamp-1">{item.name}</h3>
                                     <p className="text-sm font-bold text-[#1A181B] mt-1">₹{item.price}</p>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}

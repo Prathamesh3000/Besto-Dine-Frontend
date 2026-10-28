@@ -9,7 +9,7 @@ import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
 import QrMenuOnlyNote from "./QrMenuOnlyNote";
 import { useFavorites } from "../../utils/favorites";
 import VegBadge from "../Common/VegBadge";
-import { handleImageError, resolveImageUrl, sizedImage } from "../../utils/image";
+import { hideBrokenImage, realImage, sizedImage } from "../../utils/image";
 import { resolveSizePrice, round2, formatPrice } from "../../utils/pricing";
 
 // Normalise a product across two shapes that can arrive here:
@@ -53,7 +53,7 @@ function normaliseProduct(p) {
     id: p.id || p._id,
     title: p.title || p.name || "",
     desc: p.desc || p.description || "",
-    image: resolveImageUrl(p.image || images?.[0]) || "",
+    image: realImage(p.image || images?.[0]) || "",
     isVeg: p.isVeg !== undefined ? Boolean(p.isVeg) : p.vegType === "veg",
     basePrice,
     finalPrice,
@@ -368,13 +368,17 @@ const ProductDetails = ({ product: propProduct, onClose: propOnClose, onAddToCar
                   <VegBadge isVeg={product.isVeg} size="sm" />
                 </div>
               )}
-              <img
-                src={sizedImage(product.image, { w: 640 })}
-                alt={product.title}
-                decoding="async"
-                className="w-full aspect-[16/9] object-cover"
-                onError={handleImageError}
-              />
+              {product.image ? (
+                <img
+                  src={sizedImage(product.image, { w: 640 })}
+                  alt={product.title}
+                  decoding="async"
+                  className="w-full aspect-[16/9] object-cover"
+                  onError={hideBrokenImage}
+                />
+              ) : (
+                <div className="w-full aspect-[16/9] bg-gray-50" aria-hidden="true" />
+              )}
             </div>
 
             {/* Title, favorite + price */}

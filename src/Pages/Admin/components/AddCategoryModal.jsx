@@ -3,7 +3,7 @@ import { X, Upload, CheckCircle, Edit2, Trash2, AlertTriangle, Loader2, Monitor 
 import api from '../../../utils/api'
 import toast from 'react-hot-toast'
 import { useMenu } from '../../../Context/MenuContext'
-import { FALLBACK_IMAGE, resolveImageUrl } from '../../../utils/image'
+import { resolveImageUrl, realImage, hideBrokenImage } from '../../../utils/image'
 import { IMAGE_ACCEPT, isImageFile } from '../../../utils/imageFile'
 
 const AddCategoryModal = ({ onClose, onRefresh }) => {
@@ -361,12 +361,14 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                                         <p className="text-[11px] text-[#98A2B3] mt-1 font-medium">Any image up to 5MB</p>
                                     </div>
                                     <div className="w-[140px] h-[140px] flex-shrink-0 relative rounded-[16px] overflow-hidden group border border-[#EAECF0]">
-                                        <img
-                                            src={selectedImage || FALLBACK_IMAGE}
-                                            className="w-full h-full object-cover"
-                                            alt="preview"
-                                            onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                                        />
+                                        {selectedImage && (
+                                            <img
+                                                src={selectedImage}
+                                                className="w-full h-full object-cover"
+                                                alt="preview"
+                                                onError={hideBrokenImage}
+                                            />
+                                        )}
                                         {selectedImage && (
                                             <button
                                                 onClick={() => {
@@ -483,12 +485,14 @@ const AddCategoryModal = ({ onClose, onRefresh }) => {
                                     {/* Category Card */}
                                     <div className="flex-1 bg-white p-3.5 pl-4 rounded-[16px] border border-[#EAECF0] shadow-sm flex items-center gap-4 transition-all hover:border-orange-300">
                                         <div className="w-[48px] h-[48px] rounded-[10px] overflow-hidden bg-gray-100 flex-shrink-0">
-                                            <img
-                                                src={item.image || FALLBACK_IMAGE}
-                                                className="w-full h-full object-cover"
-                                                alt={item.name}
-                                                onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                                            />
+                                            {realImage(item.image) && (
+                                                <img
+                                                    src={realImage(item.image)}
+                                                    className="w-full h-full object-cover"
+                                                    alt={item.name}
+                                                    onError={hideBrokenImage}
+                                                />
+                                            )}
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="text-[15px] text-[#1D2939] font-bold truncate">

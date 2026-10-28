@@ -51,6 +51,7 @@ import { useEffect } from 'react'
 import { toast } from 'react-hot-toast'
 import api from '../../utils/api'
 import { backendOrigin } from '../../utils/apiOrigin';
+import { getItemImage, hideBrokenImage, realImage } from '../../utils/image';
 
 const Bookings = () => {
     const [activeTab, setActiveTab] = useState('Bookings')
@@ -1281,15 +1282,19 @@ const Bookings = () => {
                                     <div className="p-5 flex flex-col items-start gap-4 w-full">
                                         <div className="w-full flex items-start justify-between gap-4">
                                             {/* Thumbnail — `image` is the single hero URL that getHalls
-                                                derives from images[0]; falls back to a venue placeholder so
-                                                a hall with no uploaded photo still renders cleanly. */}
-                                            <img
-                                                src={hall.image || hall.images?.[0] || 'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&q=80&w=400'}
-                                                alt={hall.name}
-                                                loading="lazy"
-                                                onError={(e) => { e.currentTarget.src = 'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&q=80&w=400'; }}
-                                                className="w-24 h-24 rounded-lg object-cover flex-shrink-0 bg-gray-100"
-                                            />
+                                                derives from images[0]; a hall with no uploaded photo
+                                                renders a blank box (no placeholder picture). */}
+                                            {realImage(hall.image || hall.images?.[0]) ? (
+                                                <img
+                                                    src={realImage(hall.image || hall.images?.[0])}
+                                                    alt={hall.name}
+                                                    loading="lazy"
+                                                    onError={hideBrokenImage}
+                                                    className="w-24 h-24 rounded-lg object-cover flex-shrink-0 bg-gray-50"
+                                                />
+                                            ) : (
+                                                <div className="w-24 h-24 rounded-lg bg-gray-50 flex-shrink-0" aria-hidden="true" />
+                                            )}
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-3 mb-2 flex-wrap">
                                                     <h3 className="text-[16px] font-[700] text-[#1A181B]">{hall.name}</h3>
@@ -1494,12 +1499,17 @@ const Bookings = () => {
                             {decorationsData.map((deco, index) => (
                                 <div key={deco._id || deco.id || index} className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
                                     {/* Image */}
-                                    <div className="w-full h-[200px] overflow-hidden">
-                                        <img
-                                            src={deco.images?.[0] || deco.image || '/decoration-placeholder.png'}
-                                            alt={deco.name}
-                                            className="w-full h-full object-cover"
-                                        />
+                                    <div className="w-full h-[200px] overflow-hidden bg-gray-50">
+                                        {getItemImage(deco) ? (
+                                            <img
+                                                src={getItemImage(deco)}
+                                                alt={deco.name}
+                                                className="w-full h-full object-cover"
+                                                onError={hideBrokenImage}
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                                        )}
                                     </div>
 
                                     {/* Card Content */}

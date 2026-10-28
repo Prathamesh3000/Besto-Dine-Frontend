@@ -302,6 +302,45 @@ describe('OperationsPanel', () => {
     })
   })
 
+  describe('count-type advanced setting (tables.maxTablesPerWaiter)', () => {
+    const LABEL = 'Max tables per waiter (0 = no limit)'
+    const mountCount = async () => {
+      const catalog = { ...CATALOG, advancedPaths: { ...CATALOG.advancedPaths, 'tables.maxTablesPerWaiter': 'count' } }
+      api.get.mockImplementation((url) => (url === '/superadmin/operations/presets'
+        ? Promise.resolve({ data: { data: catalog } })
+        : Promise.resolve({ data: { data: { profile: STORED, isDefault: true, resolved: resolvedFor(ALL_ON, { tables: { useTables: true, assignWaiters: true, mergeTables: true, maxTablesPerWaiter: 0 } }), validation: { errors: [], warnings: [] } } } })))
+      await mount()
+      fireEvent.click(screen.getByText(/Advanced — fine-tune/))
+      return within(screen.getByTestId('ops-advanced')).getByLabelText(LABEL)
+    }
+
+    test('renders a numeric input (0-1000) defaulting to 0; boolean rows still render as checkboxes', async () => {
+      const input = await mountCount()
+      expect(input).toHaveAttribute('type', 'number')
+      expect(input).toHaveAttribute('min', '0')
+      expect(input).toHaveAttribute('max', '1000')
+      expect(input).toHaveValue(0)
+      expect(within(screen.getByTestId('ops-advanced')).getByLabelText('Tips')).toHaveAttribute('type', 'checkbox')
+    })
+
+    test('accepts a value and saves it as an integer; empty becomes 0', async () => {
+      const input = await mountCount()
+      fireEvent.change(input, { target: { value: '5' } })
+      await waitFor(() => expect(api.post.mock.calls.at(-1)?.[1].operations.advanced).toEqual({ 'tables.maxTablesPerWaiter': 5 }))
+      fireEvent.change(input, { target: { value: '' } })
+      await waitFor(() => expect(api.post.mock.calls.at(-1)?.[1].operations.advanced).toEqual({ 'tables.maxTablesPerWaiter': 0 }))
+    })
+
+    test('rejects negatives, fractions and values over 1000', async () => {
+      const input = await mountCount()
+      const before = api.post.mock.calls.length
+      for (const bad of ['-3', '2.5', '1001']) fireEvent.change(input, { target: { value: bad } })
+      await new Promise(r => setTimeout(r, 50))
+      expect(api.post.mock.calls.length).toBe(before)
+      expect(input).toHaveValue(0)
+    })
+  })
+
   describe('server warnings', () => {
     const NO_FLOOR = { ...STORED, preset: 'custom', modules: { ...ALL_ON, waiter: false, captain: false } }
     const getNoFloor = getWith({ profile: NO_FLOOR, isDefault: false, resolved: resolvedFor(NO_FLOOR.modules), validation: { errors: [], warnings: [TIPS_WARNING] } })

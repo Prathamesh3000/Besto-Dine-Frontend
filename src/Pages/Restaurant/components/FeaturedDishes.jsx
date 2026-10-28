@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import VegBadge from '../../../Components/Common/VegBadge';
-import { resolveImageUrl, sizedImage, handleImageError, FALLBACK_IMAGE } from '../../../utils/image';
+import { realImage, sizedImage, hideBrokenImage } from '../../../utils/image';
 import { formatPrice } from './landingUtils';
 
 /** Horizontally scrolling featured-dish cards; tapping one opens it in the menu. */
@@ -15,7 +15,7 @@ const FeaturedDishes = ({ items = [], onSelect }) => {
                 const base = Number(item.basePrice);
                 const final = Number(item.finalPrice ?? item.basePrice);
                 const hasOffer = Number.isFinite(base) && Number.isFinite(final) && final < base;
-                const img = resolveImageUrl(item.image);
+                const img = realImage(item.image);
                 return (
                     <button
                         key={item._id}
@@ -24,14 +24,18 @@ const FeaturedDishes = ({ items = [], onSelect }) => {
                         className="snap-start shrink-0 w-[172px] sm:w-[200px] text-left bg-white rounded-2xl border border-[#F2F4F7] shadow-[0_1px_2px_rgba(16,24,40,0.05)] overflow-hidden active:scale-[0.98] transition-transform"
                     >
                         <div className="relative aspect-[4/3] bg-[#F9FAFB]">
-                            <img
-                                src={img ? sizedImage(img, { w: 200 }) : FALLBACK_IMAGE}
-                                alt={item.name}
-                                loading="lazy"
-                                decoding="async"
-                                onError={handleImageError}
-                                className="w-full h-full object-cover"
-                            />
+                            {img ? (
+                                <img
+                                    src={sizedImage(img, { w: 200 })}
+                                    alt={item.name}
+                                    loading="lazy"
+                                    decoding="async"
+                                    onError={hideBrokenImage}
+                                    className="w-full h-full object-cover"
+                                />
+                            ) : (
+                                <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                            )}
                             {item.vegType && (
                                 <VegBadge vegType={item.vegType} size="sm" className="absolute top-2 left-2 shadow-sm" />
                             )}

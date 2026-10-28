@@ -30,6 +30,7 @@ import { getActiveBranch, activeRestaurantPath, setActiveTenantOperations } from
 import { geocodeAddress, reverseGeocode, getCurrentPosition } from "../../utils/geo";
 import { useDineInLock } from "../../utils/dineInSession";
 import { resolveUnitPrice, resolveLinePrice, formatPrice } from "../../utils/pricing";
+import { realImage, hideBrokenImage } from "../../utils/image";
 import { computeBill, computeSubtotal, toTaxConfig } from "../../utils/billing";
 import { lineUnitPrice, lineTotal as cartLineTotal } from "../../utils/cart";
 import { isGuestSessionExpired, clearGuestSession } from "../../utils/guestSession";
@@ -206,12 +207,17 @@ const HealthCartItem = ({
     >
       <div className="flex flex-row gap-3.5 sm:gap-4">
         {/* Image - always on left */}
-        <div className="relative w-[104px] h-[104px] sm:w-[120px] sm:h-[120px] shrink-0 rounded-[16px] overflow-hidden">
-          <img
-            src={item.image}
-            alt={item.title}
-            className="w-full h-full object-cover"
-          />
+        <div className="relative w-[104px] h-[104px] sm:w-[120px] sm:h-[120px] shrink-0 rounded-[16px] overflow-hidden bg-gray-50">
+          {realImage(item.image) ? (
+            <img
+              src={realImage(item.image)}
+              alt={item.title}
+              className="w-full h-full object-cover"
+              onError={hideBrokenImage}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+          )}
           {item.isVeg !== undefined && (
             <div className="absolute top-2 left-2 z-10">
               <div
@@ -403,11 +409,16 @@ const CartItem = ({ item, quantity, onIncrease, onDecrease, onCustomize }) => {
     <div className="bg-white rounded-2xl p-3 sm:p-4 shadow-sm border border-gray-100 flex gap-3 sm:gap-4 transition-colors">
       <div className="relative w-20 h-20 sm:w-24 sm:h-24 shrink-0">
         <div className="w-full h-full rounded-2xl overflow-hidden bg-gray-100">
-          <img
-            src={item.image}
-            alt={item.title}
-            className="w-full h-full object-cover"
-          />
+          {realImage(item.image) ? (
+            <img
+              src={realImage(item.image)}
+              alt={item.title}
+              className="w-full h-full object-cover"
+              onError={hideBrokenImage}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+          )}
         </div>
         {item.isVeg !== undefined && (
           <div className="absolute top-1 right-1 bg-white p-0.5 rounded shadow-sm">
@@ -777,7 +788,7 @@ function Cart() {
           id: item._id,
           title: item.name,
           price: resolveUnitPrice(item),
-          image: item.images?.[0] || 'https://placehold.co/200x200?text=Item',
+          image: item.images?.[0] || '',
         })));
       }
     }).catch((err) => {
@@ -1572,7 +1583,7 @@ function Cart() {
             price: resolveUnitPrice(item),
             unitPrice: resolveUnitPrice(item),
             quantity: item.quantity,
-            image: item.image || item.images?.[0] || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=300&q=80"
+            image: item.image || item.images?.[0] || ''
           })),
         },
       });
@@ -1979,7 +1990,7 @@ function Cart() {
             <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
               {complementaryItems.map((m) => {
                 const id = m._id || m.id;
-                const img = (m.images && m.images[0]) || m.image;
+                const img = realImage((m.images && m.images[0]) || m.image);
                 const price = resolveUnitPrice(m);
                 const basePrice = Number(m.basePrice ?? 0);
                 const isVeg = m.vegType === 'veg' || m.isVeg === true;
@@ -1994,10 +2005,10 @@ function Cart() {
                           src={img}
                           alt={m.name}
                           className="w-full h-full object-cover"
-                          onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/200x200?text=No+Image'; }}
+                          onError={hideBrokenImage}
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">No image</div>
+                        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
                       )}
                       <div className="absolute top-1.5 left-1.5">
                         <div className={`w-[16px] h-[16px] border-2 ${isVeg ? 'border-[#00B050]' : 'border-[#E31E24]'} rounded-[3px] bg-white flex items-center justify-center`}>
@@ -2741,12 +2752,17 @@ function Cart() {
                     key={item.id}
                     className="shrink-0 w-32 bg-white rounded-2xl p-1.5 shadow-sm cursor-pointer active:scale-95 transition-transform"
                   >
-                    <div className="w-full h-24 rounded-xl overflow-hidden mb-2">
-                      <img
-                        src={item.image}
-                        alt={item.title}
-                        className="w-full h-full object-cover"
-                      />
+                    <div className="w-full h-24 rounded-xl overflow-hidden mb-2 bg-gray-50">
+                      {realImage(item.image) ? (
+                        <img
+                          src={realImage(item.image)}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                          onError={hideBrokenImage}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                      )}
                     </div>
 
                     <p className="text-sm font-medium text-gray-800 line-clamp-1">

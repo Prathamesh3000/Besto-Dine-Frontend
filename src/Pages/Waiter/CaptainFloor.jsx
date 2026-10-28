@@ -27,7 +27,10 @@ const CaptainFloor = () => {
     const { user } = useAuth();
     // Token-number mode (tables.useTables:false): no tables to assign —
     // the floor section becomes the open token orders.
-    const tokenMode = useOperations()?.tables?.useTables === false;
+    const operations = useOperations();
+    const tokenMode = operations?.tables?.useTables === false;
+    // Same flag the admin TablesDashboard reads (default on).
+    const assignWaitersEnabled = operations?.tables?.assignWaiters !== false;
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
@@ -355,7 +358,7 @@ const CaptainFloor = () => {
                                                         {group.tables.length} table{group.tables.length === 1 ? '' : 's'}
                                                     </span>
                                                 </h3>
-                                                {unassigned > 0 && (
+                                                {assignWaitersEnabled && unassigned > 0 && (
                                                     <span className="text-[11px] font-bold text-[#B45309] bg-[#FFF7ED] px-2 py-0.5 rounded-full">
                                                         {unassigned} unassigned
                                                     </span>
@@ -385,6 +388,7 @@ const CaptainFloor = () => {
                                                                     </span>
                                                                 )}
                                                             </div>
+                                                            {assignWaitersEnabled && (
                                                             <button
                                                                 onClick={() => openAssign(t)}
                                                                 className={`mt-auto w-full flex items-center gap-2 min-h-10 px-2.5 rounded-xl text-left transition active:scale-[0.98] ${t.assignedWaiter
@@ -407,6 +411,7 @@ const CaptainFloor = () => {
                                                                     </>
                                                                 )}
                                                             </button>
+                                                            )}
                                                         </div>
                                                     );
                                                 })}

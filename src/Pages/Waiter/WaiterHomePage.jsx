@@ -8,7 +8,7 @@ import WaiterEmptyState from '../../Components/Waiter/WaiterEmptyState';
 import StaffProfileMenu from '../../Components/Waiter/StaffProfileMenu';
 import NotificationBell from '../../Components/Waiter/NotificationBell';
 import InstallAppBanner from '../../Components/Common/InstallAppBanner';
-import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
+import { getWaiterScope, inWaiterScope, countReadyOrders } from '../../utils/waiterScope';
 import api, { waiterAPI, settingsAPI } from '../../utils/api';
 import { resolveImageUrl } from '../../utils/image';
 import { useCart } from '../../Context/CartContext';
@@ -31,7 +31,10 @@ const WaiterHomePage = () => {
     // Token-number mode (tables.useTables:false): no areas or table grid —
     // the floor works a list of open token orders instead (TokenBoard).
     // Captains settle cash; waiters hand orders over.
-    const tokenMode = useOperations()?.tables?.useTables === false;
+    const operations = useOperations();
+    const tokenMode = operations?.tables?.useTables === false;
+    // Same flag the admin TablesDashboard reads (default on).
+    const mergeTablesEnabled = operations?.tables?.mergeTables !== false;
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [activeFloor, setActiveFloor] = useState(null); // Will store area ID
     const [areas, setAreas] = useState([]);
@@ -113,7 +116,8 @@ const WaiterHomePage = () => {
                 setStats(prev => ({
                     ...prev,
                     pending: dineIn.filter(o => o.status === 'new' || o.status === 'preparing').length,
-                    ready: dineIn.filter(o => o.status === 'ready').length,
+                    // Shared with the BottomNav Orders badge (includes ready takeaway).
+                    ready: countReadyOrders(liveOrdersRes.data.orders, scope),
                     takeaway: takeaway.length,
                 }));
             }
@@ -556,12 +560,14 @@ const WaiterHomePage = () => {
                             {areas.find(a => a._id === activeFloor)?.name || 'Loading...'}
                         </p>
                     </div>
+                    {mergeTablesEnabled && (
                     <button
                         onClick={handleMergeToggle}
                         className="min-h-11 px-4 sm:px-5 rounded-full border-2 font-semibold text-sm transition-all bg-white text-[#FE8301] border-[#FE8301] hover:bg-orange-50 active:scale-[0.98] shrink-0"
                     >
                         {isMergingMode ? (selectedTables.length >= 2 ? 'Confirm Merge' : 'Cancel') : 'Merge Tables'}
                     </button>
+                    )}
                 </div>
 
                 {/* Status Legend */}
@@ -711,7 +717,7 @@ const WaiterHomePage = () => {
                         </div>
 
                         <p className="text-[14px] font-bold text-gray-500 mb-8 leading-relaxed">
-                            Combine {selectedTables.sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1))).join(' & ')} Table
+                            Combine {selectedTables.map(id => tablesData.find(t => t._id === id || t.name === id)?.name || id).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true })).join(' & ')} Table
                         </p>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -780,7 +786,7 @@ const WaiterHomePage = () => {
                             </div>
 
                             <div className="flex flex-col gap-2.5">
-                                {isMerged && (
+                                {isMerged && mergeTablesEnabled && (
                                     <button
                                         type="button"
                                         onClick={() => handleUnmerge(t)}

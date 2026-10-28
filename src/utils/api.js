@@ -412,6 +412,7 @@ api.interceptors.request.use(
 );
 
 // ─── Response interceptor — centralised error handling ────────────────────────
+let _lastTableSessionEnded = 0;
 api.interceptors.response.use(
     (response) => {
         // A successful response means the server is reachable.
@@ -537,6 +538,21 @@ api.interceptors.response.use(
                 requestTableScan('no_table');
                 return Promise.reject(error);
             }
+        }
+
+        // Staff freed this diner's table: the scan token is revoked. Not an
+        // expired login — skip refresh/login redirect, tell CustomerLayout
+        // (debounced), and reject silently.
+        if (status === 401 && error.response?.data?.code === 'TABLE_SESSION_ENDED') {
+            const now = Date.now();
+            if (now - _lastTableSessionEnded > 2000) {
+                _lastTableSessionEnded = now;
+                try {
+                    window.dispatchEvent(new CustomEvent('bd:table-session-ended', { detail: { reason: 'table-freed' } }));
+                } catch { /* ignore */ }
+            }
+            error.config = { ...(error.config || {}), _silent: true };
+            return Promise.reject(error);
         }
 
         // 401 — token expired or invalid.
@@ -782,6 +798,18 @@ export const campaignAPI = {
     toggle:    (id)         => api.patch(`/campaigns/${id}/toggle`),
     update:    (id, data)   => api.put(`/campaigns/${id}`, data),
     remove:    (id)         => api.delete(`/campaigns/${id}`),
+};
+
+// Item-wise staff incentives (admin / manager with permission `incentives`).
+// _silent: the page renders its own locked / error states, so the global
+// toast and upgrade modal are suppressed.
+export const incentiveAPI = {
+    getCampaigns:   ()          => api.get('/incentives/campaigns', { _silent: true, _skipAdminBranchParam: true }),
+    createCampaign: (data)      => api.post('/incentives/campaigns', data, { _silent: true }),
+    updateCampaign: (id, data)  => api.put(`/incentives/campaigns/${id}`, data, { _silent: true }),
+    deleteCampaign: (id)        => api.delete(`/incentives/campaigns/${id}`, { _silent: true }),
+    getReport:      (params)    => api.get('/incentives/report', { params, _silent: true, _skipAdminBranchParam: true }),
+    exportReportCsv:(params)    => api.get('/incentives/report.csv', { params, responseType: 'blob', _silent: true, _skipAdminBranchParam: true }),
 };
 
 export const promotionsAPI = {

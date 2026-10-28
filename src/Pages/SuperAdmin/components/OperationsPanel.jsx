@@ -46,6 +46,7 @@ const ADVANCED_LABELS = {
     'tables.useTables': 'Table numbers in use (off = token numbers)',
     'tables.assignWaiters': 'Assign waiters to tables',
     'tables.mergeTables': 'Merge tables',
+    'tables.maxTablesPerWaiter': 'Max tables per waiter (0 = no limit)',
 };
 
 /** Save failed because someone saved a newer version first (409). */
@@ -645,6 +646,24 @@ export default function OperationsPanel({ restaurant, canEdit }) {
                                                     value={value ?? ''}
                                                     disabled={!canEdit}
                                                     onChange={e => setAdvanced(path, Number(e.target.value))}
+                                                    aria-label={ADVANCED_LABELS[path] || path}
+                                                />
+                                            ) : type === 'count' ? (
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={1000}
+                                                    step={1}
+                                                    className="w-20 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs"
+                                                    value={value ?? 0}
+                                                    disabled={!canEdit}
+                                                    onChange={e => {
+                                                        const raw = e.target.value;
+                                                        const n = raw === '' ? 0 : Number(raw);
+                                                        // integers 0-1000 only; negatives / fractions are ignored
+                                                        if (!Number.isInteger(n) || n < 0 || n > 1000) return;
+                                                        setAdvanced(path, n);
+                                                    }}
                                                     aria-label={ADVANCED_LABELS[path] || path}
                                                 />
                                             ) : (

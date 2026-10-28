@@ -8,7 +8,7 @@ import { useFavorites } from "../../utils/favorites";
 import ProductDetails from "../../Components/Loggedin/ProductDetails";
 import BottomNav from "../../Components/Loggedin/BottomNav";
 import VegBadge from "../../Components/Common/VegBadge";
-import { handleImageError, resolveImageUrl } from "../../utils/image";
+import { hideBrokenImage, realImage } from "../../utils/image";
 import { resolveUnitPrice } from '../../utils/pricing';
 
 function Favorites() {
@@ -81,7 +81,7 @@ function Favorites() {
               const title = item.name || item.title || "Item";
               const desc = item.description || item.desc || "";
               const image =
-                resolveImageUrl(
+                realImage(
                   (Array.isArray(item.images) && item.images[0]) || item.image
                 ) || "";
               const price = Number(
@@ -109,12 +109,10 @@ function Favorites() {
                         src={image}
                         alt={title}
                         className="w-full h-full object-cover"
-                        onError={handleImageError}
+                        onError={hideBrokenImage}
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">
-                        No image
-                      </div>
+                      <div className="w-full h-full bg-gray-50" aria-hidden="true" />
                     )}
                     {typeof isVeg === "boolean" && (
                       <div className="absolute top-1.5 left-1.5">

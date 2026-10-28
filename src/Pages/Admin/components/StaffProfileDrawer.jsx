@@ -83,6 +83,7 @@ const StaffProfileDrawer = ({ staff, isActive, onClose, onEdit, onToggleStatus, 
         'CRM': 'crm',
         'Access Kitchen': 'accessKitchen',
         'Manage Staff': 'manageStaff',
+        'Incentives': 'incentives',
     }
 
     // Show the ACTUAL stored permission for each key. No fallback to

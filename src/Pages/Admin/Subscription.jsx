@@ -39,6 +39,7 @@ const FEATURE_LABELS = {
     eInvoice:            { label: 'GST e-Invoice',           icon: null },
     whiteLabelBranding:  { label: 'Own Branding',            icon: null },
     revenueAnalytics:    { label: 'Revenue Analytics',       icon: null },
+    incentives:          { label: 'Staff Incentives',        icon: null },
 };
 
 const LIMIT_LABELS = {
@@ -142,6 +143,7 @@ const SubscriptionInner = () => {
     // the target plan they want to switch to.
     const [downgradePlan, setDowngradePlan] = useState(null);
     const [cancellingRequest, setCancellingRequest] = useState(false);
+    const [cancellingUpgrade, setCancellingUpgrade] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [activeTab, setActiveTab] = useState('plans'); // 'plans' | 'invoices' | 'export'
@@ -194,6 +196,11 @@ const SubscriptionInner = () => {
     // this is set, the tenant keeps their current plan features but
     // sees a clear banner showing what the switch will be and when.
     const scheduledDowngrade = current?.scheduledDowngrade ?? null;
+    // An upgrade that was started but never paid (declined card, closed
+    // checkout). The live plan is untouched; the backend refuses a second
+    // upgrade until this is paid or cancelled, so it MUST be visible here
+    // with both ways out — before this banner tenants were stuck.
+    const pendingUpgrade = current?.pendingUpgrade?.planSlug ? current.pendingUpgrade : null;
     // refreshing = the second-and-onwards revalidations (post-upgrade etc).
     // The first paint stays under `loading` so the skeleton renders.
     const refreshing = !loading && isFetching;
@@ -285,6 +292,22 @@ const SubscriptionInner = () => {
     // Tenant withdraws their own pending request — no super admin
     // involvement, no audit complication. Re-enables the upgrade
     // buttons immediately.
+    /* ── Cancel a pending (unpaid) upgrade ───────────────────────── */
+    const handleCancelPendingUpgrade = useCallback(async () => {
+        if (cancellingUpgrade || !pendingUpgrade) return;
+        if (!window.confirm(`Cancel the pending upgrade to ${pendingUpgrade.planName}? Your current plan is not affected.`)) return;
+        setCancellingUpgrade(true);
+        try {
+            const res = await api.delete('/tenant/billing/upgrade/pending', { _silent: true });
+            toast.success(res.data?.message || 'Pending upgrade cancelled.');
+            await load();
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to cancel the pending upgrade.');
+        } finally {
+            setCancellingUpgrade(false);
+        }
+    }, [cancellingUpgrade, pendingUpgrade, load]);
+
     const handleCancelDowngradeRequest = useCallback(async () => {
         if (!downgradeRequest?._id || cancellingRequest) return;
         if (!window.confirm('Cancel this downgrade request? You can submit a new one anytime.')) return;
@@ -414,6 +437,7 @@ const SubscriptionInner = () => {
                 setDowngradePlan(plan);
             } else if (data?.code === 'UPGRADE_ALREADY_PENDING') {
                 toast.error(data.message || 'You have a pending upgrade. Complete or cancel it first.');
+                load(); // make the pending-upgrade banner (Resume / Cancel) visible
             } else if (data?.code === 'DOWNGRADE_REQUEST_PENDING') {
                 toast.error(data.message || 'You have a pending downgrade request. Cancel it first.');
             } else if (data?.code === 'DOWNGRADE_SCHEDULED') {
@@ -624,6 +648,38 @@ const SubscriptionInner = () => {
                         </div>
                     )}
 
+                    {/* Pending (unpaid) upgrade — resume or cancel */}
+                    {pendingUpgrade && (
+                        <div className="mt-4 p-3.5 bg-orange-50 border border-orange-200 rounded-xl flex items-start gap-3" data-testid="pending-upgrade-banner">
+                            <Info size={18} className="text-[#FE8301] shrink-0 mt-0.5" />
+                            <div className="flex-1 text-xs text-orange-800 leading-relaxed">
+                                <p className="font-semibold text-orange-900 mb-0.5">Upgrade to {pendingUpgrade.planName} is waiting for payment</p>
+                                Your current plan stays active until the payment goes through. Resume the Razorpay payment to finish, or cancel this upgrade if you want to start a different one.
+                                <div className="flex flex-wrap gap-2 mt-2.5">
+                                    {pendingUpgrade.shortUrl && (
+                                        <a
+                                            href={pendingUpgrade.shortUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#FE8301] hover:bg-[#E67700] text-white text-xs font-semibold rounded-lg transition"
+                                        >
+                                            <ExternalLink size={13} />
+                                            Resume payment
+                                        </a>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelPendingUpgrade}
+                                        disabled={cancellingUpgrade}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-orange-300 hover:bg-orange-100 text-orange-800 text-xs font-semibold rounded-lg transition disabled:opacity-50"
+                                    >
+                                        <X size={13} />
+                                        {cancellingUpgrade ? 'Cancelling…' : 'Cancel upgrade'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {/* Trial countdown */}
                     {trial && !trial.expired && (
                         <div className="mt-4 p-3.5 bg-amber-50 border border-amber-200 rounded-xl">

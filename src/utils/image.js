@@ -62,14 +62,22 @@ export function transparentLogo(url, { tolerance = 15 } = {}) {
   return trimmed.replace('/upload/', `/upload/e_make_transparent:${tolerance}/f_auto,q_auto/`);
 }
 
-export const FALLBACK_IMAGE = `${BASE_URL}/uploads/Thumbnil.png`;
+// "Blank, no fallback" rule (2026-10-28): when the admin never uploaded a
+// picture, every screen renders an EMPTY image box. There is no
+// placeholder picture, no stock photo and no external "No Image" service.
+// Older rows may still carry the legacy grey placeholder path below; it
+// counts as "no image" (see realImage).
+const PLACEHOLDER_PATH = '/uploads/Thumbnil.png';
 
-// Stock imagery for the two VIRTUAL category cards — "All" and "Combo" —
-// that aren't real DB categories and so have no admin-uploaded image.
-// Without these they fell back to the grey Thumbnil placeholder. Stable
-// Unsplash URLs; sizedImage() adds the resize/quality params at render.
-export const ALL_CATEGORY_IMAGE = 'https://images.unsplash.com/photo-1504674900247-0877df9cc836';
-export const COMBO_CATEGORY_IMAGE = 'https://images.unsplash.com/photo-1567188040759-fb8a883dc6d8';
+/**
+ * resolveImageUrl, but the legacy Thumbnil placeholder also counts as
+ * "no image" → null. Callers render a blank box when this is null.
+ */
+export function realImage(url) {
+    if (!url || typeof url !== 'string') return null;
+    if (url.trim().endsWith(PLACEHOLDER_PATH)) return null;
+    return resolveImageUrl(url);
+}
 
 /**
  * Resolve any backend-stored image value to a fully-qualified URL the
@@ -118,19 +126,22 @@ export function resolveImageUrl(url) {
 
 /**
  * Get the best image source from a menu item object.
- * Handles: images array, single image string, and fallback.
+ * Handles: images array, then single image string. Returns null when the
+ * admin never uploaded an image so the caller renders a blank container
+ * (no placeholder picture).
  */
 export function getItemImage(item) {
-    if (!item) return FALLBACK_IMAGE;
+    if (!item) return null;
     const raw = (item.images && item.images.length > 0) ? item.images[0] : item.image;
-    return resolveImageUrl(raw) || FALLBACK_IMAGE;
+    return realImage(raw);
 }
 
 /**
- * onError handler for <img> tags — prevents infinite loops and sets fallback.
- * Usage: <img onError={handleImageError} ... />
+ * onError handler for <img> tags: hides the broken image so its container
+ * stays blank. There is no placeholder picture anywhere in the app.
+ * Usage: <img onError={hideBrokenImage} ... />
  */
-export function handleImageError(e) {
-    e.target.onerror = null; // prevent infinite loop
-    e.target.src = FALLBACK_IMAGE;
+export function hideBrokenImage(e) {
+    e.target.onerror = null;
+    e.target.style.display = 'none';
 }

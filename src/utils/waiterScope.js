@@ -84,3 +84,10 @@ export function isAssignedToMe(scope, table) {
     if (!aw || !scope?.userId) return false;
     return String(aw?._id || aw) === scope.userId;
 }
+
+// Single source of truth for the "Ready" counter. Dine-in AND takeaway ready
+// orders, narrowed by inWaiterScope — used by the Home "Ready" card and the
+// BottomNav Orders badge so the two numbers can never disagree.
+export function countReadyOrders(orders, scope) {
+    return (orders || []).filter(o => o?.status === 'ready' && inWaiterScope(scope, o)).length;
+}

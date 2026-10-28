@@ -38,7 +38,7 @@ import api, { waiterAPI } from "../../utils/api";
 import toast from "react-hot-toast";
 import { useMenu } from "../../Context/MenuContext";
 import { useDineInLock as useDineInLockState, markTablelessDineIn } from "../../utils/dineInSession";
-import { sizedImage, ALL_CATEGORY_IMAGE, COMBO_CATEGORY_IMAGE } from "../../utils/image";
+import { sizedImage, realImage, hideBrokenImage } from "../../utils/image";
 import { resolveUnitPrice, formatPrice } from "../../utils/pricing";
 import BestoDineMark from "../../assets/BestoDineMark";
 import { useFavorites } from "../../utils/favorites";
@@ -199,14 +199,19 @@ const FeaturedCarousel = ({ featuredItems = [], onAddToCart }) => {
                   : 'scale-[0.84] opacity-95 shadow-[0_8px_20px_-10px_rgba(0,0,0,0.15)]'
               }`}
             >
-              <img
-                src={sizedImage(item.image, { w: 360 })}
-                alt={item.title}
-                className="w-full h-full object-cover"
-                draggable={false}
-                loading={originalIdx < 2 ? 'eager' : 'lazy'}
-                decoding="async"
-              />
+              {realImage(item.image) ? (
+                <img
+                  src={sizedImage(realImage(item.image), { w: 360 })}
+                  alt={item.title}
+                  className="w-full h-full object-cover"
+                  draggable={false}
+                  loading={originalIdx < 2 ? 'eager' : 'lazy'}
+                  decoding="async"
+                  onError={hideBrokenImage}
+                />
+              ) : (
+                <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+              )}
               {/* Strong bottom gradient → legible title/price over any
                   food photography; top stays clean. */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
@@ -250,7 +255,7 @@ const MenuItem = ({
   title,
   desc,
   price,
-  image = "https://placehold.co/200x200?text=No+Image",
+  image = "",
   time = "--",
   serves = "--",
   isVeg,
@@ -268,7 +273,7 @@ const MenuItem = ({
   // Use fallbacks for required display fields
   const displayTitle = title || "Untitled Item";
   const displayPrice = price || 0;
-  const displayImage = image || "https://placehold.co/200x200?text=No+Image";
+  const displayImage = realImage(image);
 
   const { has: hasFavorite, toggle: toggleFavoriteId } = useFavorites();
   const isFavorited = hasFavorite(id);
@@ -281,16 +286,18 @@ const MenuItem = ({
       tabIndex="0"
     >
       <div className="relative flex-shrink-0 w-full h-[180px] min-[375px]:w-[110px] min-[375px]:h-auto md:w-[130px] md:h-[130px]">
-        <img
-          src={sizedImage(displayImage, { w: 180 })}
-          alt={displayTitle}
-          loading="lazy"
-          decoding="async"
-          className="h-full w-full object-cover rounded-[10px]"
-          onError={(e) => {
-            e.target.src = "https://placehold.co/200x200?text=No+Image";
-          }}
-        />
+        {displayImage ? (
+          <img
+            src={sizedImage(displayImage, { w: 180 })}
+            alt={displayTitle}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover rounded-[10px]"
+            onError={hideBrokenImage}
+          />
+        ) : (
+          <div className="h-full w-full rounded-[10px] bg-gray-50" aria-hidden="true" />
+        )}
         {isVeg !== undefined && (
           <img
             src={isVeg ? VegIcon : NonVegIcon}
@@ -489,7 +496,7 @@ const HealthMenuItem = ({
 
   const displayTitle = title || "Untitled Item";
   const displayPrice = price || 0;
-  const displayImage = image || "https://placehold.co/200x200?text=No+Image";
+  const displayImage = realImage(image);
 
   const { has: hasFavorite, toggle: toggleFavoriteId } = useFavorites();
   const isFavorited = hasFavorite(id);
@@ -510,14 +517,18 @@ const HealthMenuItem = ({
           bottle with no nutrition strip) no longer leaves a white gap
           between the meta and the price. Mobile keeps a fixed 100px. */}
       <div className="relative w-full min-[375px]:w-[100px] sm:w-28 md:w-32 flex-shrink-0 h-[100px] min-[375px]:h-auto min-[375px]:self-stretch overflow-hidden rounded-xl">
-        <img
-          src={sizedImage(displayImage, { w: 140 })}
-          alt={displayTitle}
-          loading="lazy"
-          decoding="async"
-          className="w-full h-full object-cover rounded-xl min-[375px]:absolute min-[375px]:inset-0"
-          onError={(e) => { e.target.src = "https://placehold.co/200x200?text=No+Image"; }}
-        />
+        {displayImage ? (
+          <img
+            src={sizedImage(displayImage, { w: 140 })}
+            alt={displayTitle}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover rounded-xl min-[375px]:absolute min-[375px]:inset-0"
+            onError={hideBrokenImage}
+          />
+        ) : (
+          <div className="w-full h-full rounded-xl bg-gray-50 min-[375px]:absolute min-[375px]:inset-0" aria-hidden="true" />
+        )}
         {isVeg !== undefined && (
           <div className="absolute top-2 left-2 z-10">
             <div className={`w-[18px] h-[18px] border-2 ${isVeg ? "border-[#00B050]" : "border-[#E31E24]"} rounded-[3px] bg-white flex items-center justify-center`}>
@@ -678,7 +689,11 @@ const CategoriesCarousel = ({ categories = [], activeId, onCategoryClick }) => {
             className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer transition-all active:scale-95 w-20 sm:w-24 md:w-28 lg:w-32 xl:w-36"
           >
             <div className={`w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 lg:w-32 lg:h-32 xl:w-36 xl:h-36 rounded-full overflow-hidden border-2 transition-all ${activeId === item._id ? 'border-orange-500 p-0.5' : 'border-gray-100 shadow-sm'}`}>
-              <img src={sizedImage(item.image || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c", { w: 120 })} alt={item.name} loading="lazy" decoding="async" className="w-full h-full object-cover rounded-full" />
+              {realImage(item.image) ? (
+                <img src={sizedImage(realImage(item.image), { w: 120 })} alt={item.name} loading="lazy" decoding="async" onError={hideBrokenImage} className="w-full h-full object-cover rounded-full" />
+              ) : (
+                <div className="w-full h-full rounded-full bg-gray-50" aria-hidden="true" />
+              )}
             </div>
             {/*
               Let long names wrap to up to 2 lines within the 84px column
@@ -821,7 +836,7 @@ function Home() {
         title: item.name,
         desc: item.description || item.shortDescription || '',
         price: resolveUnitPrice(item),
-        image: item.images?.[0] || 'https://placehold.co/400x400?text=Menu+Item',
+        image: item.images?.[0] || '',
         menuItem: item,
       }));
   }, [contextMenuItems]);
@@ -1230,16 +1245,16 @@ function Home() {
   const getDefaultMenuItems = () => {
     if (healthMode) {
       return [
-        { id: 101, title: "Greek Quinoa Bowl", desc: "Protein-rich quinoa with feta, olives, and fresh vegetables", price: 299, image: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=300&q=80", calories: 320, protein: 12, fats: 8, fibre: 6, carbs: 45, iron: 2.1, isVeg: true },
-        { id: 102, title: "Grilled Salmon Salad", desc: "Omega-rich salmon with mixed greens and avocado", price: 449, image: "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=300&q=80", calories: 380, protein: 28, fats: 18, fibre: 4, carbs: 10, iron: 1.8, isVeg: false },
-        { id: 103, title: "Avocado Toast", desc: "Whole grain toast with fresh avocado and seeds", price: 249, image: "https://images.unsplash.com/photo-1541519227354-08fa5d50c44e?auto=format&fit=crop&w=300&q=80", calories: 280, protein: 8, fats: 14, fibre: 8, carbs: 32, iron: 1.2, isVeg: true },
-        { id: 104, title: "Veggie Burger", desc: "Plant-based patty with fresh toppings", price: 199, image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=300&q=80", calories: 340, protein: 18, fats: 12, fibre: 7, carbs: 42, iron: 3.5, isVeg: true },
+        { id: 101, title: "Greek Quinoa Bowl", desc: "Protein-rich quinoa with feta, olives, and fresh vegetables", price: 299, image: "", calories: 320, protein: 12, fats: 8, fibre: 6, carbs: 45, iron: 2.1, isVeg: true },
+        { id: 102, title: "Grilled Salmon Salad", desc: "Omega-rich salmon with mixed greens and avocado", price: 449, image: "", calories: 380, protein: 28, fats: 18, fibre: 4, carbs: 10, iron: 1.8, isVeg: false },
+        { id: 103, title: "Avocado Toast", desc: "Whole grain toast with fresh avocado and seeds", price: 249, image: "", calories: 280, protein: 8, fats: 14, fibre: 8, carbs: 32, iron: 1.2, isVeg: true },
+        { id: 104, title: "Veggie Burger", desc: "Plant-based patty with fresh toppings", price: 199, image: "", calories: 340, protein: 18, fats: 12, fibre: 7, carbs: 42, iron: 3.5, isVeg: true },
       ];
     }
     return [
-      { id: 1, title: "Spaghetti Bolognese", desc: "Classic Italian pasta with rich tomato meat sauce.", price: 279, image: "https://images.unsplash.com/photo-1622973536968-3ead9e780960?auto=format&fit=crop&w=300&q=80", time: "10-15 min", serves: "Serves 2", isVeg: false },
-      { id: 2, title: "Margherita Pizza", desc: "Traditional pizza with fresh tomato, mozzarella, and basil.", price: 299, image: "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?auto=format&fit=crop&w=300&q=80", time: "15-20 min", serves: "Serves 2", isVeg: true },
-      { id: 3, title: "Classic Cheeseburger", desc: "Juicy beef patty with cheddar cheese, lettuce, and tomato.", price: 249, image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=300&q=80", time: "10-15 min", serves: "Serves 1", isVeg: false },
+      { id: 1, title: "Spaghetti Bolognese", desc: "Classic Italian pasta with rich tomato meat sauce.", price: 279, image: "", time: "10-15 min", serves: "Serves 2", isVeg: false },
+      { id: 2, title: "Margherita Pizza", desc: "Traditional pizza with fresh tomato, mozzarella, and basil.", price: 299, image: "", time: "15-20 min", serves: "Serves 2", isVeg: true },
+      { id: 3, title: "Classic Cheeseburger", desc: "Juicy beef patty with cheddar cheese, lettuce, and tomato.", price: 249, image: "", time: "10-15 min", serves: "Serves 1", isVeg: false },
     ];
   };
 
@@ -1390,7 +1405,7 @@ function Home() {
                   list.push({
                     _id: 'all',
                     name: 'All',
-                    image: ALL_CATEGORY_IMAGE,
+                    image: null,
                   });
                 }
                 list.push(...reorderedCategories);
@@ -1399,12 +1414,13 @@ function Home() {
                     list.push({
                         _id: 'combo',
                         name: 'Combo',
-                        image: COMBO_CATEGORY_IMAGE
+                        image: null
                     });
                 }
                 return list;
             })().map((category) => {
               const isActive = activeCategoryId === category._id || (category._id === 'all' && !routeCategoryId);
+              const categoryImage = realImage(category.image);
               const activeRing = isStaff ? 'border-[#7C3AED]' : 'border-[#FE8301]';
               const activeText = isStaff ? 'text-[#1A181B]' : 'text-[#FE8301]';
               return (
@@ -1426,13 +1442,18 @@ function Home() {
                 >
                   <div className={`w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 lg:w-32 lg:h-32 xl:w-36 xl:h-36 rounded-full p-1 border-2 transition-all ${isActive ? activeRing : 'border-transparent'}`}>
                     <div className="w-full h-full rounded-full overflow-hidden">
-                      <img
-                        src={sizedImage(category.image || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c", { w: 120 })}
-                        alt={category.name}
-                        loading="lazy"
-                        decoding="async"
-                        className="w-full h-full object-cover"
-                      />
+                      {categoryImage ? (
+                        <img
+                          src={sizedImage(categoryImage, { w: 120 })}
+                          alt={category.name}
+                          loading="lazy"
+                          decoding="async"
+                          onError={hideBrokenImage}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                      )}
                     </div>
                   </div>
                   <span

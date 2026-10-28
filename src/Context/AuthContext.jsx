@@ -262,6 +262,12 @@ export function AuthProvider({ children }) {
                 // page renders those as a dedicated status panel.
                 code: error.response?.data?.code,
                 reason: error.response?.data?.reason,
+                // TENANT_DISAMBIGUATION_REQUIRED (409): [{ name, slug }] of the
+                // restaurants this email exists at — the staff login page
+                // renders a picker and retries with that slug.
+                restaurants: Array.isArray(error.response?.data?.restaurants)
+                    ? error.response.data.restaurants
+                    : undefined,
                 message: error.response?.data?.message || 'Login failed'
             };
         }

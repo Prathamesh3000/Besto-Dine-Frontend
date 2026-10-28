@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { X, Edit2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Star, Clock, Users } from 'lucide-react'
 import ToggleSwitch from '../../../Components/Common/ToggleSwitch'
 import VegBadge from '../../../Components/Common/VegBadge'
-import { FALLBACK_IMAGE } from '../../../utils/image'
+import { hideBrokenImage, realImage } from '../../../utils/image'
 
 const ComboDetailModal = ({ item, onClose, onEdit, onToggle }) => {
     const [currentImageIndex, setCurrentImageIndex] = useState(0)
@@ -31,9 +31,10 @@ const ComboDetailModal = ({ item, onClose, onEdit, onToggle }) => {
     }, [item])
 
     // Normalised data from the real combo item
-    const comboImages = (item?.images && item.images.length > 0)
-        ? item.images
-        : [item?.image || FALLBACK_IMAGE]
+    // Empty when the admin never uploaded an image → the carousel box stays blank.
+    const comboImages = ((item?.images && item.images.length > 0) ? item.images : [item?.image])
+        .map(realImage)
+        .filter(Boolean)
 
     const comboDescription = item?.description || 'No description available for this combo.'
     const comboPrice = item?.price || 0
@@ -101,13 +102,17 @@ const ComboDetailModal = ({ item, onClose, onEdit, onToggle }) => {
                     )}
 
                     {/* Image Gallery */}
-                    <div className="relative rounded-xl overflow-hidden mb-4 bg-black">
-                        <img
-                            src={comboImages[currentImageIndex]}
-                            alt={`${item?.name || 'Combo'} - image ${currentImageIndex + 1} of ${comboImages.length}`}
-                            className="w-full h-[280px] object-contain bg-[#FFF8F6]"
-                            onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                        />
+                    <div className={`relative rounded-xl overflow-hidden mb-4 ${comboImages.length > 0 ? 'bg-black' : 'bg-gray-50'}`}>
+                        {comboImages.length > 0 ? (
+                            <img
+                                src={comboImages[currentImageIndex]}
+                                alt={`${item?.name || 'Combo'} - image ${currentImageIndex + 1} of ${comboImages.length}`}
+                                className="w-full h-[280px] object-contain bg-[#FFF8F6]"
+                                onError={hideBrokenImage}
+                            />
+                        ) : (
+                            <div className="w-full h-[280px] bg-gray-50" data-testid="combo-no-image" aria-hidden="true" />
+                        )}
                         {/* Navigation Arrows */}
                         {comboImages.length > 1 && (
                             <>

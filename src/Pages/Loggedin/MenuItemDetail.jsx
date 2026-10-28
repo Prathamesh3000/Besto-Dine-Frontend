@@ -21,7 +21,7 @@ import CartButton from "../../Components/Loggedin/CartButton";
 import useSelfOrderBlocked from "../../hooks/useSelfOrderBlocked";
 import QrMenuOnlyNote from "../../Components/Loggedin/QrMenuOnlyNote";
 import VegBadge from "../../Components/Common/VegBadge";
-import { handleImageError, FALLBACK_IMAGE } from "../../utils/image";
+import { realImage, hideBrokenImage } from "../../utils/image";
 import { resolveUnitPrice } from '../../utils/pricing';
 import useCustomerSession from '../../hooks/useCustomerSession';
 
@@ -45,9 +45,10 @@ const HealthMenuItem = ({
   quantity = 0,
   id,
 }) => {
-  if (!title || !price || !image) {
+  if (!title || !price) {
     return null;
   }
+  const src = realImage(image);
 
   return (
     <div
@@ -56,12 +57,16 @@ const HealthMenuItem = ({
     >
       {/* ── Thumbnail ── */}
       <div className="relative w-full min-[375px]:w-[100px] h-[180px] min-[375px]:h-[100px] sm:w-28 sm:h-28 md:w-32 md:h-32 flex-shrink-0">
-        <img
-          src={image}
-          alt={title}
-          className="w-full h-full object-cover rounded-xl"
-          onError={handleImageError}
-        />
+        {src ? (
+          <img
+            src={src}
+            alt={title}
+            className="w-full h-full object-cover rounded-xl"
+            onError={hideBrokenImage}
+          />
+        ) : (
+          <div className="w-full h-full rounded-xl bg-gray-50" aria-hidden="true" />
+        )}
         {isVeg !== undefined && (
           <div className="absolute top-2 left-2">
             <VegBadge isVeg={isVeg} size="sm" />
@@ -254,9 +259,10 @@ const MenuItem = ({
   id,
   discount,
 }) => {
-  if (!title || !price || !image) {
+  if (!title || !price) {
     return null;
   }
+  const src = realImage(image);
 
   return (
     <div className="px-4 mb-2 sm:mb-3 md:mb-4">
@@ -274,12 +280,16 @@ const MenuItem = ({
       >
         {/* Image */}
         <div className="relative flex-shrink-0 w-full h-[180px] min-[375px]:w-[110px] min-[375px]:h-auto md:w-[130px] md:h-[130px]">
-          <img
-            src={image}
-            alt={title}
-            className="h-full w-full object-cover rounded-[10px] overflow-hidden"
-            onError={handleImageError}
-          />
+          {src ? (
+            <img
+              src={src}
+              alt={title}
+              className="h-full w-full object-cover rounded-[10px] overflow-hidden"
+              onError={hideBrokenImage}
+            />
+          ) : (
+            <div className="h-full w-full rounded-[10px] bg-gray-50" aria-hidden="true" />
+          )}
 
           {isVeg !== undefined && (
             <div className="absolute top-2 left-2">
@@ -451,12 +461,12 @@ const MenuItemDetail = () => {
 
   // Build category list from API data with "All" prepended
   const categoryItems = React.useMemo(() => {
-    const all = { _id: "all", id: "all", name: "All", image: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=200&h=200" };
+    const all = { _id: "all", id: "all", name: "All", image: null };
     const cats = contextCategories.map(c => ({
       ...c,
       id: c._id,
       name: c.name,
-      image: c.image || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=150",
+      image: realImage(c.image),
     }));
     return [all, ...cats];
   }, [contextCategories]);
@@ -589,7 +599,7 @@ const MenuItemDetail = () => {
         title: item.name,
         desc: item.description,
         price: resolveUnitPrice(item),
-        image: item.images?.[0] || FALLBACK_IMAGE,
+        image: item.images?.[0] || '',
         unit: item.unit || 'pieces',
         isVeg: item.vegType === 'veg',
         categoryId: item.category?._id || item.category,
@@ -751,14 +761,22 @@ const MenuItemDetail = () => {
                     }`}
                 >
                   <div className="relative w-[80px] h-[80px] sm:w-[100px] sm:h-[100px] rounded-full overflow-hidden">
-                    <img
-                      src={category.image}
-                      alt={category.name}
-                      className={`w-full h-full object-cover ${selectedCategoryIndex !== index
-                        ? "blur-[0.5px] opacity-70"
-                        : ""
-                        }`}
-                    />
+                    {category.image ? (
+                      <img
+                        src={category.image}
+                        alt={category.name}
+                        onError={hideBrokenImage}
+                        className={`w-full h-full object-cover ${selectedCategoryIndex !== index
+                          ? "blur-[0.5px] opacity-70"
+                          : ""
+                          }`}
+                      />
+                    ) : (
+                      <div
+                        className={`w-full h-full rounded-full bg-gray-50 ${selectedCategoryIndex !== index ? "opacity-70" : ""}`}
+                        aria-hidden="true"
+                      />
+                    )}
                   </div>
                   <span
                     className={`text-[14px] font-semibold nunito text-center ${selectedCategoryIndex === index

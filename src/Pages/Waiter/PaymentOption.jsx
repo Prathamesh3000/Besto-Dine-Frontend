@@ -9,7 +9,9 @@ const PaymentOption = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { user } = useAuth();
-    const { tableId, tableName, orderId, orderDisplayId, amount = 0 } = location.state || {};
+    const { tableId, tableName, orderId, orderDisplayId, amount: rawAmount } = location.state || {};
+
+    const amount = Number(rawAmount) || 0;
 
     const [selectedMethod, setSelectedMethod] = useState('qr');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -136,6 +138,20 @@ const PaymentOption = () => {
             handleCashPayment();
         }
     };
+
+
+    // Direct page load / refresh: router state is gone, so there is no order
+    // to pay. Show an empty state instead of a ₹0 payment screen.
+    if (!orderId) {
+        return (
+            <div className="min-h-screen bg-white text-[#1A1A1A] flex flex-col items-center justify-center gap-4 px-6 text-center">
+                <p className="text-base font-semibold text-gray-700">No order selected for payment.</p>
+                <button onClick={() => navigate('/waiter/home')} className="min-h-11 px-5 rounded-full bg-[#FE8301] text-white font-semibold text-sm">
+                    Back to tables
+                </button>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-white text-[#1A1A1A] flex flex-col">

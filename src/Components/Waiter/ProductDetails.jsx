@@ -4,6 +4,7 @@ import { X, Bookmark, Clock, Users, Plus, Minus, Check } from 'lucide-react';
 import { useCart } from '../../Context/CartContext';
 import { cartLineKey } from '../../utils/cart';
 import { menuSearchAPI } from '../../utils/api';
+import { getItemImage, hideBrokenImage } from '../../utils/image';
 
 const ProductDetails = ({ product, isOpen, onClose }) => {
     if (!product) return null;
@@ -14,6 +15,8 @@ const ProductDetails = ({ product, isOpen, onClose }) => {
     const [selectedToppings, setSelectedToppings] = useState([]);
     const [sizes, setSizes] = useState([]);
     const [toppingsList, setToppingsList] = useState([]);
+    // null when no image was uploaded → the image box stays blank.
+    const productImage = getItemImage(product);
 
     // Load sizes/toppings from product or fetch from API
     useEffect(() => {
@@ -104,13 +107,17 @@ const ProductDetails = ({ product, isOpen, onClose }) => {
                         <div className="overflow-y-auto no-scrollbar pb-32">
                             {/* Product Image */}
                             <div className="relative p-4">
-                                <div className="relative aspect-[4/3] rounded-[24px] overflow-hidden shadow-sm">
-                                    <img
-                                        src={product.image}
-                                        alt={product.name}
-                                        className="w-full h-full object-cover"
-                                        onError={(e) => { e.target.src = 'https://placehold.co/400x300?text=No+Image'; }}
-                                    />
+                                <div className="relative aspect-[4/3] rounded-[24px] overflow-hidden shadow-sm bg-gray-50">
+                                    {productImage ? (
+                                        <img
+                                            src={productImage}
+                                            alt={product.name}
+                                            className="w-full h-full object-cover"
+                                            onError={hideBrokenImage}
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                                    )}
                                     {/* Veg/Non-Veg Badge */}
                                     <div className="absolute top-4 left-4 w-6 h-6 bg-white border border-[#E8E8E8] flex items-center justify-center rounded-md shadow-sm">
                                         <div className={`w-3 h-3 rounded-full ${product.isVeg !== false ? 'bg-[#34C759]' : 'bg-[#FF3B30]'}`} />

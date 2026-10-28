@@ -110,22 +110,36 @@ describe('image', () => {
     expect(img.resolveImageUrl(input)).toBe(out)
   })
 
-  test('FALLBACK_IMAGE uses the backend origin', () => {
-    expect(img.FALLBACK_IMAGE).toBe('http://localhost:5000/uploads/Thumbnil.png')
+  test('no placeholder picture is exported any more (blank, no fallback rule)', () => {
+    expect(img.FALLBACK_IMAGE).toBeUndefined()
+    expect(img.handleImageError).toBeUndefined()
   })
 
   test.each([
     [{ images: ['/uploads/1.jpg'], image: '/uploads/2.jpg' }, 'http://localhost:5000/uploads/1.jpg'],
     [{ images: [], image: '/uploads/2.jpg' }, 'http://localhost:5000/uploads/2.jpg'],
-    [{ image: '' }, 'http://localhost:5000/uploads/Thumbnil.png'],
-    [null, 'http://localhost:5000/uploads/Thumbnil.png'],
+    // no admin upload → null, so cards render a blank box instead of a placeholder
+    [{ image: '' }, null],
+    [{ images: [] }, null],
+    [{ image: '/uploads/Thumbnil.png' }, null], // legacy category/item placeholder counts as no image
+    [null, null],
   ])('getItemImage(%j)', (item, out) => expect(img.getItemImage(item)).toBe(out))
 
-  test('handleImageError swaps in the fallback once and disarms itself', () => {
-    const target = { onerror: () => {}, src: 'broken' }
-    img.handleImageError({ target })
-    expect(target).toEqual({ onerror: null, src: img.FALLBACK_IMAGE })
+  test.each([
+    ['/uploads/Thumbnil.png', null],
+    ['http://localhost:5000/uploads/Thumbnil.png', null],
+    ['/uploads/real.jpg', 'http://localhost:5000/uploads/real.jpg'],
+    ['', null],
+  ])('realImage(%j) → %j', (input, out) => expect(img.realImage(input)).toBe(out))
+
+  test('hideBrokenImage hides the <img> instead of swapping in a placeholder', () => {
+    const target = { onerror: () => {}, src: 'broken', style: {} }
+    img.hideBrokenImage({ target })
+    expect(target.onerror).toBeNull()
+    expect(target.style.display).toBe('none')
+    expect(target.src).toBe('broken')
   })
+
 
   test.each([
     ['https://images.unsplash.com/photo-1?w=4000&q=100', {}, 'https://images.unsplash.com/photo-1?auto=format&fit=crop&w=600&q=75'],

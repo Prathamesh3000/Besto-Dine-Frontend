@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { X, Star, Clock, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp } from 'lucide-react'
 import ToggleSwitch from '../../../Components/Common/ToggleSwitch'
 import VegBadge from '../../../Components/Common/VegBadge'
-import { FALLBACK_IMAGE, handleImageError } from '../../../utils/image'
+import { hideBrokenImage, realImage } from '../../../utils/image'
 
 const MenuItemDetailModal = ({ item, onClose, onEdit, onToggle }) => {
     const [currentImageIndex, setCurrentImageIndex] = useState(0)
@@ -29,9 +29,10 @@ const MenuItemDetailModal = ({ item, onClose, onEdit, onToggle }) => {
     const isVeg = item.vegType === 'veg'
     const isVisible = item.status === 'active' || item.isVisible
 
-    const itemImages = (item.images && item.images.length > 0)
-        ? item.images
-        : [(item.image || FALLBACK_IMAGE)];
+    // Empty when the admin never uploaded an image → the carousel box stays blank.
+    const itemImages = ((item.images && item.images.length > 0) ? item.images : [item.image])
+        .map(realImage)
+        .filter(Boolean);
 
     const nextImage = () => {
         setCurrentImageIndex((prev) => (prev + 1) % itemImages.length)
@@ -76,13 +77,15 @@ const MenuItemDetailModal = ({ item, onClose, onEdit, onToggle }) => {
                 <div className="flex-1 overflow-y-auto no-scrollbar">
                     {/* Image Carousel */}
                     <div className="p-6 pb-0">
-                        <div className="relative h-[300px] w-full rounded-2xl overflow-hidden group">
-                            <img
-                                src={itemImages[currentImageIndex]}
-                                alt={`${item.name} - image ${currentImageIndex + 1} of ${itemImages.length}`}
-                                className="w-full h-full object-cover"
-                                onError={handleImageError}
-                            />
+                        <div className="relative h-[300px] w-full rounded-2xl overflow-hidden group bg-gray-50">
+                            {itemImages.length > 0 && (
+                                <img
+                                    src={itemImages[currentImageIndex]}
+                                    alt={`${item.name} - image ${currentImageIndex + 1} of ${itemImages.length}`}
+                                    className="w-full h-full object-cover"
+                                    onError={hideBrokenImage}
+                                />
+                            )}
 
                             {/* Navigation Arrows */}
                             {itemImages.length > 1 && (

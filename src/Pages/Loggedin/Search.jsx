@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { sizedImage } from "../../utils/image";
+import { sizedImage, realImage, hideBrokenImage } from "../../utils/image";
 import {
   Search,
   TrendingUp,
@@ -86,13 +86,18 @@ const SearchResultItem = ({
 "
   >
     <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0">
-      <img
-        src={sizedImage(item.image, { w: 160 })}
-        alt={item.title}
-        loading="lazy"
-        decoding="async"
-        className="w-full h-full object-cover rounded-xl "
-      />
+      {realImage(item.image) ? (
+        <img
+          src={sizedImage(realImage(item.image), { w: 160 })}
+          alt={item.title}
+          loading="lazy"
+          decoding="async"
+          onError={hideBrokenImage}
+          className="w-full h-full object-cover rounded-xl "
+        />
+      ) : (
+        <div className="w-full h-full rounded-xl bg-gray-50" aria-hidden="true" />
+      )}
       {item.isVeg !== undefined && (
         <div className="absolute top-2 right-2 bg-white p-0.5 rounded shadow-sm">
           <div
@@ -205,13 +210,18 @@ const PairingItem = ({ item, onClick }) => (
 "
   >
     <div className="w-28 sm:w-32 h-20 sm:h-24 rounded-xl overflow-hidden mb-2 relative">
-      <img
-        src={sizedImage(item.image, { w: 120 })}
-        alt={item.title}
-        loading="lazy"
-        decoding="async"
-        className="w-full h-full object-cover "
-      />
+      {realImage(item.image) ? (
+        <img
+          src={sizedImage(realImage(item.image), { w: 120 })}
+          alt={item.title}
+          loading="lazy"
+          decoding="async"
+          onError={hideBrokenImage}
+          className="w-full h-full object-cover "
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+      )}
       {/* <BookmarkButton
         itemId={item.id}
         itemDetails={{
@@ -288,7 +298,7 @@ function SearchScreen() {
           title: item.name,
           desc: item.description,
           price: resolveUnitPrice(item),
-          image: item.images?.[0] || 'https://placehold.co/300x300?text=No+Image',
+          image: item.images?.[0] || '',
           isVeg: item.vegType === 'veg',
           categoryId: item.category?._id,
           categoryName: item.category?.name,
@@ -318,7 +328,7 @@ function SearchScreen() {
             id: item._id,
             title: item.name,
             price: resolveUnitPrice(item),
-            image: item.images?.[0] || 'https://placehold.co/300x300?text=No+Image',
+            image: item.images?.[0] || '',
             categoryId: item.category?._id || item.category,
           }))
         );
@@ -332,7 +342,7 @@ function SearchScreen() {
               title: item.name,
               desc: item.description,
               price: resolveUnitPrice(item),
-              image: item.images?.[0] || 'https://placehold.co/300x300?text=No+Image',
+              image: item.images?.[0] || '',
               isVeg: item.vegType === 'veg',
               categoryId: item.category?._id || item.category,
               time: item.cookingTime || '10-15 min',

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Loader2, Tag, X } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import api, { settingsAPI, promotionsAPI } from "../../utils/api";
-import { resolveImageUrl } from "../../utils/image";
+import { resolveImageUrl, realImage, hideBrokenImage } from "../../utils/image";
 import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
 import toast from "react-hot-toast";
@@ -111,7 +111,8 @@ export default function BillPage() {
         desc: item.instructions || (item.selectedSizes?.[0]?.name ? `${item.selectedSizes[0].name}` : 'Regular'),
         qty: item.quantity || 1,
         price: item.price || 0,
-        image: item.image || 'https://placehold.co/200x200?text=Item',
+        // '' when no image was uploaded → the row renders a blank box.
+        image: realImage(item.image) || '',
         isLate,
     });
     const originalItems = [];
@@ -281,12 +282,16 @@ export default function BillPage() {
                                 )}
                                 {originalItems.map((item) => (
                                     <div key={item.id} className="flex gap-3">
-                                        <img
-                                            src={item.image}
-                                            alt={item.name}
-                                            className="w-16 h-16 rounded-xl object-cover"
-                                            onError={(e) => { e.target.src = 'https://placehold.co/200x200?text=Item'; }}
-                                        />
+                                        {item.image ? (
+                                            <img
+                                                src={item.image}
+                                                alt={item.name}
+                                                className="w-16 h-16 rounded-xl object-cover flex-shrink-0"
+                                                onError={hideBrokenImage}
+                                            />
+                                        ) : (
+                                            <div className="w-16 h-16 rounded-xl bg-gray-50 flex-shrink-0" aria-hidden="true" />
+                                        )}
                                         <div className="flex-1">
                                             <h3 className="text-sm font-medium">{item.name}</h3>
                                             <p className="text-xs text-gray-500">{item.desc}</p>
@@ -309,12 +314,16 @@ export default function BillPage() {
                                 </div>
                                 {appendedItems.map((item) => (
                                     <div key={item.id} className="flex gap-3 bg-[#FFF4E8] rounded-xl p-2 -mx-1 ring-1 ring-[#FE8301]/20">
-                                        <img
-                                            src={item.image}
-                                            alt={item.name}
-                                            className="w-16 h-16 rounded-xl object-cover"
-                                            onError={(e) => { e.target.src = 'https://placehold.co/200x200?text=Item'; }}
-                                        />
+                                        {item.image ? (
+                                            <img
+                                                src={item.image}
+                                                alt={item.name}
+                                                className="w-16 h-16 rounded-xl object-cover flex-shrink-0"
+                                                onError={hideBrokenImage}
+                                            />
+                                        ) : (
+                                            <div className="w-16 h-16 rounded-xl bg-gray-50 flex-shrink-0" aria-hidden="true" />
+                                        )}
                                         <div className="flex-1">
                                             <h3 className="text-sm font-medium">{item.name}</h3>
                                             <p className="text-xs text-gray-500">{item.desc}</p>

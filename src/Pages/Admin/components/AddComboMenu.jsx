@@ -942,9 +942,13 @@ const AddComboMenu = () => {
                             </div>
                             {/* Right: Image + Price */}
                             <div className="w-[300px] flex-shrink-0">
-                                <div className="rounded-xl overflow-hidden mb-3">
-                                    <img src={comboImages[0] || 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80'}
-                                        alt="Combo preview" className="w-full h-[200px] object-cover" />
+                                <div className="rounded-xl overflow-hidden mb-3 bg-gray-50">
+                                    {comboImages[0] ? (
+                                        <img src={comboImages[0]}
+                                            alt="Combo preview" className="w-full h-[200px] object-cover" />
+                                    ) : (
+                                        <div className="w-full h-[200px] bg-gray-50" aria-hidden="true" />
+                                    )}
                                 </div>
                                 <div className="flex gap-2 mb-4">
                                     {comboImages.slice(0, 5).map((img, i) => (

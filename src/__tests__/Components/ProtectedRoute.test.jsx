@@ -11,7 +11,7 @@ vi.mock('@/Context/AuthContext', () => ({
 const tenant = vi.hoisted(() => ({ slug: 'spice' }))
 vi.mock('@/utils/tenant', () => ({ getActiveTenantSlug: () => tenant.slug }))
 
-import ProtectedRoute, { CaptainOnlyRoute } from '@/Components/ProtectedRoute'
+import ProtectedRoute from '@/Components/ProtectedRoute'
 
 const ROLES = ['admin', 'manager', 'captain', 'waiter', 'chef', 'customer', 'superadmin']
 
@@ -179,26 +179,5 @@ describe('ProtectedRoute tenant, loading and password gates', () => {
     setAuth() // AuthContext dropped the user after refresh failure / expiry
     renderAt({ requiredRole: ['admin'] })
     expect(landedOn()).toBe('/staff-login')
-  })
-})
-
-describe('CaptainOnlyRoute', () => {
-  test.each([
-    ['captain', true], ['admin', true], ['waiter', false], ['manager', false], ['chef', false],
-  ])('%s → children shown: %s', (role, shown) => {
-    setAuth({ role })
-    render(<CaptainOnlyRoute><div>CAPTAIN-ONLY</div></CaptainOnlyRoute>)
-    expect(!!screen.queryByText('CAPTAIN-ONLY')).toBe(shown)
-    if (!shown) expect(screen.getByText('Captain Access Only')).toBeInTheDocument()
-  })
-
-  test('custom fallback and loading state', () => {
-    setAuth({ role: 'waiter' })
-    const { unmount } = render(<CaptainOnlyRoute fallback={<p>nope</p>}><div>X</div></CaptainOnlyRoute>)
-    expect(screen.getByText('nope')).toBeInTheDocument()
-    unmount()
-    setAuth({ role: 'captain', loading: true })
-    render(<CaptainOnlyRoute><div>X</div></CaptainOnlyRoute>)
-    expect(screen.getByText('Loading…')).toBeInTheDocument()
   })
 })

@@ -244,6 +244,7 @@ const FEATURE_LABELS = {
     aggregatorOrders: 'Zomato / Swiggy',
     eInvoice: 'e-Invoice',
     whiteLabelBranding: 'Own branding',
+    incentives: 'Staff incentives',
 };
 
 const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPush }) => {

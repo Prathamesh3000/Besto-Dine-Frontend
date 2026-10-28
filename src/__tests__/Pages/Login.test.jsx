@@ -137,6 +137,32 @@ describe('Staff Login — results', () => {
   })
 })
 
+describe('Staff Login — restaurant picker (409 TENANT_DISAMBIGUATION_REQUIRED)', () => {
+  test('lists restaurants, then retries with the chosen tenant set', async () => {
+    auth.login
+      .mockResolvedValueOnce({ success: false, code: 'TENANT_DISAMBIGUATION_REQUIRED', message: 'pick', restaurants: [{ name: 'Spice', slug: 'spice' }, { name: 'Cafe', slug: 'cafe' }] })
+      .mockResolvedValueOnce({ success: true, role: 'admin', user: { role: 'admin' } })
+    const user = renderLogin()
+    await submit(user)
+    await user.click(await screen.findByRole('button', { name: /Cafe/ }))
+    expect(await screen.findByText('/admin/dashboard', {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(auth.login).toHaveBeenCalledTimes(2)
+    expect(setActiveTenant).toHaveBeenCalledWith({ slug: 'cafe', name: 'Cafe' })
+  })
+
+  test('falls back to a restaurant code input when no list is returned', async () => {
+    auth.login
+      .mockResolvedValueOnce({ success: false, code: 'TENANT_DISAMBIGUATION_REQUIRED', message: 'pick' })
+      .mockResolvedValueOnce({ success: true, role: 'admin', user: { role: 'admin' } })
+    const user = renderLogin()
+    await submit(user)
+    await user.type(await screen.findByLabelText('Restaurant code'), 'Spice')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByText('/admin/dashboard', {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(setActiveTenant).toHaveBeenCalledWith({ slug: 'spice', name: undefined })
+  })
+})
+
 describe('Staff Login — already signed in', () => {
   test('an existing staff session is forwarded to its workspace', async () => {
     Object.assign(auth, { isLoggedIn: true, user: { role: 'chef' } })

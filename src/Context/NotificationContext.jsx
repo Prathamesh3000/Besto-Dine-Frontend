@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api, { waiterAPI } from '../utils/api';
-import { useAuth } from './AuthContext';
+import { useAuth, CAPTAIN_ROLES } from './AuthContext';
 import { getSocket, joinRoom } from '../utils/socket';
 import { useSocketConnected, useSocketReconnect } from '../hooks/useSocketEvent';
 import { getActiveTenantSlug, subscribeActiveTenant } from '../utils/tenant';
@@ -436,20 +436,13 @@ export const NotificationProvider = ({ children }) => {
         // forever. Surface a persistent toast with a Settle CTA that
         // deep-links to /waiter/payment with cash preselected.
         //
-        // Role gate matches the route guard: /waiter/payment is wrapped
-        // by `requiredRole={CAPTAIN_ROLES}` = [captain, admin, manager].
-        // Regular waiters get the standard bell notification (via the
-        // `notification:new` listener above) but no Settle CTA — they'd
-        // bounce off the route guard. Captain handles bill settlement
-        // per CLAUDE.md role spec.
+        // Billing is captain/admin/manager only (CAPTAIN_ROLES). A waiter
+        // still gets an informational toast (it is their table) but NO
+        // Settle button; chef gets nothing.
         const handleCounterPaymentRequested = (payload) => {
             invalidateNotifications();
-            // Any floor/admin staff can collect payment now — the waiter who
-            // served the table gets the cash-request popup + Settle CTA too
-            // (the /waiter/payment route was opened to STAFF_ROLES). Chef is
-            // the only staff role excluded (no billing role).
-            const SETTLE_ROLES = ['waiter', 'captain', 'admin', 'manager'];
-            if (!SETTLE_ROLES.includes(role)) return;
+            const canSettle = CAPTAIN_ROLES.includes(role);
+            if (!canSettle && role !== 'waiter') return;
             if (soundEnabled && hasInteractedRef.current) playSoundForRole(role);
 
             const tableLabel = payload?.table || 'A table';
@@ -477,7 +470,9 @@ export const NotificationProvider = ({ children }) => {
                                 Cash payment requested
                             </p>
                             <p className="text-[12px] font-varela text-[#645E66] mt-0.5">
-                                {tableLabel} — collect ₹{amount.toFixed(0)}
+                                {canSettle
+                                    ? `${tableLabel} — collect ₹${amount.toFixed(0)}`
+                                    : `${tableLabel} — customer asked to pay cash; the captain will collect`}
                             </p>
                         </div>
                         <button
@@ -486,6 +481,7 @@ export const NotificationProvider = ({ children }) => {
                             className="text-gray-300 hover:text-gray-500 shrink-0"
                         >✕</button>
                     </div>
+                    {canSettle && (
                     <button
                         type="button"
                         onClick={() => {
@@ -515,6 +511,7 @@ export const NotificationProvider = ({ children }) => {
                     >
                         Settle Cash for {tableLabel}
                     </button>
+                    )}
                 </div>
             ), { id: toastId, duration: Infinity });
         };

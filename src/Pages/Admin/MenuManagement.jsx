@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, Search, ChevronDown, LayoutGrid, List, Loader, Upload, AlertTriangle, ChevronRight } from 'lucide-react'
+import { Plus, Search, ChevronDown, LayoutGrid, List, Loader, Upload, AlertTriangle, ChevronRight, Trash2 } from 'lucide-react'
 import MenuItemCard from './components/MenuItemCard'
 import MenuIssueModal from './components/MenuIssueModal'
 import ComboCard from './components/ComboCard'
@@ -13,6 +13,9 @@ import ActivationSuccessModal from './components/ActivationSuccessModal'
 import ConfirmModal from './components/ConfirmModal'
 import BulkImportMenuModal from './components/BulkImportMenuModal'
 import BulkImportCombosModal from './components/BulkImportCombosModal'
+import ScanMenuModal from './components/ScanMenuModal'
+import ClearMenuModal from './components/ClearMenuModal'
+import { useAuth } from '../../Context/AuthContext'
 import { useMenu } from '../../Context/MenuContext'
 import api, { inventoryAPI } from '../../utils/api'
 import toast from 'react-hot-toast'
@@ -78,6 +81,10 @@ const MenuManagement = () => {
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [showBulkImportModal, setShowBulkImportModal] = useState(false)
   const [showBulkImportCombosModal, setShowBulkImportCombosModal] = useState(false)
+  const [showScanMenuModal, setShowScanMenuModal] = useState(false)
+  const [showClearMenuModal, setShowClearMenuModal] = useState(false)
+  const { user: authUser } = useAuth()
+  const isMenuOwner = authUser?.isTenantOwner === true
   const [selectedCategory, setSelectedCategory] = useState('All Category')
   const [selectedFilter, setSelectedFilter] = useState('Filter by')
   const [selectedType, setSelectedType] = useState('Select Type')
@@ -415,6 +422,26 @@ const MenuManagement = () => {
             >
               <Upload size={18} />
               Import CSV
+            </button>
+          )}
+
+          {activeTab === 'single' && (
+            <button
+              onClick={() => setShowScanMenuModal(true)}
+              className="px-4 py-2.5 text-orange-500 font-bold border border-orange-500 rounded-xl hover:bg-orange-50 transition-colors font-manrope text-sm flex items-center gap-2"
+            >
+              <Upload size={18} />
+              Import from photo or PDF
+            </button>
+          )}
+
+          {activeTab === 'single' && isMenuOwner && (
+            <button
+              onClick={() => setShowClearMenuModal(true)}
+              className="px-4 py-2.5 text-red-600 font-bold border border-red-300 rounded-xl hover:bg-red-50 transition-colors font-manrope text-sm flex items-center gap-2"
+            >
+              <Trash2 size={18} />
+              Clear full menu
             </button>
           )}
 
@@ -770,6 +797,18 @@ const MenuManagement = () => {
       {showBulkImportModal && (
         <BulkImportMenuModal
           onClose={() => setShowBulkImportModal(false)}
+          onComplete={() => { refreshData(); fetchCategories(); }}
+        />
+      )}
+      {showScanMenuModal && (
+        <ScanMenuModal
+          onClose={() => setShowScanMenuModal(false)}
+          onComplete={() => { refreshData(); fetchCategories(); }}
+        />
+      )}
+      {showClearMenuModal && (
+        <ClearMenuModal
+          onClose={() => setShowClearMenuModal(false)}
           onComplete={() => { refreshData(); fetchCategories(); }}
         />
       )}

@@ -231,7 +231,7 @@ import { IMAGE_ACCEPT } from '../../../utils/imageFile'
 // admin from toggling flags that did nothing.
 //
 // Each entry: { key, label, description, enforcedBy }
-const PERMISSION_CATALOG = [
+export const PERMISSION_CATALOG = [
     // ── Floor & tables ────────────────────────────────────────────────
     { key: 'tables',              label: 'Table Management',        description: 'Merge or unmerge tables on the floor map', enforcedBy: 'backend' },
     { key: 'viewTableDetails',    label: 'View Table Details',      description: 'Open the table drawer to see orders / diners', enforcedBy: 'frontend' },
@@ -254,6 +254,8 @@ const PERMISSION_CATALOG = [
     { key: 'manageStaff',         label: 'Manage Staff',            description: 'Add, edit, deactivate other staff members', enforcedBy: 'backend' },
     { key: 'manageRecipe',        label: 'Manage Recipes',          description: 'View & build menu-item recipes (link ingredients, food cost). No item CRUD or stock control.', enforcedBy: 'backend' },
     { key: 'manageStock',         label: 'View Stock',               description: 'View inventory stock levels + low-stock alerts (read-only). Stock adjustments stay admin-only.', enforcedBy: 'backend' },
+    // adminOnly: only the owner/admin may grant it (it exposes other staff's earnings).
+    { key: 'incentives',          label: 'Staff Incentives',        description: 'Set up item incentive campaigns and see the incentive report (needs the Incentives plan module). Only an Admin can grant this.', enforcedBy: 'backend', adminOnly: true },
 ]
 
 const PERMISSION_KEYS = PERMISSION_CATALOG.map(p => p.key)
@@ -276,28 +278,28 @@ const DEFAULT_PERMISSIONS_BY_ROLE = {
         viewOrders: true, addOrders: true, updateOrderStatus: true, accessKitchen: false,
         viewCustomerRequests: true, reservation: true, crm: true,
         viewTips: true, viewPayments: true, refund: true,
-        editMenu: true, manageStaff: true, manageRecipe: true, manageStock: true,
+        editMenu: true, manageStaff: true, manageRecipe: true, manageStock: true, incentives: false,
     },
     Captain: {
         tables: true, viewTableDetails: true, mergeTables: true,
         viewOrders: true, addOrders: true, updateOrderStatus: true, accessKitchen: false,
         viewCustomerRequests: true, reservation: true, crm: false,
         viewTips: true, viewPayments: true, refund: false,
-        editMenu: false, manageStaff: false, manageRecipe: false, manageStock: false,
+        editMenu: false, manageStaff: false, manageRecipe: false, manageStock: false, incentives: false,
     },
     Chef: {
         tables: false, viewTableDetails: false, mergeTables: false,
         viewOrders: true, addOrders: false, updateOrderStatus: true, accessKitchen: true,
         viewCustomerRequests: false, reservation: false, crm: false,
         viewTips: false, viewPayments: false, refund: false,
-        editMenu: false, manageStaff: false, manageRecipe: true, manageStock: true,
+        editMenu: false, manageStaff: false, manageRecipe: true, manageStock: true, incentives: false,
     },
     Waiter: {
         tables: true, viewTableDetails: true, mergeTables: true,
         viewOrders: true, addOrders: true, updateOrderStatus: false, accessKitchen: false,
         viewCustomerRequests: true, reservation: false, crm: false,
         viewTips: true, viewPayments: false, refund: false,
-        editMenu: false, manageStaff: false, manageRecipe: false, manageStock: false,
+        editMenu: false, manageStaff: false, manageRecipe: false, manageStock: false, incentives: false,
     },
 }
 
@@ -950,7 +952,9 @@ const AddStaffModal = ({ onClose, onSubmit, editData }) => {
                                 )}
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {PERMISSION_CATALOG.map(({ key, label, description }) => (
+                                {PERMISSION_CATALOG.map(({ key, label, description, adminOnly }) => {
+                                    const locked = !!adminOnly && user?.role !== 'admin'
+                                    return (
                                     <div key={key} className="flex items-start justify-between gap-3 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100">
                                         <div className="min-w-0 flex-1">
                                             <p className="text-[13px] font-[600] font-manrope text-[#1A181B]">{label}</p>
@@ -959,14 +963,17 @@ const AddStaffModal = ({ onClose, onSubmit, editData }) => {
                                         <button
                                             type="button"
                                             onClick={() => setPermissions(p => ({ ...p, [key]: !p[key] }))}
-                                            className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 mt-0.5 ${permissions[key] ? 'bg-[#34C759]' : 'bg-gray-300'}`}
+                                            disabled={locked}
+                                            title={locked ? 'Only an Admin can grant this' : undefined}
+                                            className={`${locked ? 'opacity-50 cursor-not-allowed ' : ''}relative w-11 h-6 rounded-full transition-colors flex-shrink-0 mt-0.5 ${permissions[key] ? 'bg-[#34C759]' : 'bg-gray-300'}`}
                                             aria-pressed={!!permissions[key]}
                                             aria-label={`${permissions[key] ? 'Disable' : 'Enable'} ${label}`}
                                         >
                                             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${permissions[key] ? 'left-[22px]' : 'left-[4px]'}`} />
                                         </button>
                                     </div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         </div>
                     )}

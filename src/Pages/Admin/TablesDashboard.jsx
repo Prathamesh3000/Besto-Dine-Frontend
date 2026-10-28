@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, useContext } from 'react'
 import { useLocation, Link as RouterLink } from 'react-router-dom'
 import { CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload, Ticket } from 'lucide-react'
 import TokenBoard from './components/TokenBoard'
@@ -20,6 +20,7 @@ import toast from 'react-hot-toast'
 import { billFromOrders, orderAmountDue, settleAmountForOrders, toTaxConfig } from '../../utils/billing'
 import { useAdminBootstrap } from '../../hooks/queries/useAdminBootstrap'
 import useOperations from '../../hooks/useOperations'
+import AuthContext from '../../Context/AuthContext'
 import { SkeletonTablesGrid, SkeletonStatGrid } from '../../Components/Common/Skeleton'
 
 // ─── Pay-first held orders ───────────────────────────────────────────────────
@@ -115,6 +116,9 @@ const TablesDashboard = () => {
   // Operations profile — a restaurant that doesn't merge tables or
   // assign waiters never sees those controls (server rejects them too).
   const operations = useOperations()
+  // Optional (no provider in some tests): only admin/manager see Free all.
+  const authCtx = useContext(AuthContext)
+  const canFreeAll = ['admin', 'manager'].includes(authCtx?.user?.role)
   const mergeTablesEnabled = operations?.tables?.mergeTables !== false
   const assignWaitersEnabled = operations?.tables?.assignWaiters !== false
   // Token-number mode (§12.2): the branch has no tables at all — dine-in
@@ -251,6 +255,7 @@ const TablesDashboard = () => {
   }), [tablesData, areasData, reservationsData])
 
   const tablesGrid = useMemo(() => processedTablesData.filter(t => activeFilter === 'All' || t.area?.name === activeFilter), [processedTablesData, activeFilter])
+  const occupiedTableCount = useMemo(() => processedTablesData.filter(t => ['occupied', 'reserved'].includes(t.underlyingStatus)).length, [processedTablesData])
   const tablesList = useMemo(() => processedTablesData.filter(t => managementAreaFilter === 'All' || t.area?.name === managementAreaFilter), [processedTablesData, managementAreaFilter])
 
   // Live drawer table — re-derived from the latest bootstrap on every
@@ -653,6 +658,43 @@ const TablesDashboard = () => {
   const postFreeTable = (force = false) =>
     api.post(`/tables/${selectedTable._id}/free`, force ? { force: true } : {})
 
+  const freedMsg = (data, fallback) => {
+    const n = Number(data?.customersSignedOut) || 0
+    return n > 0 ? `Table freed — ${n} customer${n === 1 ? '' : 's'} signed out` : fallback
+  }
+
+  // ── Free ALL tables (admin/manager) ──
+  // step: null | 'confirm' | 'force'. 409 ORDER_NOT_EMPTY → 'force' step
+  // with the preview and a required reason; resend { force, reason }.
+  const [freeAllStep, setFreeAllStep] = useState(null)
+  const [freeAllPreview, setFreeAllPreview] = useState(null)
+  const [freeAllReason, setFreeAllReason] = useState('')
+  const [freeingAll, setFreeingAll] = useState(false)
+  const closeFreeAll = () => { setFreeAllStep(null); setFreeAllPreview(null); setFreeAllReason(''); }
+  const runFreeAll = async (force) => {
+    if (freeingAll) return
+    setFreeingAll(true)
+    try {
+      const res = await api.post('/tables/free-all', force ? { force: true, reason: freeAllReason.trim() } : {})
+      const d = res.data || {}
+      if (d.success === false) { toast.error(d.message || 'Could not free tables'); return }
+      toast.success(`${d.freedTableCount ?? 0} tables freed — ${d.customersSignedOut ?? 0} customers signed out`)
+      closeFreeAll()
+      setSelectedTableId(null)
+      fetchDashboardData()
+    } catch (err) {
+      const data = err.response?.data
+      if (data?.code === 'ORDER_NOT_EMPTY') {
+        setFreeAllPreview(data)
+        setFreeAllStep('force')
+      } else {
+        toast.error(data?.message || 'Could not free tables')
+      }
+    } finally {
+      setFreeingAll(false)
+    }
+  }
+
   const handleFreeTableNow = async () => {
     if (!selectedTable?._id || freeingTable) return
     if (!window.confirm(`Free ${selectedTable.name}? This will cancel any empty order on the table.`)) return
@@ -660,7 +702,7 @@ const TablesDashboard = () => {
     try {
       const res = await postFreeTable(false)
       if (res.data?.success) {
-        toast.success(`${selectedTable.name} freed`)
+        toast.success(freedMsg(res.data, `${selectedTable.name} freed`))
         setSelectedTable(null)
         fetchDashboardData()
       } else {
@@ -681,7 +723,7 @@ const TablesDashboard = () => {
         try {
           const res2 = await postFreeTable(true)
           if (res2.data?.success) {
-            toast.success(res2.data.message || `${selectedTable.name} freed`)
+            toast.success(freedMsg(res2.data, res2.data.message || `${selectedTable.name} freed`))
             setSelectedTable(null)
             fetchDashboardData()
           } else {
@@ -1033,6 +1075,12 @@ const TablesDashboard = () => {
             <CalendarPlus size={18} />
             Add Reservation
           </button>
+          {canFreeAll && (
+            <button type="button" onClick={() => setFreeAllStep('confirm')} disabled={occupiedTableCount === 0} className="flex items-center gap-2 px-5 py-2.5 text-red-600 font-[600] border border-red-300 rounded-[10px] hover:bg-red-50 transition-colors font-manrope text-[14px] disabled:opacity-50 disabled:cursor-not-allowed">
+              <CheckCircle size={18} />
+              Free all tables
+            </button>
+          )}
           {mergeTablesEnabled && (
             <button onClick={() => setShowMergeTables(true)} className="flex items-center gap-2 px-5 py-2.5 text-orange-500 font-[600] border border-orange-500 rounded-[10px] hover:bg-[#FFF3E6] active:bg-[#FFE6CC] transition-colors font-manrope text-[14px]">
               <Link size={18} className="rotate-45" />
@@ -2294,6 +2342,47 @@ const TablesDashboard = () => {
                 }}
                 className="flex-1 py-2.5 bg-[#FF9B0B] text-white rounded-[10px] font-[600] text-[14px] font-manrope hover:opacity-90 transition-opacity"
               >Yes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Free all tables ─────────────────────────────────────────────── */}
+      {canFreeAll && freeAllStep && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div role="dialog" className="bg-white rounded-[16px] w-full max-w-[420px] p-6 shadow-2xl font-manrope">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-10 h-10 rounded-full bg-[#FFF3E6] flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={24} className="text-[#FF9B0B]" />
+              </div>
+              <h3 className="text-[18px] font-[700] text-[#1D2939]">{freeAllStep === 'confirm' ? 'Free all tables?' : 'Open orders on tables'}</h3>
+            </div>
+            {freeAllStep === 'confirm' ? (
+              <p className="text-[#475467] text-[14px] leading-relaxed mb-6">
+                Free all tables? Every customer currently seated will be signed out. ({occupiedTableCount} occupied {occupiedTableCount === 1 ? 'table' : 'tables'})
+              </p>
+            ) : (
+              <>
+                <p className="text-[#475467] text-[14px] leading-relaxed mb-3">
+                  {freeAllPreview?.tableCount ?? 0} tables have {freeAllPreview?.orderCount ?? 0} open orders totalling ₹{freeAllPreview?.totalAmount ?? 0}. They will be cancelled and written off.
+                </p>
+                <label className="block text-[13px] font-[600] text-[#344054] mb-1" htmlFor="free-all-reason">Reason (required)</label>
+                <input
+                  id="free-all-reason"
+                  value={freeAllReason}
+                  onChange={(e) => setFreeAllReason(e.target.value)}
+                  placeholder="e.g. End of day reset"
+                  className="w-full mb-6 px-3 py-2 border border-[#D0D5DD] rounded-[10px] text-[14px] outline-none focus:border-[#FE8301]"
+                />
+              </>
+            )}
+            <div className="flex gap-3">
+              <button onClick={closeFreeAll} disabled={freeingAll} className="flex-1 py-2.5 border border-[#D0D5DD] text-[#344054] rounded-[10px] font-[600] text-[14px] hover:bg-gray-50 transition-colors">Cancel</button>
+              <button
+                onClick={() => runFreeAll(freeAllStep === 'force')}
+                disabled={freeingAll || (freeAllStep === 'force' && freeAllReason.trim().length < 3)}
+                className="flex-1 py-2.5 bg-[#FF9B0B] text-white rounded-[10px] font-[600] text-[14px] hover:opacity-90 transition-opacity disabled:opacity-50"
+              >{freeingAll ? 'Freeing…' : freeAllStep === 'force' ? 'Write off & free all' : 'Free all'}</button>
             </div>
           </div>
         </div>

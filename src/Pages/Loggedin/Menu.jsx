@@ -7,7 +7,7 @@ import BottomNavCustomer from "../../Components/Loggedin/BottomNav";
 import BottomNavWaiter from "../../Components/Waiter/BottomNav";
 import SidebarWaiter from "../../Components/Waiter/Sidebar";
 import CartButton from "../../Components/Loggedin/CartButton";
-import { FALLBACK_IMAGE, sizedImage, ALL_CATEGORY_IMAGE, COMBO_CATEGORY_IMAGE } from "../../utils/image";
+import { sizedImage, realImage, hideBrokenImage } from "../../utils/image";
 import { Search, Heart, ChevronLeft } from 'lucide-react';
 import VoiceSearchButton from '../../Components/Loggedin/VoiceSearchButton';
 
@@ -19,14 +19,18 @@ const CategoryCard = ({ name, img, onClick }) => (
     className="flex flex-col items-center gap-2 cursor-pointer active:scale-95 transition-transform duration-200 bg-transparent border-none p-0"
   >
     <div className="w-25 h-25 rounded-full overflow-hidden bg-gray-100">
-      <img
-        src={sizedImage(img, { w: 100 })}
-        alt={name}
-        loading="lazy"
-        decoding="async"
-        onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-        className="w-full h-full object-cover"
-      />
+      {img ? (
+        <img
+          src={sizedImage(img, { w: 100 })}
+          alt={name}
+          loading="lazy"
+          decoding="async"
+          onError={hideBrokenImage}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+      )}
     </div>
     <span className="text-[14px] sm:text-base nunito font-semibold text-[#645E66] text-center">
       {name}
@@ -65,7 +69,7 @@ function Menu() {
     const list = [{
       _id: "all",
       name: "All",
-      image: ALL_CATEGORY_IMAGE,
+      image: null,
     }];
 
     list.push(...contextCategories);
@@ -78,7 +82,7 @@ function Menu() {
       list.push({
         _id: "combo",
         name: "Combo",
-        image: COMBO_CATEGORY_IMAGE,
+        image: null,
         isCombo: true
       });
     }
@@ -193,8 +197,9 @@ function Menu() {
                 ${isStaff ? 'gap-y-6 gap-x-3 sm:gap-x-4' : 'gap-y-6 gap-x-4 sm:gap-x-6 md:gap-x-12 place-items-center'}
               `}
             >
-              {filteredCategories.map((item) => (
-                isStaff ? (
+              {filteredCategories.map((item) => {
+                const src = realImage(item.image);
+                return isStaff ? (
                   // Waiter Style Category Component — circular thumb with
                   // name underneath. Larger tap target via padding rather
                   // than wider visual footprint.
@@ -205,14 +210,18 @@ function Menu() {
                     className="flex flex-col items-center gap-2 cursor-pointer group active:scale-95 transition-all bg-transparent border-none p-1.5 rounded-2xl hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FE8301]"
                   >
                     <div className="relative w-full aspect-square rounded-full overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.08)] ring-2 ring-transparent group-hover:ring-[#FE8301] transition-all bg-gray-100">
-                      <img
-                        src={sizedImage(item.image || FALLBACK_IMAGE, { w: 100 })}
-                        alt={item.name}
-                        loading="lazy"
-                        decoding="async"
-                        onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
+                      {src ? (
+                        <img
+                          src={sizedImage(src, { w: 100 })}
+                          alt={item.name}
+                          loading="lazy"
+                          decoding="async"
+                          onError={hideBrokenImage}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-50" aria-hidden="true" />
+                      )}
                     </div>
                     <span className="text-xs sm:text-sm font-semibold text-[#1A181B] group-hover:text-[#FE8301] transition-colors text-center w-full truncate">
                       {item.name}
@@ -223,11 +232,11 @@ function Menu() {
                   <CategoryCard
                     key={item._id}
                     name={item.name}
-                    img={item.image || FALLBACK_IMAGE}
+                    img={src}
                     onClick={() => handleCategoryClick(item)}
                   />
-                )
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center text-center py-16 px-6">

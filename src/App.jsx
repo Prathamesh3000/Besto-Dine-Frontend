@@ -11,6 +11,7 @@ import { NotificationProvider } from './Context/NotificationContext';
 import ProtectedRoute from './Components/ProtectedRoute';
 import RequireFeature from './Components/RequireFeature';
 import RequireStaffOrder from './Components/RequireStaffOrder';
+import RequireCaptainRole from './Components/Waiter/RequireCaptainRole';
 import { STAFF_ROLES, CAPTAIN_ROLES, CUSTOMER_ROLES, ADMIN_ROLES, CHEF_ROLES, SUPERADMIN_ROLES } from './Context/AuthContext';
 // Roles the waiterDashboard plan gate applies to (admins also use /waiter/*).
 const WAITER_APP_ROLES = ['waiter', 'captain'];
@@ -293,6 +294,7 @@ const OfferPerformance = lazy(() => import('./Pages/Admin/components/OfferPerfor
 const StaffDashboard = lazy(() => import('./Pages/Admin/StaffDashboard'));
 const CRMDashboard = lazy(() => import('./Pages/Admin/CRMDashboard'));
 const Bookings = lazy(() => import('./Pages/Admin/Bookings'));
+const Incentives = lazy(() => import('./Pages/Admin/Incentives'));
 const Inventory = lazy(() => import('./Pages/Admin/Inventory'));
 const Settings = lazy(() => import('./Pages/Admin/Settings'));
 const Subscription = lazy(() => import('./Pages/Admin/Subscription'));
@@ -422,20 +424,17 @@ function App() {
                 <Route path="/waiter/cart"
                   element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><RequireStaffOrder><CartPage /></RequireStaffOrder></RequireFeature></ProtectedRoute>} />
 
-                {/* Billing + payment collection. Opened to STAFF_ROLES
-                    (waiter + captain + admin + manager) so the waiter who
-                    served the table can settle a cash bill themselves —
-                    e.g. when a dine-in customer taps "Pay at Counter" the
-                    serving waiter gets the cash-request popup and can
-                    collect + mark paid. Chef is excluded. Refund
-                    authorization remains captain/admin-only (gated
-                    separately by permission, not this route). */}
+                {/* Billing + payment collection: captain/admin/manager only
+                    (CAPTAIN_ROLES). Waiters only take orders; a waiter who
+                    opens these URLs is redirected by ProtectedRoute to
+                    /waiter/home. The server also returns 403
+                    BILLING_CAPTAIN_ONLY for waiters. */}
                 <Route path="/waiter/bill"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><BillPage /></RequireFeature></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireCaptainRole><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><BillPage /></RequireFeature></RequireCaptainRole></ProtectedRoute>} />
                 <Route path="/waiter/payment"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><PaymentOption amount={879} tableNo="no.4" /></RequireFeature></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireCaptainRole><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><PaymentOption /></RequireFeature></RequireCaptainRole></ProtectedRoute>} />
                 <Route path="/waiter/qr-payment"
-                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><QRPayment amount={879} tableNo="no.4" /></RequireFeature></ProtectedRoute>} />
+                  element={<ProtectedRoute requiredRole={STAFF_ROLES}><RequireCaptainRole><RequireFeature feature="waiterDashboard" roles={WAITER_APP_ROLES}><QRPayment /></RequireFeature></RequireCaptainRole></ProtectedRoute>} />
 
                 {/* ── Chef Routes ─────────────────────────────────────────── */}
                 {/* Plan gate: the chef app is the `kitchenDisplay` module. */}
@@ -495,6 +494,7 @@ function App() {
                   <Route path="offers/performance" element={<RequireFeature feature="couponPromotions"><OfferPerformance /></RequireFeature>} />
                   <Route path="staff" element={<StaffDashboard />} />
                   <Route path="crm" element={<RequireFeature feature="crm"><CRMDashboard /></RequireFeature>} />
+                  <Route path="incentives" element={<RequireFeature feature="incentives"><Incentives /></RequireFeature>} />
                   <Route path="inventory" element={<RequireFeature feature="inventory"><Inventory /></RequireFeature>} />
                   <Route path="bookings" element={<RequireFeature feature="advanceBookingTable"><Bookings /></RequireFeature>} />
                   <Route path="settings" element={<Settings />} />

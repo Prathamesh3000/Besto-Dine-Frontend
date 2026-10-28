@@ -10,6 +10,7 @@ import { SkeletonStatGrid, SkeletonRows } from '../../Components/Common/Skeleton
 import { useAuth } from '../../Context/AuthContext'
 import LandingPageSettings from './components/LandingPageSettings'
 import PrinterSettings from './components/PrinterSettings'
+import PaymentQrSettings from './components/PaymentQrSettings'
 import OperationsSummary from './components/OperationsSummary'
 import ParkingSettingsCard from './components/ParkingSettingsCard'
 import { IMAGE_ACCEPT } from '../../utils/imageFile'
@@ -52,7 +53,8 @@ const Settings = () => {
     // Landing Page is tenant-level (one public page per restaurant at
     // /<slug>); branch-pinned admins see it read-only (the backend
     // refuses their saves with INHERITED_FROM_MAIN).
-    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers', 'Operations']
+    const canEditPayments = ['admin', 'manager'].includes(user?.role)
+    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers', ...(canEditPayments ? ['Payment QR'] : []), 'Operations']
 
     // Loading state
     const [loading, setLoading] = useState(true)
@@ -139,6 +141,8 @@ const Settings = () => {
     // Thermal printers for this branch (Settings.printers) — see
     // components/PrinterSettings.jsx; saved via PATCH /settings/printers.
     const [printers, setPrinters] = useState({})
+    // Payment QR (UPI) — Settings.payments; saved via PATCH /settings/payments.
+    const [payments, setPayments] = useState({})
 
     const [walletConfig, setWalletConfig] = useState({
         enableWallet: true,
@@ -231,6 +235,7 @@ const Settings = () => {
             if (s.wallet) setWalletConfig(prev => ({ ...prev, ...s.wallet }))
             setLandingPage(s.landingPage || {})
             setPrinters(s.printers || {})
+            setPayments(s.payments || {})
         } catch (error) {
             console.error('Settings fetch error:', error)
         } finally {
@@ -632,7 +637,7 @@ const Settings = () => {
                 </div>
                 {/* The Landing Page tab saves on its own (PATCH /settings/landingPage);
                     "Save All" doesn't include it, so hide it there. */}
-                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && activeTab !== 'Operations' && (
+                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && activeTab !== 'Payment QR' && activeTab !== 'Operations' && (
                 <button
                     disabled={isSaving}
                     onClick={() => {
@@ -1111,6 +1116,11 @@ const Settings = () => {
                     isSaving={isSaving}
                     onSave={(data) => saveSectionSettings('printers', data)}
                 />
+            )}
+
+            {/* Content - Payment QR Tab (admin/manager; saves on its own) */}
+            {activeTab === 'Payment QR' && canEditPayments && (
+                <PaymentQrSettings initial={payments} onSaved={fetchSettings} />
             )}
 
             {/* Content - Operations Tab — read-only; set by BestoDine (Super Admin) */}

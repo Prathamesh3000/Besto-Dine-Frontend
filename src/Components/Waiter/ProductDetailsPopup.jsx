@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { X, Bookmark, Clock3, Users, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { menuSearchAPI } from '../../utils/api';
+import { getItemImage, hideBrokenImage } from '../../utils/image';
 
 const ProductDetailsPopup = ({ isOpen, onClose, product }) => {
     const [sizes, setSizes] = useState([]);
     const [toppings, setToppings] = useState([]);
+    // null when no image was uploaded → the image box stays blank.
+    const productImage = getItemImage(product);
 
     useEffect(() => {
         if (!isOpen || !product) return;
@@ -54,12 +57,16 @@ const ProductDetailsPopup = ({ isOpen, onClose, product }) => {
 
                         {/* Product Image */}
                         <div className="relative h-[280px] p-4">
-                            <img
-                                src={product?.image || 'https://placehold.co/400x300?text=No+Image'}
-                                alt={product?.name}
-                                className="w-full h-full object-cover rounded-[24px]"
-                                onError={(e) => { e.target.src = 'https://placehold.co/400x300?text=No+Image'; }}
-                            />
+                            {productImage ? (
+                                <img
+                                    src={productImage}
+                                    alt={product?.name}
+                                    className="w-full h-full object-cover rounded-[24px]"
+                                    onError={hideBrokenImage}
+                                />
+                            ) : (
+                                <div className="w-full h-full rounded-[24px] bg-gray-50" aria-hidden="true" />
+                            )}
                             {/* Veg Icon */}
                             <div className="absolute top-8 left-8 bg-white p-1 rounded-[4px] border border-green-600 flex items-center justify-center w-5 h-5">
                                 <div className={`w-2.5 h-2.5 rounded-full ${product?.isVeg !== false ? 'bg-green-600' : 'bg-red-500'}`} />

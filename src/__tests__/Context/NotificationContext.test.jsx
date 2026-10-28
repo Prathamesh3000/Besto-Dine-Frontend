@@ -22,7 +22,7 @@ vi.mock('@/utils/socket', async () => {
   }
 })
 const authState = vi.hoisted(() => ({ current: { user: null, isGuest: false } }))
-vi.mock('@/Context/AuthContext', () => ({ useAuth: () => authState.current }))
+vi.mock('@/Context/AuthContext', () => ({ useAuth: () => authState.current, CAPTAIN_ROLES: ['captain', 'admin', 'manager'] }))
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() }))
 vi.mock('react-hot-toast', () => ({ default: toast, toast }))
 
@@ -232,11 +232,21 @@ describe('socket events', () => {
 
   test.each([
     ['waiter', true], ['captain', true], ['admin', true], ['manager', true], ['chef', false], ['customer', false],
-  ])('counter-payment:requested shows a Settle prompt to %s: %s', async (role, shown) => {
+  ])('counter-payment:requested shows a toast (Settle only for captain roles) to %s: %s', async (role, shown) => {
     await ready(role)
     act(() => h.socket.serverEmit('counter-payment:requested', { table: 'Table 5', amount: 420, orderId: 'O1' }))
     expect(toast.custom.mock.calls.length > 0).toBe(shown)
     if (shown) expect(toast.custom.mock.calls[0][1]).toEqual({ id: 'counter-payment-O1', duration: Infinity })
+  })
+
+  test('a waiter gets an informational cash-request toast with NO Settle button', async () => {
+    const { render, screen } = await import('@testing-library/react')
+    await ready('waiter')
+    act(() => h.socket.serverEmit('counter-payment:requested', { table: 'Table 5', amount: 420, orderId: 'O1' }))
+    expect(toast.custom).toHaveBeenCalledTimes(1)
+    render(<>{toast.custom.mock.calls[0][0]({ id: 't1', visible: true })}</>)
+    expect(screen.getByText('Cash payment requested')).toBeInTheDocument()
+    expect(screen.queryByText(/Settle Cash/)).toBeNull()
   })
 
   test('re-renders do not stack listeners; unmount removes them all', async () => {

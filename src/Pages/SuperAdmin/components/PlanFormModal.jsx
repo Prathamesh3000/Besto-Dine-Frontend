@@ -42,6 +42,7 @@ const FEATURE_FIELDS = [
     { key: 'staffPerformance',    label: 'Staff Performance Metrics',  group: 'Management' },
     { key: 'paymentGateway',      label: 'Payment Gateway (Razorpay)', group: 'Management' },
     { key: 'kiosk',               label: 'Self-Order Kiosk',           group: 'Management' },
+    { key: 'incentives',          label: 'Staff Incentives',           group: 'Management' },
     { key: 'dataExport',          label: 'Data Export (CSV)',          group: 'Technical' },
     { key: 'accountingExport',    label: 'Tally / Accounting Export',  group: 'Technical' },
     { key: 'aggregatorOrders',    label: 'Zomato / Swiggy Orders',     group: 'Technical' },

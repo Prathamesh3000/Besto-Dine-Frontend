@@ -111,29 +111,4 @@ const ProtectedRoute = ({
     return children;
 };
 
-/**
- * CaptainOnlyRoute
- * Visually blocks waiters from captain-exclusive features without
- * redirecting them away from the page. Renders an inline message instead.
- */
-export function CaptainOnlyRoute({ children, fallback }) {
-    const { isCaptain, isLoading } = useAuth();
-
-    if (isLoading) return <AuthLoader />;
-
-    if (isCaptain) return children;
-
-    return fallback ?? (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-center px-6">
-            <div className="w-16 h-16 rounded-full bg-orange-50 flex items-center justify-center">
-                <i className="fi fi-rr-lock text-3xl text-orange-400" />
-            </div>
-            <h2 className="text-lg font-bold text-gray-800">Captain Access Only</h2>
-            <p className="text-sm text-gray-500 max-w-xs">
-                This feature is available to Captains only. Contact your captain to perform this action.
-            </p>
-        </div>
-    );
-}
-
 export default ProtectedRoute;

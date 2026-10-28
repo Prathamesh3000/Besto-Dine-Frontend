@@ -5,11 +5,14 @@ import {
     BellRing, UtensilsCrossed, Wallet, IndianRupee, Info, MapPin, ChevronRight,
 } from 'lucide-react';
 import { useNotifications } from '../../Context/NotificationContext';
+import { useAuth, CAPTAIN_ROLES } from '../../Context/AuthContext';
 import WaiterEmptyState from '../../Components/Waiter/WaiterEmptyState';
 import toast from 'react-hot-toast';
 
 const WaiterNotifications = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const canBill = CAPTAIN_ROLES.includes(user?.role);
     // Pull live data straight from NotificationContext — that's where the
     // socket listener (`notification:new` / `order:new` / etc.) and the
     // 15 s polling already live, so the page stays in sync without us
@@ -86,7 +89,11 @@ const WaiterNotifications = () => {
             case 'Payment':
                 // Counter-payment request → straight to the settle screen
                 // with cash preselected (same target as the live toast).
-                if (meta.orderId && meta.amount != null) {
+                // Billing is captain-only: a waiter's payment alert opens
+                // the orders page instead of the settle screen.
+                if (!canBill) {
+                    navigate('/waiter/orders', { state: navState });
+                } else if (meta.orderId && meta.amount != null) {
                     navigate('/waiter/payment', {
                         state: {
                             orderId: meta.orderId,
