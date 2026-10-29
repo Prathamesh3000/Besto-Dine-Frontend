@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { X, User, Phone, Copy, Check, Printer, CheckCircle2, Clock, Undo2, Receipt, Hash } from 'lucide-react'
 import { razorpayAPI } from '../../../utils/api'
+import { refundKeys } from '../../../utils/idempotency'
 import { toast } from 'react-hot-toast'
 import RefundModal from './RefundModal'
 
@@ -229,12 +230,16 @@ const PaymentDetailsModal = ({ payment, onClose, onRefundComplete }) => {
     const handleRefund = async (refundData) => {
         try {
             setRefundLoading(true)
-            const { data } = await razorpayAPI.refund({
+            const refundBody = {
                 orderId: payment._orderId || payment.id,
                 amount: refundData.amount,
                 reason: refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason,
-            })
+            }
+            // One key per refund action (order+amount+reason); a retry of the same
+            // refund reuses it so it can never be issued twice.
+            const { data } = await razorpayAPI.refund(refundBody, refundKeys.get('refund', JSON.stringify(refundBody)))
             if (data.success) {
+                refundKeys.reset('refund')
                 toast.success(data.message || 'Refund processed successfully')
                 setShowRefundModal(false)
                 onRefundComplete?.()

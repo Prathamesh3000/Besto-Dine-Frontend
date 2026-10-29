@@ -135,7 +135,7 @@ describe('TablesDashboard — held (awaiting-payment) order on a table', () => {
     expect(await screen.findByText('Counter-payment requested')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Mark Paid · Cash/ }))
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/orders/h1/status',
-      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 300 })))
+      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 300 }), expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) })))
   })
 
   test('no held order → no alert', async () => {

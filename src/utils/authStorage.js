@@ -156,8 +156,69 @@ export function userStorageKey(aud = currentAudience()) {
     return userKey(aud);
 }
 
+// ─── Cookie sessions (plan 3A.4, VITE_USE_COOKIE_AUTH) ──────────────────────
+// With the build flag on AND the server in cookie mode, the access + refresh
+// tokens live ONLY in httpOnly cookies the page cannot read. localStorage then
+// holds just the user blob and a non-secret marker `<aud>_cookie_session`
+// ({ accessExpiresAt, sessionExpiresAt } — timing hints, no credentials).
+// getToken()/getRefreshToken() return COOKIE_SESSION ("a session exists, the
+// browser carries it") so every `if (getToken())` signed-in check keeps
+// working; callers that put a token on the wire must use realToken().
+// A server that is NOT in cookie mode still answers with tokens in the body,
+// which take the legacy localStorage path below — so the flag is safe to ship
+// ahead of the backend flag.
+export const COOKIE_SESSION = 'cookie-session';
+
+/** Build-time opt-in (default OFF). Sends credentials + `X-Auth-Mode: cookie`. */
+export function cookieAuthRequested() {
+    try { return String(import.meta.env?.VITE_USE_COOKIE_AUTH || '').trim().toLowerCase() === 'true'; } catch { return false; }
+}
+
+const cookieMetaKey = (aud) => `${aud}_cookie_session`;
+const CSRF_KEY = 'bd_csrf';
+
+/** The real bearer string, or null for the cookie-session sentinel / nothing. */
+export function realToken(t) {
+    return t && t !== COOKIE_SESSION ? t : null;
+}
+
+export function getCookieSessionMeta(aud = currentAudience()) {
+    try {
+        const raw = localStorage.getItem(cookieMetaKey(aud));
+        return raw ? (JSON.parse(raw) || {}) : null;
+    } catch { return null; }
+}
+
+export function isCookieSession(aud = currentAudience()) {
+    return getCookieSessionMeta(aud) !== null;
+}
+
+export function setCsrfToken(token) {
+    try { if (token) sessionStorage.setItem(CSRF_KEY, token); } catch { /* ignore */ }
+}
+
+/** CSRF token for the X-CSRF-Token header: the live cookie when readable, else the stored copy. */
+export function getCsrfToken() {
+    try {
+        const m = typeof document !== 'undefined' && document.cookie.match(/(?:^|;\s*)bd_csrf=([^;]+)/);
+        if (m) return decodeURIComponent(m[1]);
+    } catch { /* ignore */ }
+    try { return sessionStorage.getItem(CSRF_KEY); } catch { return null; }
+}
+
+/** Record that `aud` is a cookie session (no tokens stored). `meta` = server's cookie-mode hints. */
+function writeCookieSession(aud, meta) {
+    localStorage.setItem(cookieMetaKey(aud), JSON.stringify({
+        accessExpiresAt: meta?.accessExpiresAt ?? null,
+        sessionExpiresAt: meta?.sessionExpiresAt ?? null,
+    }));
+    setCsrfToken(meta?.csrfToken);
+}
+
 export function getToken(aud = currentAudience()) {
-    try { return localStorage.getItem(tokenKey(aud)); } catch { return null; }
+    try {
+        return localStorage.getItem(tokenKey(aud)) || (isCookieSession(aud) ? COOKIE_SESSION : null);
+    } catch { return null; }
 }
 
 export function getStoredUser(aud = currentAudience()) {
@@ -170,22 +231,35 @@ export function getStoredUserObject(aud = currentAudience()) {
 }
 
 export function getRefreshToken(aud = currentAudience()) {
-    try { return localStorage.getItem(refreshKey(aud)); } catch { return null; }
+    try {
+        return localStorage.getItem(refreshKey(aud)) || (isCookieSession(aud) ? COOKIE_SESSION : null);
+    } catch { return null; }
 }
 
 // `refreshToken` is optional: callers that only have an access token
 // (legacy responses) leave any stored refresh token untouched.
-export function setAuth(token, user, aud = currentAudience(), refreshToken) {
+// `cookieMeta` ({ csrfToken, accessExpiresAt, sessionExpiresAt }) is passed
+// instead of tokens when the server answered in cookie mode: no token is
+// written, any legacy one for this audience is removed.
+export function setAuth(token, user, aud = currentAudience(), refreshToken, cookieMeta) {
     try {
-        localStorage.setItem(tokenKey(aud), token);
+        if (cookieMeta) {
+            localStorage.removeItem(tokenKey(aud));
+            localStorage.removeItem(refreshKey(aud));
+            writeCookieSession(aud, cookieMeta);
+        } else {
+            localStorage.setItem(tokenKey(aud), token);
+            localStorage.removeItem(cookieMetaKey(aud));
+            if (refreshToken) localStorage.setItem(refreshKey(aud), refreshToken);
+        }
         localStorage.setItem(userKey(aud), typeof user === 'string' ? user : JSON.stringify(user));
-        if (refreshToken) localStorage.setItem(refreshKey(aud), refreshToken);
     } catch { /* storage unavailable — nothing we can do */ }
 }
 
-/** Replace the token pair after /auth/refresh or a password change. */
-export function setTokens(token, refreshToken, aud = currentAudience()) {
+/** Replace the token pair after /auth/refresh or a password change (or refresh the cookie-session hints). */
+export function setTokens(token, refreshToken, aud = currentAudience(), cookieMeta) {
     try {
+        if (cookieMeta) { writeCookieSession(aud, cookieMeta); return; }
         if (token) localStorage.setItem(tokenKey(aud), token);
         if (refreshToken) localStorage.setItem(refreshKey(aud), refreshToken);
     } catch { /* ignore */ }
@@ -202,6 +276,7 @@ export function clearAuth(aud = currentAudience()) {
         localStorage.removeItem(tokenKey(aud));
         localStorage.removeItem(userKey(aud));
         localStorage.removeItem(refreshKey(aud));
+        localStorage.removeItem(cookieMetaKey(aud));
     } catch { /* ignore */ }
 }
 

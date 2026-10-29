@@ -266,6 +266,7 @@ const SuperAdminRestaurants     = lazy(() => import('./Pages/SuperAdmin/Restaura
 const SuperAdminRestaurantDetail = lazy(() => import('./Pages/SuperAdmin/RestaurantDetail'));
 const SuperAdminPlans      = lazy(() => import('./Pages/SuperAdmin/Plans'));
 const SuperAdminAuditLogs  = lazy(() => import('./Pages/SuperAdmin/AuditLogs'));
+const SuperAdminSecurity   = lazy(() => import('./Pages/SuperAdmin/Security'));
 const SuperAdminPendingApprovals = lazy(() => import('./Pages/SuperAdmin/PendingApprovals'));
 const SuperAdminSignupApplicationDetail = lazy(() => import('./Pages/SuperAdmin/approvals/SignupApplicationDetail'));
 const SuperAdminPlanChangeDetail = lazy(() => import('./Pages/SuperAdmin/approvals/PlanChangeDetail'));
@@ -295,8 +296,15 @@ const StaffDashboard = lazy(() => import('./Pages/Admin/StaffDashboard'));
 const CRMDashboard = lazy(() => import('./Pages/Admin/CRMDashboard'));
 const Bookings = lazy(() => import('./Pages/Admin/Bookings'));
 const Incentives = lazy(() => import('./Pages/Admin/Incentives'));
+const Payroll = lazy(() => import('./Pages/Admin/Payroll'));
+const Developers = lazy(() => import('./Pages/Admin/Developers'));
 const Inventory = lazy(() => import('./Pages/Admin/Inventory'));
+const CashClosing = lazy(() => import('./Pages/Admin/CashClosing'));
+const SupplierInvoices = lazy(() => import('./Pages/Admin/SupplierInvoices'));
+const Ledger = lazy(() => import('./Pages/Admin/Ledger'));
 const Settings = lazy(() => import('./Pages/Admin/Settings'));
+const AuditLog = lazy(() => import('./Pages/Admin/AuditLog'));
+const TaxReports = lazy(() => import('./Pages/Admin/TaxReports'));
 const Subscription = lazy(() => import('./Pages/Admin/Subscription'));
 const Branches = lazy(() => import('./Pages/Admin/Branches'));
 // ─── Legacy restaurant link redirect ──────────────────────────────────────
@@ -474,6 +482,7 @@ function App() {
                     <Route path="plans"            element={<SuperAdminPlans />} />
                     <Route path="payments"         element={<SuperAdminPayments />} />
                     <Route path="audit-logs"       element={<SuperAdminAuditLogs />} />
+                    <Route path="security"         element={<SuperAdminSecurity />} />
                 </Route>
 
                 {/* ── Admin Routes ────────────────────────────────────────── */}
@@ -495,9 +504,17 @@ function App() {
                   <Route path="staff" element={<StaffDashboard />} />
                   <Route path="crm" element={<RequireFeature feature="crm"><CRMDashboard /></RequireFeature>} />
                   <Route path="incentives" element={<RequireFeature feature="incentives"><Incentives /></RequireFeature>} />
+                  <Route path="payroll" element={<ProtectedRoute requiredRole={['admin']}><RequireFeature feature="tipManagement"><Payroll /></RequireFeature></ProtectedRoute>} />
+                  <Route path="developers" element={<RequireFeature feature="publicApi"><Developers /></RequireFeature>} />
                   <Route path="inventory" element={<RequireFeature feature="inventory"><Inventory /></RequireFeature>} />
+                  <Route path="accounts" element={<Navigate to="/admin/accounts/cash-closing" replace />} />
+                  <Route path="accounts/cash-closing" element={<ProtectedRoute requiredRole={['admin', 'manager']}><CashClosing /></ProtectedRoute>} />
+                  <Route path="accounts/supplier-invoices" element={<ProtectedRoute requiredRole={['admin', 'manager']}><RequireFeature feature="inventory"><SupplierInvoices /></RequireFeature></ProtectedRoute>} />
+                  <Route path="accounts/ledger" element={<ProtectedRoute requiredRole={['admin', 'manager']}><Ledger /></ProtectedRoute>} />
                   <Route path="bookings" element={<RequireFeature feature="advanceBookingTable"><Bookings /></RequireFeature>} />
                   <Route path="settings" element={<Settings />} />
+                  <Route path="audit" element={<ProtectedRoute requiredRole={['admin', 'manager']}><AuditLog /></ProtectedRoute>} />
+                  <Route path="reports/tax" element={<ProtectedRoute requiredRole={['admin', 'manager']}><RequireFeature feature="revenueAnalytics"><TaxReports /></RequireFeature></ProtectedRoute>} />
                   {/* Phase 5 step 4 — tenant self-service billing page.
                       Protected by adminOnly on the backend; the sidebar
                       also hides this nav item for non-admin staff. */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ChevronLeft, Clock, MapPin, Phone, ShoppingCart, ShieldCheck, User, Utensils } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -6,6 +6,7 @@ import Barcode from "react-barcode";
 import toast from "react-hot-toast";
 import { useCart } from "../../Context/CartContext";
 import api, { settingsAPI, razorpayAPI, walletAPI } from "../../utils/api";
+import { paymentKeys, withIdempotencyKey, createActionGuard } from "../../utils/idempotency";
 import { useAuth } from "../../Context/AuthContext";
 import { rememberOrderIds, getCustomerOrderSession } from "../../utils/customerOrderIds";
 import { useMenu } from "../../Context/MenuContext";
@@ -83,6 +84,10 @@ const TakeawayBillPreview = ({ state }) => {
   const { menuItems } = useMenu();
   const { user, isGuest, isLoggedIn } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
+  // Synchronous pay-button guard (state is async); released with releasePay.
+  const payGuardRef = useRef(null);
+  if (!payGuardRef.current) payGuardRef.current = createActionGuard();
+  const releasePay = () => { payGuardRef.current.leave(); setIsProcessing(false); };
   const [merchantName, setMerchantName] = useState("BestoDine");
   const {
     items: rawItems = [],
@@ -262,7 +267,7 @@ const TakeawayBillPreview = ({ state }) => {
         },
       } : {}),
       ...(walletAmountPaid > 0 ? { walletAmountPaid } : {}),
-    });
+    }, withIdempotencyKey(orderPayload?.clientIdempotencyKey || paymentKeys.get("order-create", `${grandTotal}|${paymentMethod}`)));
     if (!data.success) throw new Error("Failed to create order");
 
     // Remember only the order ID (#22); order screens re-fetch it from
@@ -299,10 +304,10 @@ const TakeawayBillPreview = ({ state }) => {
   const handleFullWalletPayment = async () => {
     try {
       const createdOrder = await createCafeOrder("wallet");
-      const payRes = await walletAPI.payWithWallet(walletAmount, createdOrder._id);
+      const payRes = await walletAPI.payWithWallet(walletAmount, createdOrder._id, paymentKeys.get("wallet-pay", `${walletAmount}|${createdOrder._id}`));
       if (!payRes?.data?.success) {
         toast.error("Wallet payment failed. Please try again.", { id: "pay-wallet-err" });
-        setIsProcessing(false);
+        releasePay();
         return;
       }
 
@@ -313,12 +318,12 @@ const TakeawayBillPreview = ({ state }) => {
       const backendMsg = err?.response?.data?.message || err?.message || "Wallet payment failed.";
       toast.error(backendMsg, { id: "pay-wallet-err" });
     } finally {
-      setIsProcessing(false);
+      releasePay();
     }
   };
 
   const handlePayBill = async () => {
-    if (isProcessing) return;
+    if (isProcessing || !payGuardRef.current.enter()) return;
     setIsProcessing(true);
 
     // Wallet covers it entirely → skip Razorpay, pay from wallet.
@@ -334,7 +339,7 @@ const TakeawayBillPreview = ({ state }) => {
     const scriptLoaded = await loadRazorpayScript();
     if (!scriptLoaded) {
       toast.error("Failed to load payment gateway. Please check your internet connection.", { id: "pay-gateway-load" });
-      setIsProcessing(false);
+      releasePay();
       return;
     }
 
@@ -345,10 +350,10 @@ const TakeawayBillPreview = ({ state }) => {
       // razorpayAmount = grandTotal - walletAmount (split-rail). Wallet
       // is only debited AFTER Razorpay clears so a Razorpay failure
       // never silently drains the customer's wallet.
-      const { data } = await razorpayAPI.createOrder(razorpayAmount, null);
+      const { data } = await razorpayAPI.createOrder(razorpayAmount, null, paymentKeys.get("rzp-create", `${razorpayAmount}|`));
       if (!data.success) {
         toast.error("Failed to initiate payment. Please try again.", { id: "pay-init" });
-        setIsProcessing(false);
+        releasePay();
         return;
       }
 
@@ -385,7 +390,7 @@ const TakeawayBillPreview = ({ state }) => {
             // portion paid — surface the payment_id for staff lookup.
             if (walletAmount > 0) {
               try {
-                const walletRes = await walletAPI.payWithWallet(walletAmount, createdOrder._id);
+                const walletRes = await walletAPI.payWithWallet(walletAmount, createdOrder._id, paymentKeys.get("wallet-pay", `${walletAmount}|${createdOrder._id}`));
                 if (!walletRes?.data?.success) {
                   throw new Error(walletRes?.data?.message || "Wallet deduction failed");
                 }
@@ -404,9 +409,10 @@ const TakeawayBillPreview = ({ state }) => {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
               cafeOrderId,
-            });
+            }, paymentKeys.get("rzp-verify", response.razorpay_payment_id));
 
             if (verifyRes.data.success) {
+              paymentKeys.reset();
               toast.success("Payment successful! Thank you.", { id: "pay-success", duration: 4000 });
               finishOrder(cafeOrderId, "online");
             } else {
@@ -440,7 +446,7 @@ const TakeawayBillPreview = ({ state }) => {
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_signature: response.razorpay_signature,
                 reason: backendMsg,
-              }).catch((refundErr) => {
+              }, paymentKeys.get("rzp-orphan", response.razorpay_payment_id)).catch((refundErr) => {
                 console.warn("Orphan-refund call failed:", refundErr);
               });
             } catch { /* fire-and-forget */ }
@@ -449,7 +455,7 @@ const TakeawayBillPreview = ({ state }) => {
               { id: "pay-verify-err", duration: 12000 }
             );
           }
-          setIsProcessing(false);
+          releasePay();
         },
         prefill: {
           name: user?.name || "",
@@ -458,20 +464,20 @@ const TakeawayBillPreview = ({ state }) => {
         },
         theme: { color: "#FE8301" },
         modal: {
-          ondismiss: () => setIsProcessing(false),
+          ondismiss: () => releasePay(),
         },
       };
 
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", (response) => {
         toast.error(`Payment failed: ${response.error.description}`);
-        setIsProcessing(false);
+        releasePay();
       });
       rzp.open();
     } catch (err) {
       console.error("Takeaway payment error:", err);
       toast.error("Failed to initiate payment. Please try again.");
-      setIsProcessing(false);
+      releasePay();
     }
   };
 

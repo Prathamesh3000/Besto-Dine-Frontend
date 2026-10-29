@@ -10,6 +10,7 @@ import { SkeletonStatGrid, SkeletonRows } from '../../Components/Common/Skeleton
 import { useAuth } from '../../Context/AuthContext'
 import LandingPageSettings from './components/LandingPageSettings'
 import PrinterSettings from './components/PrinterSettings'
+import TwoFactorSettings from '../../Components/Auth/TwoFactorSettings'
 import PaymentQrSettings from './components/PaymentQrSettings'
 import OperationsSummary from './components/OperationsSummary'
 import ParkingSettingsCard from './components/ParkingSettingsCard'
@@ -54,7 +55,7 @@ const Settings = () => {
     // /<slug>); branch-pinned admins see it read-only (the backend
     // refuses their saves with INHERITED_FROM_MAIN).
     const canEditPayments = ['admin', 'manager'].includes(user?.role)
-    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers', ...(canEditPayments ? ['Payment QR'] : []), 'Operations']
+    const tabs = ['General', 'Taxes & Charges', 'Delivery', 'Notification', 'Reservation', 'Wallet', 'Landing Page', 'Printers', ...(canEditPayments ? ['Payment QR'] : []), 'Operations', ...(user?.role === 'admin' ? ['Security'] : [])]
 
     // Loading state
     const [loading, setLoading] = useState(true)
@@ -637,7 +638,7 @@ const Settings = () => {
                 </div>
                 {/* The Landing Page tab saves on its own (PATCH /settings/landingPage);
                     "Save All" doesn't include it, so hide it there. */}
-                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && activeTab !== 'Payment QR' && activeTab !== 'Operations' && (
+                {activeTab !== 'Landing Page' && activeTab !== 'Printers' && activeTab !== 'Payment QR' && activeTab !== 'Operations' && activeTab !== 'Security' && (
                 <button
                     disabled={isSaving}
                     onClick={() => {
@@ -1125,6 +1126,9 @@ const Settings = () => {
 
             {/* Content - Operations Tab — read-only; set by BestoDine (Super Admin) */}
             {activeTab === 'Operations' && <OperationsSummary />}
+
+            {/* Content - Security Tab — optional two-factor authentication (admin / owner) */}
+            {activeTab === 'Security' && user?.role === 'admin' && <TwoFactorSettings />}
 
             {/* Content - Taxes & Charges Tab */}
             {activeTab === 'Taxes & Charges' && (

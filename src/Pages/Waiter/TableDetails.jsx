@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ProductDetailsPopup from '../../Components/Waiter/ProductDetailsPopup';
 import { useCart } from '../../Context/CartContext';
 import { waiterAPI, settingsAPI } from '../../utils/api';
+import { repeatKeys, adminOrderKeys } from '../../utils/idempotency';
 import { resolveImageUrl } from '../../utils/image';
 import useSocketEvent from '../../hooks/useSocketEvent';
 import toast from 'react-hot-toast';
@@ -244,7 +245,11 @@ const TableDetails = () => {
         }
 
         try {
-            const res = await waiterAPI.repeatItem(activeOrder._id, itemToRepeat._id, repeatQty);
+            const res = await waiterAPI.repeatItem(
+                activeOrder._id, itemToRepeat._id, repeatQty,
+                repeatKeys.get(`repeat:${activeOrder._id}:${itemToRepeat._id}`, repeatQty),
+            );
+            repeatKeys.reset(`repeat:${activeOrder._id}:${itemToRepeat._id}`);
             if (res.data.success) {
                 toast.success('Item added to order');
                 fetchActiveOrder();
@@ -312,8 +317,15 @@ const TableDetails = () => {
                     // which ignores toppings.
                     total: Number(computedSubmitTotal.toFixed(2)),
                 };
-                const res = await waiterAPI.createOrder(orderData);
+                // Stable per (table + payload): a retry after a network blip
+                // reuses the key, a changed cart gets a fresh one.
+                const createKeyName = `waiter-create:${tableId}`;
+                const res = await waiterAPI.createOrder(
+                    orderData,
+                    adminOrderKeys.get(createKeyName, JSON.stringify(orderData)),
+                );
                 if (res.data.success) {
+                    adminOrderKeys.reset(createKeyName);
                     toast.success('Order placed successfully');
                     clearCart();
                     fetchActiveOrder();

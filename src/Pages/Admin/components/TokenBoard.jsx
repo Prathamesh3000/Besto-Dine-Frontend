@@ -3,6 +3,7 @@ import { Ticket, Loader2, Eye, CheckCircle, RefreshCw, AlertTriangle } from 'luc
 import api from '../../../utils/api'
 import useSocketEvent from '../../../hooks/useSocketEvent'
 import toast from 'react-hot-toast'
+import { orderPayConfig, resetOrderPayKey, createActionGuard } from '../../../utils/idempotency'
 import OrderDetailsModal from './OrderDetailsModal'
 
 /**
@@ -132,21 +133,27 @@ const TokenBoard = ({
 
   useEffect(() => { if (onCountChange) onCountChange(orders.length) }, [orders.length, onCountChange])
 
+  const payGuardRef = useRef(null)
+  if (!payGuardRef.current) payGuardRef.current = createActionGuard()
+
   const markPaid = async (o) => {
-    if (busyId) return
+    if (busyId || !payGuardRef.current.enter()) return
     const id = o._id || o.id
     setBusyId(id)
     try {
-      await api.patch(`/orders/${id}/status`, {
+      const payBody = {
         paymentStatus: 'Paid',
         paymentMethod: 'cash',
         amountPaid: Math.max(0, Math.round(((Number(o.total) || 0) - (Number(o.manualDiscount) || 0)) * 100) / 100),
-      })
+      }
+      await api.patch(`/orders/${id}/status`, payBody, orderPayConfig(id, payBody))
+      resetOrderPayKey(id)
       toast.success(`Token ${o.tokenNumber} paid${o.status === 'awaiting-payment' ? ' — sent to the kitchen' : ''}`)
       await load(true)
     } catch (err) {
       toast.error('Failed to mark paid: ' + (err.response?.data?.message || err.message))
     } finally {
+      payGuardRef.current.leave()
       setBusyId(null)
     }
   }

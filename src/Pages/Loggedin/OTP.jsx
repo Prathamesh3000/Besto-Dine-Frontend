@@ -102,14 +102,15 @@ function OTP() {
         verified = true;
         // Store user data and token (same shape as login/register response)
         // eslint-disable-next-line no-unused-vars
-        const { token, refreshToken, success, needsName, ...userData } = data;
+        const { token, refreshToken, cookieAuth, csrfToken, accessExpiresAt, sessionExpiresAt, success, needsName, ...userData } = data;
         // Wipe another customer's cached data before this account's
         // screens load (a guest signing in keeps their cart).
         claimCustomerData(userData._id || userData.id, {
           keepUnowned: localStorage.getItem('isGuest') === 'true',
         });
         // Customer audience — stores token, user and the #28 refresh token.
-        setAuth(token, userData, 'customer', refreshToken);
+        if (cookieAuth) setAuth(token, userData, 'customer', refreshToken, { csrfToken, accessExpiresAt, sessionExpiresAt });
+        else setAuth(token, userData, 'customer', refreshToken);
         localStorage.setItem('cafeUser', JSON.stringify(userData));
         localStorage.removeItem('isGuest');
 

@@ -1,5 +1,8 @@
 import { io } from 'socket.io-client';
-import { getToken, identityMismatch } from './authStorage';
+import {
+    getToken, identityMismatch, currentAudience, cookieAuthRequested,
+    COOKIE_SESSION, realToken, getCookieSessionMeta,
+} from './authStorage';
 import { configuredApiUrl } from './apiOrigin';
 import { guestAccessJoinPayload } from './guestOrderAccess';
 
@@ -69,10 +72,16 @@ function readSocketAuth() {
     // is this tab's audience (platform / staff / customer — see
     // authStorage); if another tab has since signed a different account
     // into that audience, don't hand the server that account's token.
-    const token = (_skipUserToken || identityMismatch()) ? null : (getToken() || null);
+    const skip = _skipUserToken || identityMismatch();
+    // Cookie sessions (3A.4): the token is an httpOnly cookie the browser
+    // sends with the handshake (withCredentials below); we only name the
+    // audience so the server picks the right cookie, or 'none' to connect as
+    // a guest. realToken() drops the cookie-session sentinel.
+    const token = skip ? null : (realToken(getToken()) || null);
     return {
         token,
         scanToken: localStorage.getItem('scanToken') || null,
+        ...(cookieAuthRequested() ? { audience: skip ? 'none' : currentAudience() } : {}),
     };
 }
 
@@ -85,7 +94,9 @@ async function ensureFreshToken({ force = false } = {}) {
     if (identityMismatch()) return null;
     const token = getToken();
     if (!token) return null;
-    const exp = tokenExpMs(token);
+    const exp = token === COOKIE_SESSION
+        ? (getCookieSessionMeta()?.accessExpiresAt ?? null)
+        : tokenExpMs(token);
     if (!force && (!exp || exp - Date.now() > 60 * 1000)) return token;
     try {
         const { refreshSession } = await import('./api');
@@ -121,6 +132,8 @@ export function getSocket() {
             reconnectionDelay: 2000,
             reconnectionDelayMax: 15000,
             autoConnect: true,
+            // Cookie sessions: send the httpOnly access cookie with the handshake.
+            withCredentials: cookieAuthRequested(),
             // Server-side `io.use` reads these from socket.handshake.auth to
             // populate socket.data.{userId,role,branchId,restaurant,scan},
             // then auto-joins the tenant-scoped rooms for that identity.

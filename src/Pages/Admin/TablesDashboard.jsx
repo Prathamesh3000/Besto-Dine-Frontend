@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useContext } from 'react'
+import { orderPayConfig, resetOrderPayKey, createActionGuard } from '../../utils/idempotency'
 import { useLocation, Link as RouterLink } from 'react-router-dom'
 import { CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload, Ticket } from 'lucide-react'
 import TokenBoard from './components/TokenBoard'
@@ -10,6 +11,8 @@ import BulkAddTablesModal from './components/BulkAddTablesModal'
 import MergeTables from './components/MergeTables'
 import QRManagementModal from './components/QRManagementModal'
 import LateArrivalBanner from './components/LateArrivalBanner'
+import SplitTenderEditor from './components/SplitTenderEditor'
+import { buildPayments, summarizeLines } from '../../utils/tenderLines'
 import {
   statusColors, statusTextColors, hoverShadows, statusBadgeStyle,
   drawerHeaderBg, drawerTitleColor, statusLabel, LEGEND_ITEMS, InitialsAvatar
@@ -136,6 +139,9 @@ const TablesDashboard = () => {
   const [isEditingBill, setIsEditingBill] = useState(false)
   const [isPaymentView, setIsPaymentView] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null)
+  // Split payment (per-tender lines) for the counter settle.
+  const [splitMode, setSplitMode] = useState(false)
+  const [splitLines, setSplitLines] = useState([])
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false)
   const [isSettlingPayment, setIsSettlingPayment] = useState(false)
   const [showUnmergeModal, setShowUnmergeModal] = useState(false)
@@ -878,7 +884,12 @@ const TablesDashboard = () => {
   //   3. unmerges the group (see freeTableOrUnmergeGroup in
   //      Backend/utils/tableMerge.js) so every sibling goes back to 'free'.
   // Frontend then just refetches the grid and shows the success screen.
-  const settleBillPayment = async ({ amount, method }) => {
+  const settleGuardRef = useRef(null)
+  if (!settleGuardRef.current) settleGuardRef.current = createActionGuard()
+  const counterSettleGuardRef = useRef(null)
+  if (!counterSettleGuardRef.current) counterSettleGuardRef.current = createActionGuard()
+
+  const settleBillPayment = async ({ amount, method, payments = null }) => {
     if (!activeOrderMeta?._id) {
       toast.error('No active order to settle.')
       return false
@@ -891,6 +902,7 @@ const TablesDashboard = () => {
       toast.error('Bill amount looks invalid — please refresh.')
       return false
     }
+    if (!settleGuardRef.current.enter()) return false
     setIsSettlingPayment(true)
     try {
       // Marking Paid never changes order.total on the server (it 400s
@@ -900,13 +912,23 @@ const TablesDashboard = () => {
       // already persisted it on the primary round; the drawer's figure is
       // the sum across rounds, so it is not re-sent here.)
       const singleRound = (activeOrderMeta.orderCount || 1) <= 1
-      await api.patch(`/orders/${activeOrderMeta._id}/status`, {
-        paymentStatus: 'Paid',
-        paymentMethod: method,
-        amountPaid: Math.round(amount * 100) / 100,
-        ...(singleRound ? { manualDiscount: Number(discount) || 0 } : {}),
-      })
-      setActiveOrderMeta(m => m ? { ...m, paymentStatus: 'Paid', paymentMethod: method } : m)
+      // Split payment: the server derives method / amountPaid from the lines.
+      const payBody = payments
+        ? {
+            paymentStatus: 'Paid',
+            payments,
+            ...(singleRound ? { manualDiscount: Number(discount) || 0 } : {}),
+          }
+        : {
+            paymentStatus: 'Paid',
+            paymentMethod: method,
+            amountPaid: Math.round(amount * 100) / 100,
+            ...(singleRound ? { manualDiscount: Number(discount) || 0 } : {}),
+          }
+      await api.patch(`/orders/${activeOrderMeta._id}/status`, payBody, orderPayConfig(activeOrderMeta._id, payBody))
+      resetOrderPayKey(activeOrderMeta._id)
+      if (payments) { setSelectedPaymentMethod('Split'); setSplitMode(false); setSplitLines([]) }
+      setActiveOrderMeta(m => m ? { ...m, paymentStatus: 'Paid', paymentMethod: payments ? 'mixed' : method } : m)
       setIsPaymentSuccess(true)
       fetchDashboardData()
       return true
@@ -915,6 +937,7 @@ const TablesDashboard = () => {
       toast.error(err.response?.data?.message || 'Failed to record payment')
       return false
     } finally {
+      settleGuardRef.current.leave()
       setIsSettlingPayment(false)
     }
   }
@@ -1465,8 +1488,20 @@ const TablesDashboard = () => {
         {renderBillSummary({ editable: false })}
       </div>
       <div className="px-6 py-4 flex-shrink-0">
-        <p className="text-[14px] font-[600] text-[#101828] font-manrope mb-3">Select Payment Method</p>
-        <div className="space-y-3">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[14px] font-[600] text-[#101828] font-manrope">Select Payment Method</p>
+          <button
+            type="button"
+            onClick={() => { setSplitMode((v) => !v); setSplitLines([]) }}
+            className="text-[13px] font-[600] text-[#FE8301] font-manrope"
+          >
+            {splitMode ? 'Single method' : 'Split payment'}
+          </button>
+        </div>
+        {splitMode && (
+          <SplitTenderEditor due={payableTotal} lines={splitLines} onChange={setSplitLines} disabled={isSettlingPayment} />
+        )}
+        <div className={`space-y-3 ${splitMode ? 'hidden' : ''}`}>
           {['Cash', 'UPI', 'Card', 'Net Banking'].map((method) => (
             <label key={method} onClick={() => setSelectedPaymentMethod(method)} className="flex items-center gap-3 cursor-pointer">
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedPaymentMethod === method ? 'border-[#FE8301]' : 'border-[#D0D5DD]'}`}>
@@ -1480,10 +1515,11 @@ const TablesDashboard = () => {
       <div className="px-6 py-4 flex-shrink-0">
         <button
           onClick={() => {
-            settleBillPayment({ amount: payableTotal, method: selectedPaymentMethod })
+            if (splitMode) settleBillPayment({ amount: payableTotal, method: 'mixed', payments: buildPayments(splitLines) })
+            else settleBillPayment({ amount: payableTotal, method: selectedPaymentMethod })
           }}
-          disabled={!selectedPaymentMethod || isSettlingPayment || !activeOrderMeta?._id}
-          className={`w-full py-3 rounded-[10px] font-[600] text-[14px] font-manrope transition-colors flex items-center justify-center gap-2 ${selectedPaymentMethod && !isSettlingPayment && activeOrderMeta?._id ? 'bg-[#FE8301] text-white hover:bg-[#DC6803]' : 'bg-[#DFDCE0] text-[#B6AEB8] cursor-not-allowed'}`}
+          disabled={!(splitMode ? summarizeLines(splitLines, payableTotal).valid : selectedPaymentMethod) || isSettlingPayment || !activeOrderMeta?._id}
+          className={`w-full py-3 rounded-[10px] font-[600] text-[14px] font-manrope transition-colors flex items-center justify-center gap-2 ${(splitMode ? summarizeLines(splitLines, payableTotal).valid : selectedPaymentMethod) && !isSettlingPayment && activeOrderMeta?._id ? 'bg-[#FE8301] text-white hover:bg-[#DC6803]' : 'bg-[#DFDCE0] text-[#B6AEB8] cursor-not-allowed'}`}
         >
           {isSettlingPayment ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
           {isSettlingPayment ? 'Recording…' : 'Done'}
@@ -2237,6 +2273,7 @@ const TablesDashboard = () => {
                         ? activeOrderMeta.allOrderIds
                         : (activeOrderMeta?._id ? [activeOrderMeta._id] : [])
                       if (ids.length === 0) return
+                      if (!counterSettleGuardRef.current.enter()) return
                       try {
                         for (const oid of ids) {
                           // Each order's own total — looked up from
@@ -2250,16 +2287,20 @@ const TablesDashboard = () => {
                           const full = activeOrderMeta?.orders?.find(o => String(o._id) === String(oid))
                           const meta = activeOrderMeta?.allOrders?.find(o => String(o._id) === String(oid))
                           const amt = full ? orderAmountDue(full, taxConfig) : (Number(meta?.total) || 0)
-                          await api.patch(`/orders/${oid}/status`, {
+                          const payBody = {
                             paymentStatus: 'Paid',
                             paymentMethod: 'cash',
                             amountPaid: amt,
-                          })
+                          }
+                          await api.patch(`/orders/${oid}/status`, payBody, orderPayConfig(oid, payBody))
+                          resetOrderPayKey(oid)
                         }
                         setDrawerRefreshKey(k => k + 1)
                       } catch (err) {
                         console.error('Mark paid failed:', err)
                         alert(err?.response?.data?.message || 'Failed to mark as paid')
+                      } finally {
+                        counterSettleGuardRef.current.leave()
                       }
                     }}
                     className="mt-3 w-full h-[40px] rounded-xl bg-[#EF4F5F] hover:bg-[#D9354F] active:scale-[0.98] transition-all text-white font-manrope font-[600] text-[13px] flex items-center justify-center gap-2"

@@ -133,13 +133,23 @@ const AdminLayoutInner = () => {
     // Incentives: hidden (not PRO-badged) when the plan lacks the module,
     // and only for an admin or staff holding the `incentives` permission.
     { name: 'Incentives', path: '/admin/incentives', icon: 'fi fi-rr-gift',              permission: 'incentives',   feature: 'incentives', hideWhenLocked: true },
+    // Payroll (simple, attendance + wallet payout): admin only, shares the wallet's `tipManagement` gate.
+    { name: 'Payroll',    path: '/admin/payroll',   icon: 'fi fi-rr-wallet',             permission: null,           feature: 'tipManagement', roles: ['admin'] },
     // Phase 6 — branch management is an owner-only feature. A branch-pinned
     // Branch Admin has nothing to do here; the whole tab is hidden for them.
     { name: 'Branches',   path: '/admin/branches',  icon: 'fi fi-rr-building',           permission: null,           feature: 'multiBranch', ownerOnly: true },
+    // Developers: API keys + webhooks, owner only; PRO badge when the plan lacks `publicApi`.
+    { name: 'Developers', path: '/admin/developers', icon: 'fi fi-rr-code',             permission: null,           feature: 'publicApi', ownerOnly: true },
+    // Audit Log (task 2.1): admin and manager only (backend scopes managers to their own actions).
+    { name: 'Audit Log',  path: '/admin/audit',     icon: 'fi fi-rr-document',           permission: null,           feature: null, roles: ['admin', 'manager'] },
+    // Accounts (3B.3 / 3B.5): daily cash closing, supplier bills, simple ledger / P&L. Admin and manager only.
+    { name: 'Accounts',   path: '/admin/accounts',  icon: 'fi fi-rr-chart-pie',          permission: null,           feature: null, roles: ['admin', 'manager'] },
+    // GST report, Tally export, emailed report schedules (export aids). Admin and manager only.
+    { name: 'Tax Reports', path: '/admin/reports/tax', icon: 'fi fi-rr-file-invoice',     permission: null,           feature: 'revenueAnalytics', hideWhenLocked: true, roles: ['admin', 'manager'] },
   ]
 
   const navItems = buildAdminNavItems(allNavItems, {
-    isTenantOwner, hasPermission, hasFeature, isCrossBranchReadOnly,
+    isTenantOwner, hasPermission, hasFeature, isCrossBranchReadOnly, role: user?.role,
   })
 
   // Hard guard for deep links — if the URL points anywhere other than

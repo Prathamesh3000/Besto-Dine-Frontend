@@ -4,9 +4,10 @@
 //                    PRO badge ...
 //   hideWhenLocked : ... unless the item sets this, then it is hidden
 //   ownerOnly      : tenant owner only
-export function buildAdminNavItems(items, { isTenantOwner, hasPermission, hasFeature, isCrossBranchReadOnly }) {
+export function buildAdminNavItems(items, { isTenantOwner, hasPermission, hasFeature, isCrossBranchReadOnly, role }) {
     return items
         .filter(item => !item.ownerOnly || isTenantOwner)
+        .filter(item => !item.roles || item.roles.includes(role))
         .filter(item => !item.permission || hasPermission(item.permission))
         .filter(item => !(item.hideWhenLocked && item.feature && !hasFeature(item.feature)))
         // Cross-branch peek: only the Dashboard tab is reachable.

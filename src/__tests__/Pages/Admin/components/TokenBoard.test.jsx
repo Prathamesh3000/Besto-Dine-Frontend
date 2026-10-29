@@ -85,7 +85,7 @@ describe('TokenBoard', () => {
     await screen.findAllByTestId('token-card')
     await user.click(within(card('T-001')).getByRole('button', { name: 'Mark paid (cash)' }))
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/orders/h1/status',
-      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 250 })))
+      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 250 }), expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) })))
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('T-001'))
   })
 

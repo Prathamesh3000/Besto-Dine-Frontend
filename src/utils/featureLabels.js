@@ -27,6 +27,7 @@ export const FEATURE_LABELS = {
     kiosk:               'Self-Order Kiosk',
     revenueAnalytics:    'Revenue Analytics',
     incentives:          'Staff Incentives',
+    publicApi:           'API Keys & Webhooks',
 };
 
 // Levels of the tiered revenueAnalytics module.

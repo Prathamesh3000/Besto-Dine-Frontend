@@ -103,7 +103,7 @@ describe('OrdersDashboard — staff takeaway create', () => {
     await waitFor(() => expect(settingsAPI.getSettings).toHaveBeenCalled())
     await buildOrder(user, { discount: 100 })
 
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/orders', expect.objectContaining({ total: 525, manualDiscount: 100 })))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/orders', expect.objectContaining({ total: 525, manualDiscount: 100 }), expect.objectContaining({ headers: { 'Idempotency-Key': expect.any(String) } })))
     // Let the handler finish before checking nothing else was sent.
     await waitFor(() => expect(DINE.refetch).toHaveBeenCalled())
     expect(api.patch).not.toHaveBeenCalled()

@@ -4,6 +4,7 @@ import { Search, LayoutGrid, List, Eye, User, AlertCircle, Plus, ChevronLeft, Ch
 import OrderDetailsModal from './components/OrderDetailsModal'
 import AddTakeawayOrderModal from './components/AddTakeawayOrderModal'
 import api from '../../utils/api'
+import { adminOrderKeys, withIdempotencyKey, orderPayConfig, resetOrderPayKey, createActionGuard } from '../../utils/idempotency'
 import { useQueryClient } from '@tanstack/react-query'
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent'
 import { useAdminBranch } from '../../Context/AdminBranchContext'
@@ -140,24 +141,29 @@ const getTakeawayLabel = (status) => {
 // awaiting-payment orders.
 const HeldOrderActions = ({ order, onDone, className = '' }) => {
   const [busy, setBusy] = useState(false)
+  const guardRef = useRef(null)
+  if (!guardRef.current) guardRef.current = createActionGuard()
   if (!order || order.status !== HELD_STATUS) return null
   const orderId = order._id || order.id
 
   const markPaid = async (e) => {
     e.stopPropagation()
-    if (busy) return
+    if (busy || !guardRef.current.enter()) return
     setBusy(true)
     try {
-      await api.patch(`/orders/${orderId}/status`, {
+      const payBody = {
         paymentStatus: 'Paid',
         paymentMethod: 'cash',
         amountPaid: Math.max(0, Math.round(((Number(order.total) || 0) - (Number(order.manualDiscount) || 0)) * 100) / 100),
-      })
+      }
+      await api.patch(`/orders/${orderId}/status`, payBody, orderPayConfig(orderId, payBody))
+      resetOrderPayKey(orderId)
       toast.success(`${order.id || 'Order'} paid — sent to the kitchen`)
       if (onDone) onDone()
     } catch (err) {
       toast.error('Failed to mark paid: ' + (err.response?.data?.message || err.message))
     } finally {
+      guardRef.current.leave()
       setBusy(false)
     }
   }
@@ -1079,7 +1085,8 @@ const OrdersDashboard = () => {
                 // The staff discount travels in the create body as
                 // manualDiscount (the server stamps it at creation,
                 // outside order.total, no GST effect) — no follow-up PATCH.
-                await api.post('/orders', orderPayload)
+                await api.post('/orders', orderPayload, withIdempotencyKey(adminOrderKeys.get('create', JSON.stringify(orderPayload))))
+                adminOrderKeys.reset('create')
                 toast.success('Takeaway order placed successfully!')
                 setShowAddTakeawayModal(false)
                 fetchOrders()
@@ -1169,7 +1176,8 @@ const OrdersDashboard = () => {
           isBranchLocked={isBranchLocked}
           onPlaceOrder={async (orderPayload) => {
             try {
-              const { data } = await api.post('/orders', orderPayload)
+              const { data } = await api.post('/orders', orderPayload, withIdempotencyKey(adminOrderKeys.get('create', JSON.stringify(orderPayload))))
+              adminOrderKeys.reset('create')
               const token = data?.order?.tokenNumber
               toast.success(token ? `Order placed — token ${token}` : 'Dine-in order placed')
               fetchOrders()

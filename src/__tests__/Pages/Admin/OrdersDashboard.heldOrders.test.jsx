@@ -94,7 +94,7 @@ describe('OrdersDashboard — awaiting-payment orders', () => {
     expect(buttons).toHaveLength(1)
     await user.click(buttons[0])
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/orders/ord-held/status',
-      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 250 })))
+      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 250 }), expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) })))
     await waitFor(() => expect(archive.refetch).toHaveBeenCalled())
   })
 
@@ -125,6 +125,6 @@ describe('OrdersDashboard — awaiting-payment orders', () => {
     expect(within(card).getByText('Awaiting payment')).toBeInTheDocument()
     await user.click(within(card).getByRole('button', { name: 'Mark paid (cash)' }))
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/orders/ort-held/status',
-      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash' })))
+      expect.objectContaining({ paymentStatus: 'Paid', paymentMethod: 'cash' }), expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) })))
   })
 })

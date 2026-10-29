@@ -9,7 +9,7 @@ export const MODULE_KEYS = [
     'tipManagement', 'inventory', 'multiBranch', 'dataExport', 'accountingExport', 'aggregatorOrders',
     'walletLoyalty', 'couponPromotions', 'campaigns', 'crm', 'advanceBookingTable', 'staffPerformance',
     'advanceBookingHall', 'kiosk', 'eInvoice', 'webhooks', 'whiteLabelBranding',
-    'incentives',
+    'incentives', 'publicApi',
 ];
 
 const isOn = (v) => v === true || v === 'basic' || v === 'standard' || v === 'advanced';

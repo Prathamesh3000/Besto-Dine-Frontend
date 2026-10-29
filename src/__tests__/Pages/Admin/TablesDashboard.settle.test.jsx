@@ -76,7 +76,7 @@ async function openAndSettle(order) {
   const showsAmountDue = screen.queryAllByText('Amount Due').length > 0
   await user.click(screen.getByText('Cash'))
   await user.click(screen.getByRole('button', { name: /Done/ }))
-  await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/orders/oid1/status', expect.objectContaining({ paymentStatus: 'Paid' })))
+  await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/orders/oid1/status', expect.objectContaining({ paymentStatus: 'Paid' }), expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) })))
   const body = api.patch.mock.calls.find((c) => c[0] === '/orders/oid1/status' && c[1].paymentStatus === 'Paid')[1]
   return { body, showsAmountDue }
 }

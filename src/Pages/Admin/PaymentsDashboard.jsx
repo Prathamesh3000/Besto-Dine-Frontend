@@ -7,6 +7,7 @@ import PaymentDetailsModal from './components/PaymentDetailsModal'
 import RefundModal from './components/RefundModal'
 import RefundsDashboard from './RefundsDashboard'
 import api, { razorpayAPI } from '../../utils/api'
+import { refundKeys } from '../../utils/idempotency'
 import { SkeletonRows } from '../../Components/Common/Skeleton'
 import { adminKeys } from '../../hooks/queries/queryKeys'
 
@@ -123,12 +124,16 @@ const PaymentsDashboard = () => {
         if (!refundPayment) return
         try {
             setRefundLoading(true)
-            const { data } = await razorpayAPI.refund({
+            const refundBody = {
                 orderId: refundPayment._orderId || refundPayment.id,
                 amount: refundData.amount,
                 reason: refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason,
-            })
+            }
+            // One key per refund action (order+amount+reason); a retry of the same
+            // refund reuses it so it can never be issued twice.
+            const { data } = await razorpayAPI.refund(refundBody, refundKeys.get('refund', JSON.stringify(refundBody)))
             if (data.success) {
+                refundKeys.reset('refund')
                 toast.success(data.message || 'Refund processed successfully')
                 fetchPayments()
             }

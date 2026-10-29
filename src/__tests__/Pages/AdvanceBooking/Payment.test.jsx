@@ -110,7 +110,7 @@ describe('AdvanceBooking Payment — amounts', () => {
     const confirm = screen.getAllByRole('button', { name: 'Confirm Booking' })[0]
     expect(confirm).toBeEnabled()
     await user.click(confirm)
-    await waitFor(() => expect(advanceBookingAPI.createBooking).toHaveBeenCalledWith(expect.objectContaining({ total: 0 })))
+    await waitFor(() => expect(advanceBookingAPI.createBooking).toHaveBeenCalledWith(expect.objectContaining({ total: 0 }), expect.any(String)))
     expect(razorpayAPI.createOrder).not.toHaveBeenCalled()
   })
 })
@@ -121,7 +121,7 @@ describe('AdvanceBooking Payment — Razorpay flow', () => {
     await startPayment(user, 'Card')
 
     expect(razorpayAPI.createOrder).toHaveBeenCalledTimes(1)
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(7525)
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(7525, undefined, expect.any(String))
     expect(rzp.options).toMatchObject({
       key: 'rzp_test', amount: 752500, currency: 'INR', order_id: 'order_RZ1',
       prefill: { name: 'Asha', email: 'a@x.in', contact: '9999999999' },
@@ -129,11 +129,11 @@ describe('AdvanceBooking Payment — Razorpay flow', () => {
 
     await act(() => rzp.options.handler(RZP_RESPONSE))
 
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith(RZP_RESPONSE)
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith(RZP_RESPONSE, expect.any(String))
     expect(advanceBookingAPI.createBooking).toHaveBeenCalledWith(expect.objectContaining({
       paymentMethod: 'card', total: 15049, paymentType: 'advance',
       razorpayPaymentId: 'pay_RZ1', razorpay_order_id: 'order_RZ1', razorpay_signature: 'sig_1',
-    }))
+    }), expect.any(String))
     expect(clearCart).toHaveBeenCalled()
     await user.click(await screen.findByRole('button', { name: 'View Booking Summary' }))
     expect(await screen.findByText('booking-success')).toBeInTheDocument()
@@ -152,7 +152,7 @@ describe('AdvanceBooking Payment — Razorpay flow', () => {
     expect(razorpayAPI.orphanRefund).toHaveBeenCalledWith({
       razorpay_payment_id: 'pay_RZ1', razorpay_order_id: 'order_RZ1', razorpay_signature: 'sig_1',
       reason: 'Hall already booked',
-    })
+    }, expect.any(String))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringMatching(/refunded automatically/), expect.anything()))
     payButtons().forEach((b) => expect(b).toBeEnabled()) // can retry
   })

@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { X, User, Clock, AlertCircle, Phone, ChevronDown, ChevronUp, Check, Utensils, Info, Link } from 'lucide-react'
 import api, { settingsAPI } from '../../../utils/api'
 import toast from 'react-hot-toast'
+import { orderPayConfig, resetOrderPayKey, createActionGuard } from '../../../utils/idempotency'
 import { billFromOrder, toTaxConfig } from '../../../utils/billing'
+import SplitTenderEditor from './SplitTenderEditor'
+import { buildPayments, summarizeLines, round2 } from '../../../utils/tenderLines'
 
 const PAYMENT_METHODS = ['Cash', 'UPI', 'Card', 'Net Banking']
 
@@ -17,6 +20,9 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
   // isBillExpanded state removed — was unused
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null)
   const [paymentDone, setPaymentDone] = useState(false)
+  // Split payment (per-tender lines); off by default = the single-method flow.
+  const [splitMode, setSplitMode] = useState(false)
+  const [splitLines, setSplitLines] = useState([])
   const [loading, setLoading] = useState(false)
   const [taxConfig, setTaxConfig] = useState(() => toTaxConfig(null))
   const [deliveryPartnerName, setDeliveryPartnerName] = useState(order?.delivery?.partnerName || '')
@@ -65,19 +71,34 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose]);
 
+  const payGuardRef = useRef(null);
+  if (!payGuardRef.current) payGuardRef.current = createActionGuard();
+
+  // What is due: the bill less the staff manual discount.
+  // A split only has to cover what is still unpaid (a wallet part-payment is already recorded).
+  const amountDue = Math.max(0, round2((Number(order?.total) || 0) - (Number(order?.manualDiscount) || 0) - (Number(order?.amountPaid) || 0)))
+  const splitValid = summarizeLines(splitLines, amountDue).valid
+
   const handleCompletePayment = async () => {
-    if (!selectedPaymentMethod) return;
+    if (splitMode ? !splitValid : !selectedPaymentMethod) return;
+    if (!payGuardRef.current.enter()) return;
+    const orderId = order._id || order.id;
     try {
       setLoading(true);
-      const orderId = order._id || order.id;
-      const res = await api.patch(`/orders/${orderId}/status`, {
+      const payBody = splitMode ? {
+        paymentStatus: 'Paid',
+        payments: buildPayments(splitLines),
+      } : {
         paymentStatus: 'Paid',
         paymentMethod: selectedPaymentMethod,
         // What is due: the bill less the staff manual discount. Marking
         // Paid never changes order.total on the server.
         amountPaid: Math.max(0, Math.round(((Number(order.total) || 0) - (Number(order.manualDiscount) || 0)) * 100) / 100)
-      });
+      };
+      const res = await api.patch(`/orders/${orderId}/status`, payBody, orderPayConfig(orderId, payBody));
       if (res.data.success) {
+         resetOrderPayKey(orderId);
+         if (splitMode) { setSelectedPaymentMethod('Split'); setSplitMode(false); setSplitLines([]) }
          setPaymentDone(true);
          if (onRefresh) onRefresh();
       }
@@ -85,6 +106,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
       console.error('Failed to update payment status:', error);
       toast.error('Failed to update payment: ' + (error.response?.data?.message || error.message));
     } finally {
+      payGuardRef.current.leave();
       setLoading(false);
     }
   };
@@ -790,10 +812,22 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
                       <>
                         {/* ── Select Payment Method ── */}
                         <div>
-                          <p className="text-[14px] font-[600] font-manrope text-[#1A181B] mb-3">
-                            Select Payment Method
-                          </p>
-                          <div className="flex flex-col gap-3">
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-[14px] font-[600] font-manrope text-[#1A181B]">
+                              Select Payment Method
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => { setSplitMode((v) => !v); setSplitLines([]) }}
+                              className="text-[13px] font-[600] font-manrope text-[#FE8301]"
+                            >
+                              {splitMode ? 'Single method' : 'Split payment'}
+                            </button>
+                          </div>
+                          {splitMode && (
+                            <SplitTenderEditor due={amountDue} lines={splitLines} onChange={setSplitLines} disabled={loading} />
+                          )}
+                          <div className={`flex flex-col gap-3 ${splitMode ? 'hidden' : ''}`}>
                             {PAYMENT_METHODS.map((method) => (
                               <label
                                 key={method}
@@ -825,7 +859,7 @@ const OrderDetailsModal = ({ order, onClose, onRefresh }) => {
                         {/* ── Done Button ── */}
                         <button
                           onClick={handleCompletePayment}
-                          disabled={!selectedPaymentMethod || loading}
+                          disabled={(splitMode ? !splitValid : !selectedPaymentMethod) || loading}
                           className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-[#FE8301] hover:bg-[#e07400] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-[15px] font-[700] font-manrope transition-colors"
                         >
                           {loading ? (

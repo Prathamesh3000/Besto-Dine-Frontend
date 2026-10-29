@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Loader2, RefreshCw, Search, Filter, Calendar, AlertCircle, CheckCircle2, Clock, Check, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { waiterAPI, razorpayAPI, refundRequestAPI } from '../../utils/api'
+import { refundKeys } from '../../utils/idempotency'
 import RefundModal from './components/RefundModal'
 import { SkeletonRows } from '../../Components/Common/Skeleton'
 import { useAdminBranch } from '../../Context/AdminBranchContext'
@@ -193,12 +194,16 @@ const RefundsDashboard = ({ embedded = false } = {}) => {
         if (!modalPayment) return
         setModalLoading(true)
         try {
-            const { data } = await razorpayAPI.refund({
+            const refundBody = {
                 orderId: modalPayment._orderId || modalPayment.id,
                 amount: refundData.amount,
                 reason: refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason,
-            })
+            }
+            // One key per refund action (order+amount+reason); a retry of the same
+            // refund reuses it so it can never be issued twice.
+            const { data } = await razorpayAPI.refund(refundBody, refundKeys.get('refund', JSON.stringify(refundBody)))
             if (data.success) {
+                refundKeys.reset('refund')
                 toast.success(data.message || 'Refund processed')
                 setModalPayment(null)
                 fetchData()

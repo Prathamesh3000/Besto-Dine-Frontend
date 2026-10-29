@@ -78,7 +78,7 @@ describe('Kiosk PayOption — amount', () => {
     renderPay({ orderType: kioskType })
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
     expect(screen.getByText(expected.total.toFixed(2))).toBeInTheDocument()
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(expected.total, null)
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(expected.total, null, expect.any(String))
 
     await act(() => rzp.options.handler(RZP))
     const [url, payload] = api.post.mock.calls[0]
@@ -86,10 +86,11 @@ describe('Kiosk PayOption — amount', () => {
     expect(payload).toMatchObject({ type: backendType, source: 'kiosk', total: expected.total, paymentMethod: 'online' })
     expect(payload.items[0]).toMatchObject({ menuItem: 'b1', price: 149.5, quantity: 2, instructions: 'Size: Large; Extras: 2× Cheese' })
     expect(payload.clientIdempotencyKey).toBeTruthy()
+    expect(api.post.mock.calls[0][2].headers['Idempotency-Key']).toBe(payload.clientIdempotencyKey)
     // Decision 4c: the checkout ids travel with the create so the server
     // links the payment to the order the moment it is written.
     expect(payload.razorpayPayment).toEqual(RZP)
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'K-001' })
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'K-001' }, expect.any(String))
     expect(await screen.findByText('payment-success')).toBeInTheDocument()
     expect(localStorage.getItem(KIOSK_KEYS.CART)).toBeNull()
     expect(localStorage.getItem(KIOSK_KEYS.IDEMPOTENCY_KEY)).toBeNull()
@@ -98,7 +99,7 @@ describe('Kiosk PayOption — amount', () => {
 
   test('router state from the cart wins (the amount the customer was quoted)', async () => {
     renderPay({ state: { totalPayment: 460.84, subtotal: SUBTOTAL, gst: 19.95, serviceCharge: 39.9 } })
-    await waitFor(() => expect(razorpayAPI.createOrder).toHaveBeenCalledWith(460.84, null))
+    await waitFor(() => expect(razorpayAPI.createOrder).toHaveBeenCalledWith(460.84, null, expect.any(String)))
   })
 })
 

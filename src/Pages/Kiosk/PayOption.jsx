@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api, { razorpayAPI, settingsAPI } from '../../utils/api';
+import { paymentKeys, withIdempotencyKey } from '../../utils/idempotency';
 import {
     KIOSK_KEYS,
     readCart,
@@ -206,7 +207,7 @@ export default function PayOption() {
             // the actual cafe order until payment succeeds, so a customer
             // who abandons at the modal never leaves an orphan order in
             // the kitchen queue (mirrors the takeaway flow in Payment.jsx).
-            const { data: rzpRes } = await razorpayAPI.createOrder(totalPayment, null);
+            const { data: rzpRes } = await razorpayAPI.createOrder(totalPayment, null, paymentKeys.get('rzp-create', `${totalPayment}|`));
             if (!rzpRes?.success) throw new Error(rzpRes?.message || 'Failed to initiate payment');
 
             setTimerPaused(true);
@@ -230,7 +231,8 @@ export default function PayOption() {
                     let cafeOrder = null;
                     let cafeTrackingToken = null;
                     try {
-                        const { data: orderRes } = await api.post('/orders', buildOrderPayload(response));
+                        const orderBody = buildOrderPayload(response);
+                        const { data: orderRes } = await api.post('/orders', orderBody, withIdempotencyKey(orderBody.clientIdempotencyKey));
                         if (!orderRes?.success) throw new Error('Order creation failed after payment');
                         cafeOrder = orderRes.order;
                         cafeTrackingToken = orderRes.trackingToken || null;
@@ -253,7 +255,8 @@ export default function PayOption() {
                             razorpay_payment_id: response.razorpay_payment_id,
                             razorpay_signature:  response.razorpay_signature,
                             cafeOrderId:         cafeOrder.orderId,
-                        });
+                        }, paymentKeys.get('rzp-verify', response.razorpay_payment_id));
+                        paymentKeys.reset();
                         if (!verifyRes?.success) throw new Error('Payment verification failed');
                     } catch (err) {
                         // Order DID get created (we have cafeOrder.orderId)

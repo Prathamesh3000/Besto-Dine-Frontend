@@ -90,6 +90,7 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
         healthLevel: editItem?.healthLevel || '',
         vegType: editItem?.vegType || 'veg',
         prepStation: editItem?.prepStation || 'kitchen',
+        hsnCode: editItem?.hsnCode || '',
         unit: editItem?.unit || 'pieces',
         isFeatured: editItem?.isFeatured || false,
         healthTags: editItem?.healthTags || [],
@@ -894,6 +895,21 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
                             </div>
                         </div>
 
+
+                        {/* Optional HSN/SAC for GST reports (empty = category / default code). */}
+                        <div className="mt-6">
+                            <label htmlFor="menu-item-hsn" className="block text-sm font-semibold text-gray-700 mb-2">HSN/SAC code (optional)</label>
+                            <input
+                                id="menu-item-hsn"
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={8}
+                                value={formData.hsnCode}
+                                onChange={(e) => setFormData(p => ({ ...p, hsnCode: e.target.value.replace(/\D/g, '') }))}
+                                placeholder="Leave empty to use the default (996331)"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            />
+                        </div>
 
                         {/* Available Days */}
                         <div className="mt-6">

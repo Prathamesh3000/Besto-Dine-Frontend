@@ -8,7 +8,7 @@ import { isGuestSessionExpired, clearGuestSession } from '../utils/guestSession'
 import {
     currentAudience, audienceForUser, setEntryAudience, userStorageKey, getStoredUserObject,
     setTabIdentity, clearTabIdentity, STAFF_SIDE_AUDIENCES,
-    getToken, getRefreshToken, getStoredUser, setAuth, setStoredUser, clearAuth,
+    getToken, getRefreshToken, getStoredUser, setAuth, setStoredUser, clearAuth, realToken,
 } from '../utils/authStorage';
 import { claimCustomerData, clearCustomerPersonalData } from '../utils/customerSession';
 import SessionChangedOverlay from '../Components/Common/SessionChangedOverlay';
@@ -200,7 +200,9 @@ export function AuthProvider({ children }) {
         };
     }, []);
 
-    const login = async (email, password, loginType, expectedRole) => {
+    // Shared by /auth/login and the 2FA step (/auth/2fa/verify): both end
+    // in the same { token, refreshToken, ...user } session payload.
+    const signIn = async (path, payload) => {
         // Read before isGuest is cleared below — a guest signing in keeps
         // the cart they built (see claimCustomerData).
         const wasGuest = localStorage.getItem('isGuest') === 'true';
@@ -210,14 +212,16 @@ export function AuthProvider({ children }) {
             // error display (formError banner above the form). Without
             // this, both the interceptor and the page would fire toasts
             // for the same failure (double-toast).
-            const response = await api.post(
-                '/auth/login',
-                { email, password, loginType, expectedRole },
-                { _silent: true },
-            );
+            const response = await api.post(path, payload, { _silent: true });
+            // Optional TOTP 2FA (admin / owner / superadmin): no session yet —
+            // the login page shows a code step and calls verifyTwoFactor.
+            if (response.data?.twoFactorRequired) {
+                return { success: false, twoFactorRequired: true, challengeToken: response.data.challengeToken };
+            }
             // #28 — refreshToken is kept out of the user object and stored
             // separately (audience-scoped) for silent session renewal.
-            const { token, refreshToken, ...userData } = response.data;
+            const { token, refreshToken, cookieAuth, csrfToken, accessExpiresAt, sessionExpiresAt, ...userData } = response.data;
+            const cookieMeta = cookieAuth ? { csrfToken, accessExpiresAt, sessionExpiresAt } : undefined;
 
             // Another customer's cached orders / cart / allergies must never
             // surface in this account. Staff logins don't touch customer data.
@@ -235,7 +239,7 @@ export function AuthProvider({ children }) {
             const tabAud = currentAudience();
             const aud = tabAud === 'customer' ? 'customer' : (audienceForUser(userData) || tabAud);
             if (STAFF_SIDE_AUDIENCES.includes(aud)) setEntryAudience(aud);
-            setAuth(token, userData, aud, refreshToken);
+            setAuth(token, userData, aud, refreshToken, cookieMeta);
             setTabIdentity(aud, userData);
             setAudience(aud);
             setSessionChange(null);
@@ -273,6 +277,13 @@ export function AuthProvider({ children }) {
         }
     };
 
+    const login = (email, password, loginType, expectedRole) =>
+        signIn('/auth/login', { email, password, loginType, expectedRole });
+
+    /** Second step of a 2FA login: `{ code }` (authenticator) or `{ recoveryCode }`. */
+    const verifyTwoFactor = (challengeToken, { code, recoveryCode } = {}) =>
+        signIn('/auth/2fa/verify', { challengeToken, ...(recoveryCode ? { recoveryCode } : { code }) });
+
     /**
      * Exchange a Google ID token for a BestoDine session.
      *
@@ -287,7 +298,8 @@ export function AuthProvider({ children }) {
             // _silent — the login page owns the error copy, same as
             // login() and register() above.
             const response = await api.post('/auth/google', { credential }, { _silent: true });
-            const { token, refreshToken, needsMobile, ...userData } = response.data;
+            const { token, refreshToken, cookieAuth, csrfToken, accessExpiresAt, sessionExpiresAt, needsMobile, ...userData } = response.data;
+            const cookieMeta = cookieAuth ? { csrfToken, accessExpiresAt, sessionExpiresAt } : undefined;
 
             // A Google sign-in may be a brand-new account OR a return
             // visit. claimCustomerData wipes cached personal data when
@@ -298,7 +310,7 @@ export function AuthProvider({ children }) {
             // Customer-only flow (Pages/Loggedin/Login.jsx) → this tab's
             // (customer) audience.
             const aud = currentAudience();
-            setAuth(token, userData, aud, refreshToken);
+            setAuth(token, userData, aud, refreshToken, cookieMeta);
             setTabIdentity(aud, userData);
             setAudience(aud);
             setSessionChange(null);
@@ -333,14 +345,15 @@ export function AuthProvider({ children }) {
             const response = await api.post('/auth/register', formData, { _silent: true });
             // #28 — refreshToken is kept out of the user object and stored
             // separately (audience-scoped) for silent session renewal.
-            const { token, refreshToken, ...userData } = response.data;
+            const { token, refreshToken, cookieAuth, csrfToken, accessExpiresAt, sessionExpiresAt, ...userData } = response.data;
+            const cookieMeta = cookieAuth ? { csrfToken, accessExpiresAt, sessionExpiresAt } : undefined;
 
             // A brand-new account owns nothing cached in this browser
             // (except a guest's own cart when a guest signs up).
             claimCustomerData(userData._id || userData.id, { keepUnowned: wasGuest });
 
             const aud = currentAudience();
-            setAuth(token, userData, aud, refreshToken);
+            setAuth(token, userData, aud, refreshToken, cookieMeta);
             setTabIdentity(aud, userData);
             setAudience(aud);
             setSessionChange(null);
@@ -413,9 +426,11 @@ export function AuthProvider({ children }) {
     // (#15) and closes an auto-opened staff shift. Credentials are captured
     // before the local teardown clears them.
     const notifyServerLogout = (path = '/auth/logout', aud = audRef.current || currentAudience()) => {
-        const token = getToken(aud);
-        const refreshToken = getRefreshToken(aud);
-        if (!token && !refreshToken) return Promise.resolve();
+        // Cookie sessions hold no readable tokens (getToken() is a sentinel):
+        // the httpOnly cookies ride along and the server revokes from them.
+        const token = realToken(getToken(aud));
+        const refreshToken = realToken(getRefreshToken(aud));
+        if (!getToken(aud) && !getRefreshToken(aud)) return Promise.resolve();
         return api.post(
             path,
             { refreshToken },
@@ -662,6 +677,7 @@ export function AuthProvider({ children }) {
         superadminLevel: user?.superadminLevel || '',
         mustChangePassword,
         login,
+        verifyTwoFactor,
         register,
         loginWithGoogle,
         logout,

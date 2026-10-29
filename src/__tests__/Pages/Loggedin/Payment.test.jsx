@@ -139,11 +139,11 @@ describe('Payment — online (dine-in, order already exists)', () => {
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
 
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(1249.5, 'ORD-20261003-0042')
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(1249.5, 'ORD-20261003-0042', expect.any(String))
     expect(rzp.options).toMatchObject({ key: 'rzp_k', amount: 124950, order_id: 'order_A', currency: 'INR' })
 
     await act(() => rzp.options.handler(RZP))
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-20261003-0042' })
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-20261003-0042' }, expect.any(String))
     expect(markDineInBillSettled).toHaveBeenCalled()
     expect(await screen.findByText('orders-page')).toBeInTheDocument()
     expect(razorpayAPI.orphanRefund).not.toHaveBeenCalled()
@@ -197,6 +197,31 @@ describe('Payment — online (dine-in, order already exists)', () => {
     expect(razorpayAPI.createOrder).toHaveBeenCalledTimes(1)
   })
 
+  test('a second Razorpay checkout cannot open while one is on screen (even after payment.failed re-enables Pay)', async () => {
+    const user = renderPayment(DINE_IN)
+    await choose(user, 'Pay Online')
+    await user.click(payBtn())
+    await waitFor(() => expect(rzp.open).toHaveBeenCalledTimes(1))
+    act(() => rzp.handlers['payment.failed']({ error: { description: 'Bank declined' } }))
+    expect(payBtn()).toBeEnabled()
+    await user.click(payBtn())
+    expect(razorpayAPI.createOrder).toHaveBeenCalledTimes(1)
+    expect(rzp.open).toHaveBeenCalledTimes(1)
+  })
+
+  test('retrying the same checkout reuses the same Idempotency-Key for create-order', async () => {
+    const user = renderPayment(DINE_IN)
+    await choose(user, 'Pay Online')
+    await user.click(payBtn())
+    await waitFor(() => expect(rzp.open).toHaveBeenCalledTimes(1))
+    act(() => rzp.options.modal.ondismiss())
+    await user.click(payBtn())
+    await waitFor(() => expect(razorpayAPI.createOrder).toHaveBeenCalledTimes(2))
+    const [k1, k2] = razorpayAPI.createOrder.mock.calls.map((c) => c[2])
+    expect(k1).toBeTruthy()
+    expect(k2).toBe(k1)
+  })
+
   // Regression (fixed 2026-10): merchant name is read from the top-level GET /settings payload (general.cafeName).
   test('the merchant name from settings reaches the Razorpay checkout', async () => {
     const user = renderPayment(DINE_IN)
@@ -217,14 +242,14 @@ describe('Payment — online (deferred takeaway)', () => {
     await choose(user, 'Pay Online')
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(630.25, null)
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(630.25, null, expect.any(String))
 
     await act(() => rzp.options.handler(RZP))
     expect(api.post).toHaveBeenCalledWith('/orders',
       { ...TAKEAWAY_PAYLOAD, clientIdempotencyKey: 'web-fixed-key', paymentMethod: 'online', razorpayPayment: RZP },
       { headers: { 'Idempotency-Key': 'web-fixed-key' } })
     expect(rememberOrderIds).toHaveBeenCalledWith('sess', ['ORD-TK-9'])
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-TK-9' })
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-TK-9' }, expect.any(String))
     expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
     expect(landed.state).toMatchObject({ orderId: 'ORD-TK-9', total: 630.25, isTakeaway: true, selectedTime: '18:30', paymentMethod: 'online' })
     expect(markDineInBillSettled).not.toHaveBeenCalled()
@@ -248,7 +273,7 @@ describe('Payment — online (deferred takeaway)', () => {
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
     await act(() => rzp.options.handler(RZP))
 
-    expect(razorpayAPI.orphanRefund).toHaveBeenCalledWith({ ...RZP, reason: 'Paneer Wrap is out of stock' })
+    expect(razorpayAPI.orphanRefund).toHaveBeenCalledWith({ ...RZP, reason: 'Paneer Wrap is out of stock' }, expect.any(String))
     expect(razorpayAPI.verifyPayment).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/refunded automatically/), expect.anything())
     expect(screen.queryByText('order-confirmed')).not.toBeInTheDocument()
@@ -263,7 +288,7 @@ describe('Payment — online (deferred takeaway)', () => {
     expect(window.Razorpay).not.toHaveBeenCalled()
     expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith(expect.objectContaining({
       razorpay_order_id: 'order_mock_1', razorpay_payment_id: expect.stringMatching(/^pay_mock_/), cafeOrderId: 'ORD-TK-9',
-    }))
+    }), expect.any(String))
   })
 
   test('the draft is persisted so a refresh can resume, with a stable idempotency key', () => {
@@ -283,8 +308,8 @@ describe('Payment — wallet', () => {
     await user.click(payBtn())
     await screen.findByText('orders-page')
     expect(api.get).toHaveBeenCalledWith('/orders/ORD-20261003-0042/detail')
-    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(1049.25, 'mongo42')
-    expect(api.patch).toHaveBeenCalledWith('/orders/ORD-20261003-0042/payment', { paymentStatus: 'Paid', paymentMethod: 'wallet' }, { _silent: true })
+    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(1049.25, 'mongo42', expect.any(String))
+    expect(api.patch).toHaveBeenCalledWith('/orders/ORD-20261003-0042/payment', { paymentStatus: 'Paid', paymentMethod: 'wallet' }, { _silent: true, headers: { 'Idempotency-Key': expect.any(String) } })
   })
 
   test('wallet rejection surfaces the server message and stays on the page', async () => {
@@ -401,7 +426,7 @@ describe('Payment — pay-first dine-in (operations profile)', () => {
     await user.click(payBtn())
     expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
     expect(orderCreate()[1]).toMatchObject({ paymentMethod: 'wallet', paymentIntent: 'wallet' })
-    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(480.5, 'mongo7')
+    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(480.5, 'mongo7', expect.any(String))
     expect(landed.state).toMatchObject({ payFirstDineIn: true, payAtCounter: false, tracking: false, paymentMethod: 'wallet' })
     expect(markDineInBillSettled).not.toHaveBeenCalled()
   })
@@ -412,12 +437,12 @@ describe('Payment — pay-first dine-in (operations profile)', () => {
     await choose(user, 'Pay Online')
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(480.5, null)
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(480.5, null, expect.any(String))
     await act(() => rzp.options.handler(RZP))
     const body = orderCreate()[1]
     expect(body).toMatchObject({ paymentMethod: 'online', razorpayPayment: RZP })
     expect(body).not.toHaveProperty('paymentIntent')
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-DI-7' })
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP, cafeOrderId: 'ORD-DI-7' }, expect.any(String))
     expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
     expect(landed.state).toMatchObject({ payFirstDineIn: true, payAtCounter: false, tracking: true, paymentMethod: 'online' })
     expect(markDineInBillSettled).not.toHaveBeenCalled()

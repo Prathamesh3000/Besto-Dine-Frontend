@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ChevronLeft, Smartphone, CreditCard, Wallet, CheckCircle2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../../Context/CartContext';
 import { useAuth } from '../../Context/AuthContext';
 import BookingProgressBar from './BookingProgressBar';
 import { advanceBookingAPI, razorpayAPI } from '../../utils/api';
+import { paymentKeys, createActionGuard } from '../../utils/idempotency';
 import toast from 'react-hot-toast';
 
 // Payment Method Option Component
@@ -114,6 +115,11 @@ function Payment() {
 
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  // Synchronous guard against a double-tap starting two payments (state
+  // updates are async). Released via releasePay on every end path.
+  const payGuardRef = useRef(null);
+  if (!payGuardRef.current) payGuardRef.current = createActionGuard();
+  const releasePay = () => { payGuardRef.current.leave(); setIsProcessing(false); };
   const [showModal, setShowModal] = useState(false);
   const [modalMsg, setModalMsg] = useState('');
   const [savedOrderId, setSavedOrderId] = useState(null);
@@ -127,13 +133,13 @@ function Payment() {
   ];
 
   const handlePayNow = async () => {
-    if (isProcessing) return;
+    if (isProcessing || !payGuardRef.current.enter()) return;
     if (nothingDueNow) {
       setIsProcessing(true);
       await createBooking(selectedMethod || 'wallet', null);
       return;
     }
-    if (!selectedMethod) return;
+    if (!selectedMethod) { payGuardRef.current.leave(); return; }
 
     setIsProcessing(true);
     await handleRazorpayPayment();
@@ -155,9 +161,10 @@ function Payment() {
         razorpayPaymentId: rzpResponse?.razorpay_payment_id || undefined,
         razorpay_order_id: rzpResponse?.razorpay_order_id || undefined,
         razorpay_signature: rzpResponse?.razorpay_signature || undefined,
-      });
+      }, paymentKeys.get('booking-create', rzpResponse?.razorpay_payment_id || JSON.stringify([bookingData, bookingTotal, paymentMethod])));
 
       if (response.data.success) {
+        paymentKeys.reset('booking-create');
         clearCart();
         const orderId = response.data.booking.bookingId || response.data.booking._id;
         setSavedOrderId(orderId);
@@ -180,12 +187,12 @@ function Payment() {
           razorpay_order_id: rzpResponse.razorpay_order_id,
           razorpay_signature: rzpResponse.razorpay_signature,
           reason: err.response?.data?.message || 'Booking could not be saved',
-        }).then(() => {
+        }, paymentKeys.get('rzp-orphan', rzpResponse.razorpay_payment_id)).then(() => {
           toast('Your payment is being refunded automatically.', { id: 'booking-refund', duration: 8000 });
         }).catch(() => { /* staff can reconcile manually */ });
       }
     } finally {
-      setIsProcessing(false);
+      releasePay();
     }
   };
 
@@ -193,16 +200,16 @@ function Payment() {
     const scriptLoaded = await loadRazorpayScript();
     if (!scriptLoaded) {
       toast.error('Failed to load payment gateway. Please check your internet connection.');
-      setIsProcessing(false);
+      releasePay();
       return;
     }
 
     try {
       // Create Razorpay order for 50% advance amount only
-      const { data } = await razorpayAPI.createOrder(amountDueNow);
+      const { data } = await razorpayAPI.createOrder(amountDueNow, undefined, paymentKeys.get('rzp-create', `${amountDueNow}|`));
       if (!data.success) {
         toast.error('Failed to initiate payment. Please try again.');
-        setIsProcessing(false);
+        releasePay();
         return;
       }
 
@@ -220,18 +227,19 @@ function Payment() {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
-            });
+            }, paymentKeys.get('rzp-verify', response.razorpay_payment_id));
 
             if (verifyRes.data.success) {
+              paymentKeys.reset();
               // Payment verified — now create the booking
               await createBooking(selectedMethod, response);
             } else {
               toast.error('Payment verification failed. Please contact support.');
-              setIsProcessing(false);
+              releasePay();
             }
           } catch {
             toast.error('Payment verification failed. Please contact support.');
-            setIsProcessing(false);
+            releasePay();
           }
         },
         prefill: {
@@ -242,7 +250,7 @@ function Payment() {
         theme: { color: '#FE8301' },
         modal: {
           ondismiss: () => {
-            setIsProcessing(false);
+            releasePay();
           },
         },
       };
@@ -250,13 +258,13 @@ function Payment() {
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (resp) => {
         toast.error(`Payment failed: ${resp.error.description}`);
-        setIsProcessing(false);
+        releasePay();
       });
       rzp.open();
     } catch (err) {
       console.error('Razorpay error:', err);
       toast.error('Payment failed. Please try again.');
-      setIsProcessing(false);
+      releasePay();
     }
   };
 

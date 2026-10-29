@@ -91,7 +91,7 @@ describe('OrdersDashboard — token-number mode', () => {
     await user.click(await screen.findByText('Thali'))
     await user.click(screen.getByRole('button', { name: 'Place Order' }))
 
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/orders', expect.objectContaining({ type: 'dine-in', branchId: 'b1' })))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/orders', expect.objectContaining({ type: 'dine-in', branchId: 'b1' }), expect.objectContaining({ headers: { 'Idempotency-Key': expect.any(String) } })))
     const payload = api.post.mock.calls[0][1]
     expect(payload).not.toHaveProperty('tableId')
     expect(payload).not.toHaveProperty('pickupLocation')

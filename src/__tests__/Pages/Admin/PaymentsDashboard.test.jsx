@@ -126,7 +126,7 @@ describe('PaymentsDashboard — refund', () => {
     await user.type(screen.getByLabelText(/Specify reason/), 'Cold food')
     await user.click(screen.getByRole('button', { name: /Confirm Refund/ }))
 
-    await waitFor(() => expect(razorpayAPI.refund).toHaveBeenCalledWith({ orderId: 'm1', amount: 100.25, reason: 'Cold food' }))
+    await waitFor(() => expect(razorpayAPI.refund).toHaveBeenCalledWith({ orderId: 'm1', amount: 100.25, reason: 'Cold food' }, expect.any(String)))
     expect(toast.success).toHaveBeenCalledWith('Refund of ₹100.25 processed')
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)) // refetched
     expect(screen.queryByRole('button', { name: /Confirm Refund/ })).not.toBeInTheDocument()
@@ -139,7 +139,7 @@ describe('PaymentsDashboard — refund', () => {
     await user.click(screen.getByTitle('Refund'))
     await user.click(screen.getByRole('button', { name: /Confirm Refund/ }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Refund amount must be between ₹1 and ₹519.5'))
-    expect(razorpayAPI.refund).toHaveBeenCalledWith({ orderId: 'm1', amount: 519.5, reason: 'Order cancelled' })
+    expect(razorpayAPI.refund).toHaveBeenCalledWith({ orderId: 'm1', amount: 519.5, reason: 'Order cancelled' }, expect.any(String))
     expect(api.get).toHaveBeenCalledTimes(1)
   })
 })

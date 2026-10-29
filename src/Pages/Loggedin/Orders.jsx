@@ -17,6 +17,7 @@ import { useAuth } from "../../Context/AuthContext";
 import { useCart } from "../../Context/CartContext";
 import { useMenu } from "../../Context/MenuContext";
 import api, { settingsAPI } from "../../utils/api";
+import { repeatKeys, withIdempotencyKey } from "../../utils/idempotency";
 import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
 import toast from "react-hot-toast";
@@ -1559,7 +1560,12 @@ function Orders() {
     try {
       const body = { selections };
       if (targetTableId) body.targetTableId = targetTableId;
-      const res = await api.post(`/orders/${ref}/repeat-all`, body);
+      const res = await api.post(
+        `/orders/${ref}/repeat-all`,
+        body,
+        withIdempotencyKey(repeatKeys.get(`repeat-all:${ref}`, JSON.stringify(body))),
+      );
+      repeatKeys.reset(`repeat-all:${ref}`);
       if (res.data?.success) {
         // Prefer the backend's message when it exists — it now
         // reflects mixed-cart splits (eg. "counter items ready,

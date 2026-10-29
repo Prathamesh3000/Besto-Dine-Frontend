@@ -14,6 +14,7 @@ import {
     Megaphone,
     Globe,
     BookOpen,
+    ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../Context/AuthContext';
 
@@ -44,6 +45,7 @@ const NAV_ITEMS = [
     { to: '/superadmin/plans',             label: 'Plans',             icon: Receipt },
     { to: '/superadmin/payments',          label: 'Payments',          icon: CreditCard },
     { to: '/superadmin/audit-logs',        label: 'Audit Log',         icon: ClipboardList },
+    { to: '/superadmin/security',          label: 'Security',          icon: ShieldCheck },
 ];
 
 const TITLE_BY_PATH = {
@@ -56,6 +58,7 @@ const TITLE_BY_PATH = {
     '/superadmin/plans':             { title: 'Subscription Plans',  crumb: 'Plans' },
     '/superadmin/payments':          { title: 'Subscription Payments', crumb: 'Payments' },
     '/superadmin/audit-logs':        { title: 'Audit Log',           crumb: 'Audit Log' },
+    '/superadmin/security':          { title: 'Security',            crumb: 'Security' },
 };
 
 const getCrumb = (pathname) => {

@@ -8,6 +8,10 @@ import './i18n'
 import App from './App.jsx'
 import UpdateAvailableToast from './Components/Common/UpdateAvailableToast'
 import { migrateLegacyPlatformSession } from './utils/authStorage'
+import { initSentry, Sentry } from './utils/sentry'
+
+// Error reporting: no-op unless VITE_SENTRY_DSN is set at build time.
+const sentryOn = initSentry()
 
 // One-time move of a Super Admin session from the shared staff_* keys to
 // its own platform_* keys (see utils/authStorage). Runs before the first
@@ -16,7 +20,13 @@ migrateLegacyPlatformSession()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    {sentryOn ? (
+      <Sentry.ErrorBoundary fallback={<p style={{ padding: 24 }}>Something went wrong. Please reload the page.</p>}>
+        <App />
+      </Sentry.ErrorBoundary>
+    ) : (
+      <App />
+    )}
     {/* PWA: "new version ready — Reload" bar. Lives outside App's router
         so it is visible on every screen (see hooks/useServiceWorkerUpdate). */}
     <UpdateAvailableToast />

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ChevronLeft, Smartphone, Zap, IndianRupee, Wallet } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api, { razorpayAPI } from '../../utils/api';
+import { paymentKeys, orderPayConfig, resetOrderPayKey, createActionGuard } from '../../utils/idempotency';
 import { useAuth } from '../../Context/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -15,6 +16,11 @@ const PaymentOption = () => {
 
     const [selectedMethod, setSelectedMethod] = useState('qr');
     const [isProcessing, setIsProcessing] = useState(false);
+    // Synchronous guard: setIsProcessing is async, so two taps in one tick
+    // could both start a payment. Released on every failure / dismiss path.
+    const payGuardRef = useRef(null);
+    if (!payGuardRef.current) payGuardRef.current = createActionGuard();
+    const releasePay = () => { payGuardRef.current.leave(); setIsProcessing(false); };
 
     // Wallet is intentionally NOT offered as a staff-side payment method.
     // POST /wallet/pay only ever debits the CALLER's own wallet (and only
@@ -41,14 +47,14 @@ const PaymentOption = () => {
             const scriptLoaded = await loadRazorpayScript();
             if (!scriptLoaded) {
                 toast.error('Failed to load payment gateway.');
-                setIsProcessing(false);
+                releasePay();
                 return;
             }
 
-            const { data } = await razorpayAPI.createOrder(amount, orderId);
+            const { data } = await razorpayAPI.createOrder(amount, orderId, paymentKeys.get('rzp-create', `${amount}|${orderId}`));
             if (!data.success) {
                 toast.error('Failed to initiate payment.');
-                setIsProcessing(false);
+                releasePay();
                 return;
             }
 
@@ -66,8 +72,9 @@ const PaymentOption = () => {
                             razorpay_payment_id: response.razorpay_payment_id,
                             razorpay_signature: response.razorpay_signature,
                             cafeOrderId: orderId,
-                        });
+                        }, paymentKeys.get('rzp-verify', response.razorpay_payment_id));
                         if (verifyRes.data.success) {
+                            paymentKeys.reset();
                             // replace: true — block back-navigation from
                             // the confirmation screen back into this
                             // PaymentOption page; the order is already
@@ -83,7 +90,7 @@ const PaymentOption = () => {
                     } catch {
                         toast.error('Payment verification failed.');
                     }
-                    setIsProcessing(false);
+                    releasePay();
                 },
                 prefill: {
                     name: user?.name || '',
@@ -91,30 +98,32 @@ const PaymentOption = () => {
                     contact: user?.mobile || '',
                 },
                 theme: { color: '#FE8301' },
-                modal: { ondismiss: () => setIsProcessing(false) },
+                modal: { ondismiss: () => releasePay() },
             };
 
             const rzp = new window.Razorpay(options);
             rzp.on('payment.failed', (resp) => {
                 toast.error(`Payment failed: ${resp.error.description}`);
-                setIsProcessing(false);
+                releasePay();
             });
             rzp.open();
         } catch (err) {
             console.error('Payment error:', err);
             toast.error('Payment failed. Please try again.');
-            setIsProcessing(false);
+            releasePay();
         }
     };
 
     const handleCashPayment = async () => {
         setIsProcessing(true);
         try {
-            await api.patch(`/orders/${orderId}/status`, {
+            const payBody = {
                 paymentStatus: 'Paid',
                 paymentMethod: 'Cash',
                 amountPaid: amount,
-            });
+            };
+            await api.patch(`/orders/${orderId}/status`, payBody, orderPayConfig(orderId, payBody));
+            resetOrderPayKey(orderId);
             toast.success('Cash payment recorded.');
             navigate('/waiter/qr-payment', {
                 state: { tableId, tableName, orderId, orderDisplayId, amount, paymentSuccess: true, method: 'cash' },
@@ -126,12 +135,12 @@ const PaymentOption = () => {
             // server says to use the Discount option; show its message.
             toast.error(err?.response?.data?.message || 'Failed to record payment.');
         } finally {
-            setIsProcessing(false);
+            releasePay();
         }
     };
 
     const handleConfirm = () => {
-        if (isProcessing) return;
+        if (isProcessing || !payGuardRef.current.enter()) return;
         if (selectedMethod === 'qr') {
             handleQRPayment();
         } else {

@@ -11,6 +11,7 @@ import { markDineInBillSettled } from '../../utils/dineInSession';
 import { rememberOrderIds, getCustomerOrderSession } from '../../utils/customerOrderIds';
 import { getCustomerOperations } from '../../utils/operations';
 import toast from 'react-hot-toast';
+import { generateIdempotencyKey, withIdempotencyKey, createKeyStore, createActionGuard } from '../../utils/idempotency';
 
 // Payment Method Card — richer, accessible radio-card.
 //
@@ -80,20 +81,6 @@ const PaymentOption = ({
     </button>
   );
 };
-
-// One idempotency key per checkout attempt (duplicate-order guard).
-function generateIdempotencyKey() {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return `web-${crypto.randomUUID()}`;
-    }
-    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-      const bytes = crypto.getRandomValues(new Uint8Array(16));
-      return `web-${Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')}`;
-    }
-  } catch { /* fall through */ }
-  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
-}
 
 // Cart.jsx keeps the dine-in checkout's idempotency key under this
 // sessionStorage key (its CHECKOUT_IDEM_KEY) so every retry of the same
@@ -190,6 +177,21 @@ function Payment() {
   // fired far away from the payment cards.
   const [methodError, setMethodError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  // Synchronous double-tap guard. isProcessing is React state, so two taps
+  // in the same tick both read false; this ref flips instantly. Held for the
+  // whole attempt, including while the Razorpay modal is open.
+  const payGuardRef = useRef(createActionGuard());
+  // True from rzp.open() until the modal is dismissed / the handler finishes:
+  // a second Razorpay checkout must never open while one is on screen (the
+  // modal stays open after payment.failed so the customer can retry in it).
+  const rzpOpenRef = useRef(false);
+  // Retry-stable Idempotency-Keys for the non-create payment calls; reset
+  // after a successful payment (see navigateAfterPayment callers).
+  const payKeysRef = useRef(createKeyStore());
+  const endProcessing = () => {
+    payGuardRef.current.leave();
+    setIsProcessing(false);
+  };
   const [walletBalance, setWalletBalance] = useState(0);
   const [merchantName, setMerchantName] = useState('BestoDine');
   // Counter-payment "Waiting for staff" overlay state. Flipped on
@@ -440,16 +442,20 @@ function Payment() {
     const scriptLoaded = await loadRazorpayScript();
     if (!scriptLoaded) {
       toast.error('Failed to load payment gateway. Please check your internet connection.', { id: 'pay-gateway-load' });
-      setIsProcessing(false);
+      endProcessing();
       return;
     }
 
     try {
       // Step 1: Create Razorpay order on backend (no cafeOrderId for deferred takeaway)
-      const { data } = await razorpayAPI.createOrder(totalAmount, isTakeawayDeferred ? null : existingOrderId);
+      const { data } = await razorpayAPI.createOrder(
+        totalAmount,
+        isTakeawayDeferred ? null : existingOrderId,
+        payKeysRef.current.get('rzp-create', `${totalAmount}|${isTakeawayDeferred ? '' : existingOrderId}`),
+      );
       if (!data.success) {
         toast.error('Failed to initiate payment. Please try again.', { id: 'pay-init' });
-        setIsProcessing(false);
+        endProcessing();
         return;
       }
 
@@ -488,9 +494,10 @@ function Payment() {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
               cafeOrderId,
-            });
+            }, payKeysRef.current.get('rzp-verify', response.razorpay_payment_id));
 
             if (verifyRes.data.success) {
+              payKeysRef.current.reset();
               toast.success('Payment successful! Thank you.', { id: 'pay-success', duration: 4000 });
               navigateAfterPayment(cafeOrderId);
             } else {
@@ -515,7 +522,7 @@ function Payment() {
                   razorpay_order_id: response.razorpay_order_id,
                   razorpay_signature: response.razorpay_signature,
                   reason,
-                }).catch((refundErr) => {
+                }, payKeysRef.current.get('rzp-orphan', response.razorpay_payment_id)).catch((refundErr) => {
                   console.warn('Orphan-refund call failed:', refundErr);
                 });
               } catch { /* fire-and-forget */ }
@@ -527,7 +534,8 @@ function Payment() {
               toast.error('Payment verification failed. Please contact staff at the counter.', { id: 'pay-verify-err' });
             }
           }
-          setIsProcessing(false);
+          rzpOpenRef.current = false;
+          endProcessing();
         },
         prefill: {
           name: user?.name || '',
@@ -539,7 +547,8 @@ function Payment() {
         },
         modal: {
           ondismiss: () => {
-            setIsProcessing(false);
+            rzpOpenRef.current = false;
+            endProcessing();
           },
         },
       };
@@ -557,13 +566,14 @@ function Payment() {
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (response) => {
         toast.error(`Payment failed: ${response.error.description}`);
-        setIsProcessing(false);
+        endProcessing();
       });
+      rzpOpenRef.current = true;
       rzp.open();
     } catch (err) {
       console.error('Payment Error:', err);
       toast.error('Failed to initiate payment. Please try again.');
-      setIsProcessing(false);
+      endProcessing();
     }
   };
 
@@ -592,7 +602,11 @@ function Payment() {
       // directly so a refresh elsewhere in the app shows the right number
       // without a second round-trip. Fall back to a getWallet() fetch if
       // the shape changes.
-      const payRes = await walletAPI.payWithWallet(walletAmount, serverOrder._id);
+      const payRes = await walletAPI.payWithWallet(
+        walletAmount,
+        serverOrder._id,
+        payKeysRef.current.get('wallet-pay', `${walletAmount}|${serverOrder._id}`),
+      );
       const nextBalance = payRes?.data?.newBalance ?? payRes?.data?.balance;
       if (typeof nextBalance === 'number') {
         setWalletBalance(nextBalance);
@@ -612,18 +626,19 @@ function Payment() {
         await api.patch(`/orders/${cafeOrderId}/payment`, {
           paymentStatus: 'Paid',
           paymentMethod: 'wallet',
-        }, { _silent: true });
+        }, withIdempotencyKey(payKeysRef.current.get('pay-finalize', `${cafeOrderId}|wallet`), { _silent: true }));
       } catch (finalizeErr) {
         console.warn('Wallet payment finalize failed (non-fatal):', finalizeErr);
       }
 
+      payKeysRef.current.reset();
       toast.success(`Paid ₹${Number(walletAmount).toFixed(2)} from wallet.`, { id: 'pay-wallet-success', duration: 4000 });
       navigateAfterPayment(cafeOrderId);
     } catch (err) {
       console.error('Wallet payment error:', err);
       toast.error(err.response?.data?.message || 'Wallet payment failed.', { id: 'pay-wallet-err' });
     } finally {
-      setIsProcessing(false);
+      endProcessing();
     }
   };
 
@@ -657,14 +672,14 @@ function Payment() {
       // Open the waiting overlay; isProcessing flips off so the user
       // can tap Cancel and switch to another method if they change
       // their mind.
-      setIsProcessing(false);
+      endProcessing();
       setWaitingForCounter(true);
       return;
     } catch (err) {
       console.error('Cash payment error:', err);
       toast.error('Failed to update order. Please inform the staff.', { id: 'pay-cash-err' });
     } finally {
-      setIsProcessing(false);
+      endProcessing();
     }
   };
 
@@ -680,6 +695,9 @@ function Payment() {
     }
     setMethodError('');
 
+    // Synchronous guard first — before any await or state update.
+    if (rzpOpenRef.current) return;
+    if (!payGuardRef.current.enter()) return;
     setIsProcessing(true);
 
     switch (selectedMethod) {
@@ -693,7 +711,7 @@ function Payment() {
         await handleCashPayment();
         break;
       default:
-        setIsProcessing(false);
+        endProcessing();
     }
   };
 

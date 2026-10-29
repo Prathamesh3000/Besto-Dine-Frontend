@@ -104,7 +104,7 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     await ready()
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(GRAND_TOTAL, null)
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(GRAND_TOTAL, null, expect.any(String))
 
     await act(() => rzp.options.handler(CHECKOUT))
     const body = ordersPost()
@@ -112,7 +112,7 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     expect(body.razorpayPayment).toEqual(RZP_IDS)
     expect(body).not.toHaveProperty('walletAmountPaid')
     expect(walletAPI.payWithWallet).not.toHaveBeenCalled()
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP_IDS, cafeOrderId: 'ORD-TK-9' })
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP_IDS, cafeOrderId: 'ORD-TK-9' }, expect.any(String))
     expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
   })
 
@@ -122,14 +122,14 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
     // Razorpay charges only grandTotal − wallet.
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(750, null)
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(750, null, expect.any(String))
 
     await act(() => rzp.options.handler(CHECKOUT))
     const body = ordersPost()
     expect(body).toMatchObject({ total: GRAND_TOTAL, paymentMethod: 'online', walletAmountPaid: 300 })
     expect(body.razorpayPayment).toEqual(RZP_IDS)
-    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(300, 'oid1')
-    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP_IDS, cafeOrderId: 'ORD-TK-9' })
+    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(300, 'oid1', expect.any(String))
+    expect(razorpayAPI.verifyPayment).toHaveBeenCalledWith({ ...RZP_IDS, cafeOrderId: 'ORD-TK-9' }, expect.any(String))
     // Order: create → wallet debit → verify.
     const order = [
       api.post.mock.invocationCallOrder[0],
@@ -143,7 +143,7 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     const user = renderPreview(baseState({ appliedPoints: 5000 }))
     await ready()
     await user.click(payBtn())
-    await waitFor(() => expect(walletAPI.payWithWallet).toHaveBeenCalledWith(GRAND_TOTAL, 'oid1'))
+    await waitFor(() => expect(walletAPI.payWithWallet).toHaveBeenCalledWith(GRAND_TOTAL, 'oid1', expect.any(String)))
     const body = ordersPost()
     expect(body).toMatchObject({ total: GRAND_TOTAL, paymentMethod: 'wallet' })
     expect(body).not.toHaveProperty('razorpayPayment')

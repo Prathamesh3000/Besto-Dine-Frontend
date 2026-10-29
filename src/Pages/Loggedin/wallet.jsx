@@ -18,6 +18,7 @@ import {
   Plus,
 } from "lucide-react";
 import api, { settingsAPI, walletAPI, razorpayAPI } from "../../utils/api";
+import { paymentKeys, createActionGuard } from "../../utils/idempotency";
 import toast from "react-hot-toast";
 import { useAuth } from "../../Context/AuthContext";
 
@@ -809,21 +810,27 @@ function Wallet() {
   // credit the wallet via /verify-wallet-recharge. The wallet balance
   // and transaction list are re-fetched on success so the customer
   // sees the new balance + the wallet_recharge row immediately.
+  const topUpGuardRef = useRef(null);
+  if (!topUpGuardRef.current) topUpGuardRef.current = createActionGuard();
+  // Synchronous re-entrancy guard (state alone lets two taps in one tick
+  // both through); released on every failure / dismiss / finish path.
+  const releaseTopUp = () => { topUpGuardRef.current.leave(); setIsPayingTopUp(false); };
   const handleTopUp = async (amount) => {
     if (!amount || amount <= 0 || amount > 10000 || isPayingTopUp) return;
+    if (!topUpGuardRef.current.enter()) return;
     setIsPayingTopUp(true);
     try {
       const ok = await loadRazorpayScript();
       if (!ok) {
         toast.error("Payment gateway failed to load. Check your connection and retry.");
-        setIsPayingTopUp(false);
+        releaseTopUp();
         return;
       }
 
-      const { data } = await razorpayAPI.createWalletRecharge(amount);
+      const { data } = await razorpayAPI.createWalletRecharge(amount, paymentKeys.get("recharge-create", String(amount)));
       if (!data?.success) {
         toast.error(data?.message || "Could not start top-up.");
-        setIsPayingTopUp(false);
+        releaseTopUp();
         return;
       }
 
@@ -841,8 +848,9 @@ function Wallet() {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
               amount,
-            });
+            }, paymentKeys.get("recharge-verify", response.razorpay_payment_id));
             if (verifyRes.data?.success) {
+              paymentKeys.reset();
               toast.success(`₹${amount} added to your wallet.`);
               setTopUpOpen(false);
               await fetchWallet();
@@ -852,13 +860,13 @@ function Wallet() {
           } catch (err) {
             toast.error(err?.response?.data?.message || "Top-up verification failed.");
           } finally {
-            setIsPayingTopUp(false);
+            releaseTopUp();
           }
         },
         modal: {
           // Customer closed the Razorpay popup without paying — re-enable
           // the CTA so they can retry without reloading.
-          ondismiss: () => setIsPayingTopUp(false),
+          ondismiss: () => releaseTopUp(),
         },
         prefill: {
           name: user?.name || "",
@@ -871,12 +879,12 @@ function Wallet() {
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", () => {
         toast.error("Payment failed. Please try again.");
-        setIsPayingTopUp(false);
+        releaseTopUp();
       });
       rzp.open();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Could not start top-up.");
-      setIsPayingTopUp(false);
+      releaseTopUp();
     }
   };
 

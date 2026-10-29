@@ -10,6 +10,7 @@ import { setActiveTenant, clearActiveTenant } from '../utils/tenant';
 import BestoDineMark from '../assets/BestoDineMark';
 import RequestDemoForm from '../Components/Common/RequestDemoForm';
 import InstallAppBanner from '../Components/Common/InstallAppBanner';
+import TwoFactorCodeForm from '../Components/Auth/TwoFactorCodeForm';
 import {
     useFormValidation,
     combine,
@@ -22,7 +23,10 @@ const REMEMBER_EMAIL_KEY = 'staff_remembered_email';
 const Login = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { login, isLoggedIn, user } = useAuth();
+    const { login, verifyTwoFactor, isLoggedIn, user } = useAuth();
+    // Set when the server answers { twoFactorRequired, challengeToken }:
+    // the page swaps the password form for the code step.
+    const [twoFactor, setTwoFactor] = useState(null);
     // `?switch=1` — sent here to sign in with a different account (cross-tab
     // "Sign in again", Super Admin session check). Don't auto-forward the
     // account currently stored for this tab's audience.
@@ -94,6 +98,51 @@ const Login = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Shared tail of a successful sign-in (password-only or after the 2FA step).
+    const routeAfterLogin = (result) => {
+        // Lock the active tenant to the one the authenticated staff
+        // member actually belongs to (from the login response), so
+        // every subsequent request carries the right slug.
+        const tenant = result.user?.tenant;
+        if (tenant?.slug) {
+            setActiveTenant({ slug: tenant.slug, name: tenant.name, _id: tenant._id });
+        }
+
+        if (result.user?.mustChangePassword) {
+            // Tell the page which audience holds this session.
+            navigate('/force-change-password', { state: { audience: result.audience } });
+            return;
+        }
+
+        const userRole = result.role;
+        if (userRole === USER_ROLES.SUPERADMIN) navigate('/superadmin/dashboard');
+        else if (userRole === USER_ROLES.WAITER || userRole === USER_ROLES.CAPTAIN) navigate('/waiter/home');
+        else if (userRole === USER_ROLES.CHEF) navigate('/chef/dashboard');
+        else if (userRole === USER_ROLES.ADMIN || userRole === USER_ROLES.MANAGER) navigate('/admin/dashboard');
+        else navigate('/');
+    };
+
+    const handleTwoFactorSubmit = async (codes) => {
+        setFormError('');
+        setLoading(true);
+        try {
+            const result = await verifyTwoFactor(twoFactor.challengeToken, codes);
+            if (result.success) {
+                routeAfterLogin(result);
+            } else if (result.code === 'INVALID_CHALLENGE') {
+                // Challenge expired (5 min) or was revoked: start over.
+                setTwoFactor(null);
+                setFormError(result.message || 'Your sign-in expired. Please sign in again.');
+            } else {
+                setFormError(result.message || 'That code is not correct.');
+            }
+        } catch (err) {
+            setFormError(err.response?.data?.message || err.message || 'Verification failed. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // `chosen` ({ slug, name }) is set only on the retry after the user picked
     // a restaurant; the first attempt never sends a tenant.
     const handleSubmit = async (e, chosen) => {
@@ -128,26 +177,10 @@ const Login = () => {
             const result = await login(form.values.email.trim(), form.values.password, 'staff');
 
             if (result.success) {
-                // Lock the active tenant to the one the authenticated staff
-                // member actually belongs to (from the login response), so
-                // every subsequent request carries the right slug.
-                const tenant = result.user?.tenant;
-                if (tenant?.slug) {
-                    setActiveTenant({ slug: tenant.slug, name: tenant.name, _id: tenant._id });
-                }
-
-                if (result.user?.mustChangePassword) {
-                    // Tell the page which audience holds this session.
-                    navigate('/force-change-password', { state: { audience: result.audience } });
-                    return;
-                }
-
-                const userRole = result.role;
-                if (userRole === USER_ROLES.SUPERADMIN) navigate('/superadmin/dashboard');
-                else if (userRole === USER_ROLES.WAITER || userRole === USER_ROLES.CAPTAIN) navigate('/waiter/home');
-                else if (userRole === USER_ROLES.CHEF) navigate('/chef/dashboard');
-                else if (userRole === USER_ROLES.ADMIN || userRole === USER_ROLES.MANAGER) navigate('/admin/dashboard');
-                else navigate('/');
+                routeAfterLogin(result);
+            } else if (result.twoFactorRequired) {
+                // Password was right; ask for the authenticator / recovery code.
+                setTwoFactor({ challengeToken: result.challengeToken });
             } else if (result.code === 'TENANT_DISAMBIGUATION_REQUIRED') {
                 // Don't leave the picked (wrong-password etc.) tenant behind.
                 clearActiveTenant();
@@ -340,8 +373,16 @@ const Login = () => {
                             </div>
                         )}
 
+                        {twoFactor && (
+                            <TwoFactorCodeForm
+                                loading={loading}
+                                onSubmit={handleTwoFactorSubmit}
+                                onCancel={() => { setTwoFactor(null); setFormError(''); }}
+                            />
+                        )}
+
                         {/* Login Form */}
-                        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                        <form onSubmit={handleSubmit} className={twoFactor ? 'hidden' : 'space-y-4'} noValidate>
                             {/* Email */}
                             <div>
                                 <label htmlFor="email" className="block text-[13px] font-semibold text-[#1A181B] mb-1.5">

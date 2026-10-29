@@ -48,6 +48,7 @@ const FEATURE_FIELDS = [
     { key: 'aggregatorOrders',    label: 'Zomato / Swiggy Orders',     group: 'Technical' },
     { key: 'eInvoice',            label: 'GST e-Invoice (IRN)',        group: 'Technical' },
     { key: 'webhooks',            label: 'Webhook Integrations',       group: 'Technical' },
+    { key: 'publicApi',           label: 'API Keys & Webhooks',        group: 'Technical' },
     { key: 'whiteLabelBranding',  label: 'Own Branding (white-label)', group: 'Technical' },
 ];
 

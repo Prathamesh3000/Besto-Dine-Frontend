@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   ChevronLeft,
@@ -16,6 +16,7 @@ import {
 import toast from "react-hot-toast";
 import api, { advanceBookingAPI } from "../../utils/api";
 import { useAuth } from "../../Context/AuthContext";
+import { paymentKeys, createActionGuard } from "../../utils/idempotency";
 import BottomNav from "../../Components/Loggedin/BottomNav";
 
 // Reuse the same lazy-loaded Razorpay script the booking Payment page uses.
@@ -132,22 +133,26 @@ function BookingHistory() {
     }));
   };
 
+  const remainingGuardRef = useRef(null);
+  if (!remainingGuardRef.current) remainingGuardRef.current = createActionGuard();
+  const releaseRemaining = () => { remainingGuardRef.current.leave(); setPayingId(null); };
+
   const handlePayRemaining = async (booking) => {
-    if (!booking?._id || payingId) return;
+    if (!booking?._id || payingId || !remainingGuardRef.current.enter()) return;
     setPayingId(booking._id);
 
     try {
       const ok = await loadRazorpayScript();
       if (!ok) {
         toast.error("Payment gateway failed to load. Check your connection and retry.");
-        setPayingId(null);
+        releaseRemaining();
         return;
       }
 
-      const { data } = await advanceBookingAPI.createRemainingPayment(booking._id);
+      const { data } = await advanceBookingAPI.createRemainingPayment(booking._id, paymentKeys.get("booking-remaining-create", String(booking._id)));
       if (!data?.success) {
         toast.error(data?.message || "Could not start payment.");
-        setPayingId(null);
+        releaseRemaining();
         return;
       }
 
@@ -166,8 +171,10 @@ function BookingHistory() {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
-            });
+            }, paymentKeys.get("booking-remaining-verify", `${booking._id}|${response.razorpay_payment_id}`));
             if (verifyRes.data?.success) {
+              paymentKeys.reset("booking-remaining-create");
+              paymentKeys.reset("booking-remaining-verify");
               markBookingPaid(booking._id, verifyRes.data.booking);
               toast.success(`₹${remaining} payment received. Booking is fully paid.`);
             } else {
@@ -176,13 +183,14 @@ function BookingHistory() {
           } catch (err) {
             toast.error(err.response?.data?.message || "Payment verification failed.");
           } finally {
-            setPayingId(null);
+            releaseRemaining();
           }
         },
         modal: {
           // User dismissed the popup — re-enable the button so they
           // can retry without reloading the page.
-          ondismiss: () => setPayingId(null),
+          // The Razorpay order exists server-side; the next tap is a NEW action.
+          ondismiss: () => { paymentKeys.reset("booking-remaining-create"); releaseRemaining(); },
         },
         prefill: {
           name: user?.name || "",
@@ -195,12 +203,13 @@ function BookingHistory() {
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", () => {
         toast.error("Payment failed. Please try again.");
-        setPayingId(null);
+        paymentKeys.reset("booking-remaining-create");
+        releaseRemaining();
       });
       rzp.open();
     } catch (err) {
       toast.error(err.response?.data?.message || "Could not start payment.");
-      setPayingId(null);
+      releaseRemaining();
     }
   };
 

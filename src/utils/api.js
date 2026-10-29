@@ -6,11 +6,13 @@ import { openUpgradePrompt } from './upgradePromptBus';
 import {
     getToken, getStoredUser, getStoredUserObject, clearAuth, currentAudience, getRefreshToken, setTokens,
     AUDIENCES, identityMismatch, loginPathForAudience,
+    COOKIE_SESSION, cookieAuthRequested, realToken, isCookieSession, getCookieSessionMeta, getCsrfToken, setCsrfToken,
 } from './authStorage';
 import { clearDineInTable, requestTableScan } from './dineInSession';
 import { guestAccessForRequest } from './guestOrderAccess';
 import { isReservedSlug } from './reservedSlugs';
 import { configuredApiUrl } from './apiOrigin';
+import { withIdempotencyKey, needsIdempotencyKey, generateIdempotencyKey, IDEMPOTENCY_HEADER } from './idempotency';
 import { startActivityTracking, msSinceActivity, CUSTOMER_IDLE_TIMEOUT_MS } from './customerActivity';
 
 // ─── Axios instance ───────────────────────────────────────────────────────────
@@ -45,10 +47,16 @@ function resolveApiBaseUrl() {
     return base;
 }
 
+// Cookie sessions (VITE_USE_COOKIE_AUTH, default OFF): send the httpOnly
+// session cookies cross-origin. Off -> axios' default (no credentials), exactly
+// the legacy behaviour.
+const COOKIE_MODE = cookieAuthRequested();
+
 const api = axios.create({
     baseURL: resolveApiBaseUrl(),
     timeout: 30000, // 30 s — generous enough to absorb MongoDB Atlas cold-start handshake on hard refresh; React Query handles retries on top.
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json' },
+    withCredentials: COOKIE_MODE,
 });
 
 // ─── Session refresh (#28) ────────────────────────────────────────────────────
@@ -68,7 +76,44 @@ const refreshClient = axios.create({
     baseURL: resolveApiBaseUrl(),
     timeout: 15000,
     headers: { 'Content-Type': 'application/json' },
+    withCredentials: COOKIE_MODE,
 });
+
+// ─── Cookie-session helpers (3A.4) ───────────────────────────────────────────
+const SAFE_METHODS = new Set(['get', 'head', 'options']);
+
+/** Headers telling the server which audience's cookies to use and that we want cookie-only bodies. */
+function cookieHeaders(aud) {
+    return COOKIE_MODE ? { 'X-Auth-Mode': 'cookie', 'X-Auth-Audience': aud } : {};
+}
+
+let _csrfFetch = null;
+/** CSRF token for unsafe requests: live cookie / stored copy, else GET /auth/csrf once. */
+async function ensureCsrfToken() {
+    const have = getCsrfToken();
+    if (have) return have;
+    if (!_csrfFetch) {
+        _csrfFetch = refreshClient.get('/auth/csrf')
+            .then((r) => { const t = r.data?.csrfToken || null; if (t) setCsrfToken(t); return t; })
+            .catch(() => null)
+            .finally(() => { _csrfFetch = null; });
+    }
+    return _csrfFetch;
+}
+
+/** Cookie-mode server answer (login / refresh / change-password): keep only the non-secret hints. */
+function cookieMetaFrom(data) {
+    return data && data.cookieAuth
+        ? { csrfToken: data.csrfToken, accessExpiresAt: data.accessExpiresAt, sessionExpiresAt: data.sessionExpiresAt }
+        : null;
+}
+
+// Access-token expiry (ms): from the JWT in legacy mode, from the server's
+// hint in cookie mode.
+function accessExpiryMs(token, aud) {
+    if (token === COOKIE_SESSION) return getCookieSessionMeta(aud)?.accessExpiresAt ?? null;
+    return tokenExpiresAtMs(token);
+}
 
 const _refreshInFlight = {};
 
@@ -110,11 +155,16 @@ async function doRefresh(aud) {
     try {
         // Customers report how long since they last touched the app, so a
         // background poll can't keep an abandoned session alive.
-        const body = aud === 'customer'
-            ? { refreshToken: presented, idleMs: msSinceActivity() }
-            : { refreshToken: presented };
-        const res = await refreshClient.post('/auth/refresh', body);
+        // Cookie session: the refresh token is an httpOnly cookie - send none.
+        const rt = realToken(presented);
+        const base = rt ? { refreshToken: rt } : {};
+        const body = aud === 'customer' ? { ...base, idleMs: msSinceActivity() } : base;
+        const headers = { ...cookieHeaders(aud) };
+        if (!rt) { const csrf = await ensureCsrfToken(); if (csrf) headers['X-CSRF-Token'] = csrf; }
+        const res = await refreshClient.post('/auth/refresh', body, { headers });
         const { token, refreshToken } = res.data || {};
+        const cookieMeta = cookieMetaFrom(res.data);
+        if (cookieMeta) { setTokens(null, null, aud, cookieMeta); return COOKIE_SESSION; }
         if (!token) return null;
         setTokens(token, refreshToken, aud);
         return token;
@@ -144,6 +194,7 @@ async function doRefresh(aud) {
 export function customerSessionEndsAtMs() {
     const token = getToken('customer');
     if (!token) return null;
+    if (token === COOKIE_SESSION) return getCookieSessionMeta('customer')?.sessionExpiresAt ?? null;
     try {
         const json = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
         return typeof json.sexp === 'number' ? json.sexp * 1000 : null;
@@ -168,7 +219,7 @@ function customerSessionTick({ onReturn = false } = {}) {
     }
     if (idle > 2 * 60 * 1000) return; // not actively using the app
     const token = getToken('customer');
-    const exp = token && tokenExpiresAtMs(token);
+    const exp = token && accessExpiryMs(token, 'customer');
     if (!token || (exp && exp - Date.now() < 10 * 60 * 1000)) {
         refreshSession('customer').catch(() => {});
     }
@@ -199,7 +250,7 @@ export function refreshSession(aud = currentAudience()) {
         const now = getRefreshToken(aud);
         if (before && now && now !== before) {
             const t = getToken(aud);
-            const exp = t && tokenExpiresAtMs(t);
+            const exp = t && accessExpiryMs(t, aud);
             if (t && (!exp || exp - Date.now() > 30 * 1000)) return t;
         }
         return doRefresh(aud);
@@ -306,7 +357,7 @@ api.interceptors.request.use(
 
         // #28 — proactive refresh when the access token is (nearly) expired.
         if (token && !NO_REFRESH_URL.test(config.url || '') && getRefreshToken(aud)) {
-            const exp = tokenExpiresAtMs(token);
+            const exp = accessExpiryMs(token, aud);
             if (exp && exp - Date.now() < 30 * 1000) {
                 try {
                     const fresh = await refreshSession(aud);
@@ -314,7 +365,29 @@ api.interceptors.request.use(
                 } catch { /* offline — send as-is; the 401 path handles it */ }
             }
         }
-        if (token) config.headers.Authorization = `Bearer ${token}`;
+        if (realToken(token)) config.headers.Authorization = `Bearer ${token}`;
+
+        // Cookie mode: the browser carries the session. Say which audience's
+        // cookies to use, and prove same-origin intent on unsafe requests
+        // (double-submit CSRF token; Authorization-header requests are exempt
+        // server-side, so legacy bearer sessions skip it).
+        if (COOKIE_MODE) {
+            Object.entries(cookieHeaders(aud)).forEach(([k, v]) => { config.headers[k] = v; });
+            if (!SAFE_METHODS.has((config.method || 'get').toLowerCase()) && !config.headers.Authorization) {
+                const csrf = isCookieSession(aud) ? await ensureCsrfToken() : getCsrfToken();
+                if (csrf) config.headers['X-CSRF-Token'] = csrf;
+            }
+        }
+
+        // Payment-type routes require an Idempotency-Key. Callers pass their
+        // own retry-stable key; this is the safety net for any call that did
+        // not (that key then only guards transport-level replays).
+        if (needsIdempotencyKey(config.method, config.url, config.data)) {
+            const has = typeof config.headers.get === 'function'
+                ? config.headers.get(IDEMPOTENCY_HEADER)
+                : config.headers[IDEMPOTENCY_HEADER];
+            if (!has) config.headers[IDEMPOTENCY_HEADER] = generateIdempotencyKey();
+        }
 
         // Phase 1 SaaS: customer & guest requests carry the active tenant
         // slug so the backend `attachTenant` middleware can scope every
@@ -421,9 +494,13 @@ api.interceptors.response.use(
         setServerDown(false);
         // #15 — a password change revokes every session and hands this
         // device a fresh pair; store it so the tab stays signed in.
-        if (/\/auth\/change-password/.test(response.config?.url || '')
-            && response.data?.token && response.data?.refreshToken) {
-            setTokens(response.data.token, response.data.refreshToken, response.config._aud || currentAudience());
+        if (/\/auth\/change-password/.test(response.config?.url || '')) {
+            const aud = response.config._aud || currentAudience();
+            const cookieMeta = cookieMetaFrom(response.data);
+            if (cookieMeta) setTokens(null, null, aud, cookieMeta);
+            else if (response.data?.token && response.data?.refreshToken) {
+                setTokens(response.data.token, response.data.refreshToken, aud);
+            }
         }
         return response;
     },
@@ -555,6 +632,20 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
+        // Cookie mode: the CSRF token went stale (cookie rotated by another
+        // tab / expired). Fetch the current one and retry the call once.
+        if (status === 403 && error.response?.data?.code === 'CSRF_INVALID'
+            && COOKIE_MODE && error.config && !error.config._csrfRetried) {
+            error.config._csrfRetried = true;
+            try { sessionStorage.removeItem('bd_csrf'); } catch { /* ignore */ }
+            const csrf = await ensureCsrfToken();
+            if (csrf) {
+                error.config.headers = error.config.headers || {};
+                error.config.headers['X-CSRF-Token'] = csrf;
+                return api(error.config);
+            }
+        }
+
         // 401 — token expired or invalid.
         // Skip redirect for guest users and intentional logouts (handled by the component).
         // Also skip for `_isBackground` polls (notifications, profile sync, etc.) —
@@ -567,12 +658,12 @@ api.interceptors.response.use(
             const url = cfg.url || '';
             // #28 — try one silent refresh + retry before giving up.
             if (!cfg._retried && !NO_REFRESH_URL.test(url)
-                && cfg.headers?.Authorization && getRefreshToken(aud)) {
+                && (cfg.headers?.Authorization || isCookieSession(aud)) && getRefreshToken(aud)) {
                 cfg._retried = true;
                 try {
                     const fresh = await refreshSession(aud);
                     if (fresh) {
-                        cfg.headers.Authorization = `Bearer ${fresh}`;
+                        if (realToken(fresh)) cfg.headers.Authorization = `Bearer ${fresh}`;
                         return api(cfg);
                     }
                 } catch {
@@ -589,7 +680,7 @@ api.interceptors.response.use(
             // Customer login gone (idle / absolute timeout, revoked): let
             // AuthContext explain "session expired" and route to the
             // restaurant page, keeping any guest QR session intact.
-            if (aud === 'customer' && !isGuestSession && !isIntentionalLogout && cfg.headers?.Authorization && !NO_REFRESH_URL.test(url)
+            if (aud === 'customer' && !isGuestSession && !isIntentionalLogout && (cfg.headers?.Authorization || isCookieSession('customer')) && !NO_REFRESH_URL.test(url)
                 && (getToken('customer') || getRefreshToken('customer'))) {
                 announceCustomerSessionExpired(error.response?.data?.code);
                 return Promise.reject(error);
@@ -725,13 +816,13 @@ export const waiterAPI = {
     getMenuItemsByCategory: (categoryId) => api.get(`/menu?category=${categoryId}`),
 
     // Orders
-    createOrder:           (orderData)              => api.post('/orders', orderData),
+    createOrder:           (orderData, idemKey)     => api.post('/orders', orderData, withIdempotencyKey(idemKey)),
     getLiveOrders:         (floor)                  => api.get(`/orders/live${floor ? `?floor=${floor}` : ''}`),
     getPastOrders:         ()                       => api.get('/orders/past'),
     getRefunds:            (params)                 => api.get('/orders/refunds', { params }),
     getActiveOrderByTable: (tableId)                => api.get(`/orders/active/table/${tableId}`),
     pickupOrder:           (orderId)                => api.patch(`/orders/${orderId}/pickup`),
-    repeatItem:            (orderId, itemId, qty)   => api.post(`/orders/${orderId}/repeat/${itemId}`, { quantity: qty }),
+    repeatItem:            (orderId, itemId, qty, idemKey) => api.post(`/orders/${orderId}/repeat/${itemId}`, { quantity: qty }, withIdempotencyKey(idemKey)),
     // Append a second / third KOT round to an already-active order
     appendItems:           (orderId, items)         => api.post(`/orders/${orderId}/append`, { items }),
 
@@ -782,7 +873,7 @@ export const staffAPI = {
 export const walletAPI = {
     getWallet:        (opts = {}) => api.get('/wallet', opts),
     redeemPoints:     (points) => api.post('/wallet/points/redeem', { points }),
-    payWithWallet:    (amount, orderId) => api.post('/wallet/pay', { amount, orderId }),
+    payWithWallet:    (amount, orderId, idemKey) => api.post('/wallet/pay', { amount, orderId }, withIdempotencyKey(idemKey)),
     getAdminStats:    ()       => api.get('/wallet/admin/stats'),
     searchCustomers:  (q)      => api.get('/wallet/admin/customers', { params: { q } }),
     adjustWallet:     (data)   => api.post('/wallet/admin/adjust', data),
@@ -810,6 +901,25 @@ export const incentiveAPI = {
     deleteCampaign: (id)        => api.delete(`/incentives/campaigns/${id}`, { _silent: true }),
     getReport:      (params)    => api.get('/incentives/report', { params, _silent: true, _skipAdminBranchParam: true }),
     exportReportCsv:(params)    => api.get('/incentives/report.csv', { params, responseType: 'blob', _silent: true, _skipAdminBranchParam: true }),
+};
+
+// Developers page: API keys + webhooks (owner only, module `publicApi`).
+// _silent: the page renders its own locked / error states.
+const devOpts = { _silent: true, _skipAdminBranchParam: true };
+export const developerAPI = {
+    meta:            ()         => api.get('/developer/meta', devOpts),
+    listKeys:        ()         => api.get('/developer/api-keys', devOpts),
+    createKey:       (data)     => api.post('/developer/api-keys', data, devOpts),
+    revokeKey:       (id)       => api.delete(`/developer/api-keys/${id}`, devOpts),
+    rotateKey:       (id)       => api.post(`/developer/api-keys/${id}/rotate`, {}, devOpts),
+    listWebhooks:    ()         => api.get('/developer/webhooks', devOpts),
+    createWebhook:   (data)     => api.post('/developer/webhooks', data, devOpts),
+    updateWebhook:   (id, data) => api.patch(`/developer/webhooks/${id}`, data, devOpts),
+    deleteWebhook:   (id)       => api.delete(`/developer/webhooks/${id}`, devOpts),
+    rotateWebhookSecret: (id)   => api.post(`/developer/webhooks/${id}/rotate-secret`, {}, devOpts),
+    testWebhook:     (id)       => api.post(`/developer/webhooks/${id}/test`, {}, devOpts),
+    listDeliveries:  (id, params) => api.get(`/developer/webhooks/${id}/deliveries`, { params, ...devOpts }),
+    redeliver:       (id)       => api.post(`/developer/webhook-deliveries/${id}/redeliver`, {}, devOpts),
 };
 
 export const promotionsAPI = {
@@ -878,6 +988,18 @@ export const inventoryAPI = {
     getConsumptionReport:(params)       => api.get('/inventory/reports/consumption', { params }),
 };
 
+// ── Stocktake + deduction health (plan 2.4 / 3B.6) ─────────────────────
+export const stocktakeAPI = {
+    list:      (params)   => api.get('/inventory/stocktakes', { params }),
+    create:    (data)     => api.post('/inventory/stocktakes', data),
+    get:       (id)       => api.get(`/inventory/stocktakes/${id}`),
+    setCounts: (id, counts) => api.put(`/inventory/stocktakes/${id}/counts`, { counts }),
+    submit:    (id)       => api.post(`/inventory/stocktakes/${id}/submit`),
+    apply:     (id)       => api.post(`/inventory/stocktakes/${id}/apply`),
+    deductionHealth: (params) => api.get('/inventory/reports/deduction-health', { params }),
+    retryDeduction:  (data)   => api.post('/inventory/reports/deduction-health/retry', data),
+};
+
 // ── Supplier / Vendor master (10.3.2) ──────────────────────────────────
 export const supplierAPI = {
     getAll:    (params) => api.get('/suppliers', { params }),
@@ -911,17 +1033,17 @@ export const productionAPI = {
 };
 
 export const razorpayAPI = {
-    createOrder:   (amount, cafeOrderId) => api.post('/razorpay/create-order', { amount, cafeOrderId }),
-    verifyPayment: (data)                => api.post('/razorpay/verify-payment', data),
-    refund:        (data)                => api.post('/razorpay/refund', data),
+    createOrder:   (amount, cafeOrderId, idemKey) => api.post('/razorpay/create-order', { amount, cafeOrderId }, withIdempotencyKey(idemKey)),
+    verifyPayment: (data, idemKey)       => api.post('/razorpay/verify-payment', data, withIdempotencyKey(idemKey)),
+    refund:        (data, idemKey)       => api.post('/razorpay/refund', data, withIdempotencyKey(idemKey)),
     // Customer-facing safety net. Called from the payment handler's
     // catch block when POST /orders rejects AFTER Razorpay captured —
     // refunds the payment automatically and pushes an admin alert so
     // staff know to investigate the underlying cause (stock, total
     // tampering, expired coupon, etc.).
-    orphanRefund:  (data)                => api.post('/razorpay/orphan-refund', data, { _silent: true }),
-    createWalletRecharge:  (amount)      => api.post('/razorpay/create-wallet-recharge', { amount }),
-    verifyWalletRecharge:  (data)        => api.post('/razorpay/verify-wallet-recharge', data),
+    orphanRefund:  (data, idemKey)       => api.post('/razorpay/orphan-refund', data, withIdempotencyKey(idemKey, { _silent: true })),
+    createWalletRecharge:  (amount, idemKey) => api.post('/razorpay/create-wallet-recharge', { amount }, withIdempotencyKey(idemKey)),
+    verifyWalletRecharge:  (data, idemKey) => api.post('/razorpay/verify-wallet-recharge', data, withIdempotencyKey(idemKey)),
     reconcile:     (minutes)             => api.get('/razorpay/reconcile', { params: { minutes } }),
 };
 
@@ -937,7 +1059,7 @@ export const refundRequestAPI = {
 };
 
 export const advanceBookingAPI = {
-    createBooking:  (bookingData)       => api.post('/advance-booking/create', bookingData),
+    createBooking:  (bookingData, idemKey) => api.post('/advance-booking/create', bookingData, withIdempotencyKey(idemKey)),
     // Customer-facing table list + booking. These deliberately do NOT
     // reuse waiterAPI.getTablesByArea / the staff reservation route:
     // those are staffOnly and returned 403 "Access denied. Staff only."
@@ -952,8 +1074,8 @@ export const advanceBookingAPI = {
     // createRemainingPayment returns a Razorpay order the customer's
     // checkout popup consumes; the verify call lands the receipt and
     // marks the booking fully paid on the backend.
-    createRemainingPayment: (id)         => api.post(`/advance-booking/${id}/create-remaining-payment`),
-    verifyRemainingPayment: (id, data)   => api.post(`/advance-booking/${id}/verify-remaining-payment`, data),
+    createRemainingPayment: (id, idemKey) => api.post(`/advance-booking/${id}/create-remaining-payment`, undefined, withIdempotencyKey(idemKey)),
+    verifyRemainingPayment: (id, data, idemKey) => api.post(`/advance-booking/${id}/verify-remaining-payment`, data, withIdempotencyKey(idemKey)),
     // CUS-075 — customer self-cancel + refund-policy preview.
     getMyBookings:          ()           => api.get('/advance-booking/my-bookings'),
     previewCancel:          (id)         => api.get(`/advance-booking/${id}/cancel-preview`),

@@ -1,0 +1,18 @@
+# Response headers for the static host (Netlify / Cloudflare Pages format).
+# Vite copies public/_headers into dist/, so it ships with every build.
+#
+# Content-Security-Policy-Report-Only: violations are REPORTED, nothing is
+# blocked. To enforce, rename the header below to Content-Security-Policy once
+# /api/csp-report (or your logs) has been quiet for a few days of real use.
+#
+# Same policy as Backend/utils/csp.js (CSP_MODE) - regenerate with:
+#   cd Backend && NODE_ENV=production node -e "const c=require('./utils/csp');console.log(c.serialize(c.buildDirectives({NODE_ENV:'production',CSP_REPORT_URI:'/api/csp-report'})))"
+# If the API lives on its own host (VITE_API_URL=https://api...), add that
+# origin to connect-src / img-src / media-src (and a wss:// twin) and set
+# report-uri to the absolute https://api.../csp-report. See
+# Backend/docs/COOKIE_AUTH_AND_CSP.md for other hosts (nginx, Apache, Vercel).
+
+/*
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' https://checkout.razorpay.com https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn-uicons.flaticon.com https://accounts.google.com/gsi/style; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn-uicons.flaticon.com; img-src 'self' data: blob: https://res.cloudinary.com https://images.unsplash.com https://plus.unsplash.com https://ui-avatars.com https://barcode.tec-it.com https://quickchart.io https://api.qrserver.com https://img.icons8.com https://*.googleusercontent.com https://*.razorpay.com; media-src 'self' data: blob: https://res.cloudinary.com; connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io https://nominatim.openstreetmap.org https://api.razorpay.com https://checkout.razorpay.com https://lumberjack.razorpay.com https://accounts.google.com/gsi/; frame-src https://api.razorpay.com https://checkout.razorpay.com https://accounts.google.com/gsi/ https://www.youtube.com https://player.vimeo.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://api.razorpay.com; frame-ancestors 'self'; report-uri /api/csp-report
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

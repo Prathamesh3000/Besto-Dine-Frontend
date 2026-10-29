@@ -21,6 +21,8 @@ import SuppliersTab from './components/SuppliersTab'
 import PurchasesTab from './components/PurchasesTab'
 import ProductionTab from './components/ProductionTab'
 import InventoryReports from './components/InventoryReports'
+import StocktakeTab from './components/StocktakeTab'
+import TransfersTab from './components/TransfersTab'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -50,6 +52,8 @@ const TABS = [
     { id: 'purchases', label: 'Purchases', icon: Truck },
     { id: 'production', label: 'Production', icon: CookingPot },
     { id: 'reports', label: 'Reports', icon: FileBarChart },
+    { id: 'stocktake', label: 'Stocktake', icon: Package },
+    { id: 'transfers', label: 'Transfers', icon: Truck },
 ]
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -705,6 +709,12 @@ const Inventory = () => {
                 )}
                 {activeTab === 'reports' && (
                     <div className="flex-1 min-h-0 overflow-auto"><InventoryReports /></div>
+                )}
+                {activeTab === 'stocktake' && (
+                    <div className="flex-1 min-h-0 overflow-auto"><StocktakeTab /></div>
+                )}
+                {activeTab === 'transfers' && (
+                    <div className="flex-1 min-h-0 overflow-auto"><TransfersTab /></div>
                 )}
             </div>
 

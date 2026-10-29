@@ -592,13 +592,78 @@ describe('response interceptor — errors and toasts', () => {
 })
 
 describe('named API helpers', () => {
-  test('payment verification forwards the body verbatim (idempotency travels in the body, no header)', async () => {
+  test('payment verification forwards the body verbatim and sends an Idempotency-Key header (auto-minted when the caller gives none)', async () => {
     const { razorpayAPI } = await loadApi()
     on('post', '/razorpay/verify-payment', (c) => reply(c, 200))
     const body = { razorpay_order_id: 'o', clientIdempotencyKey: 'k-123' }
     await razorpayAPI.verifyPayment(body)
     expect(JSON.parse(requests[0].data)).toEqual(body)
-    expect(Object.keys(requests[0].headers).some((h) => /idempotency/i.test(h))).toBe(false)
+    const hk = Object.keys(requests[0].headers).find((h) => /^idempotency-key$/i.test(h))
+    expect(hk).toBeTruthy()
+    expect(requests[0].headers[hk]).toBeTruthy()
+  })
+
+  test('a caller-supplied key is sent as-is on verify, refund, wallet pay and orders', async () => {
+    const { razorpayAPI, walletAPI, waiterAPI } = await loadApi()
+    on('post', '/razorpay/verify-payment', (c) => reply(c, 200))
+    on('post', '/razorpay/refund', (c) => reply(c, 200))
+    on('post', '/wallet/pay', (c) => reply(c, 200))
+    on('post', '/orders', (c) => reply(c, 200))
+    await razorpayAPI.verifyPayment({}, 'K-verify')
+    await razorpayAPI.refund({}, 'K-refund')
+    await walletAPI.payWithWallet(10, 'o1', 'K-wallet')
+    await waiterAPI.createOrder({}, 'K-order')
+    const keys = requests.map((r) => r.headers[Object.keys(r.headers).find((h) => /^idempotency-key$/i.test(h))])
+    expect(keys).toEqual(['K-verify', 'K-refund', 'K-wallet', 'K-order'])
+  })
+
+  const idemOf = (r) => r.headers[Object.keys(r.headers).find((h) => /^idempotency-key$/i.test(h))]
+
+  test('staff mark-paid PATCH /orders/:id/status carries a key that is STABLE across a retry and new for a different amount', async () => {
+    const { default: api } = await loadApi()
+    const { orderPayConfig, resetOrderPayKey } = await import('../../utils/idempotency')
+    on('patch', '/orders/o1/status', (c) => reply(c, 200))
+    const body = { paymentStatus: 'Paid', paymentMethod: 'cash', amountPaid: 250 }
+    await api.patch('/orders/o1/status', body, orderPayConfig('o1', body))
+    await api.patch('/orders/o1/status', body, orderPayConfig('o1', body)) // retry of the same action
+    await api.patch('/orders/o1/status', { ...body, amountPaid: 300 }, orderPayConfig('o1', { ...body, amountPaid: 300 }))
+    const [k1, k2, k3] = requests.map(idemOf)
+    expect(k1).toBeTruthy()
+    expect(k2).toBe(k1)
+    expect(k3).toBeTruthy()
+    expect(k3).not.toBe(k1)
+    resetOrderPayKey('o1')
+    await api.patch('/orders/o1/status', { ...body, amountPaid: 300 }, orderPayConfig('o1', { ...body, amountPaid: 300 }))
+    expect(idemOf(requests[3])).not.toBe(k3)
+  })
+
+  test('ordinary status changes (no paymentStatus/amountPaid) get NO Idempotency-Key', async () => {
+    const { default: api } = await loadApi()
+    on('patch', '/orders/o1/status', (c) => reply(c, 200))
+    await api.patch('/orders/o1/status', { status: 'preparing' })
+    await api.patch('/orders/o1/status', { status: 'cancelled', cancelReason: 'x' })
+    await api.patch('/orders/o1/status', { manualDiscount: 10 })
+    expect(requests.map(idemOf)).toEqual([undefined, undefined, undefined])
+  })
+
+  test('last-resort fallback: a payment status PATCH sent without a key still gets one; a caller key is never overwritten', async () => {
+    const { default: api } = await loadApi()
+    on('patch', '/orders/o1/status', (c) => reply(c, 200))
+    await api.patch('/orders/o1/status', { paymentStatus: 'Paid', amountPaid: 5 })
+    await api.patch('/orders/o1/status', { amountPaid: 5 }, { headers: { 'Idempotency-Key': 'K-mine' } })
+    expect(idemOf(requests[0])).toBeTruthy()
+    expect(idemOf(requests[1])).toBe('K-mine')
+  })
+
+  test('advance-booking money routes send the caller key as-is', async () => {
+    const { advanceBookingAPI } = await loadApi()
+    on('post', '/advance-booking/create', (c) => reply(c, 200))
+    on('post', '/advance-booking/b1/create-remaining-payment', (c) => reply(c, 200))
+    on('post', '/advance-booking/b1/verify-remaining-payment', (c) => reply(c, 200))
+    await advanceBookingAPI.createBooking({}, 'K-book')
+    await advanceBookingAPI.createRemainingPayment('b1', 'K-rem-create')
+    await advanceBookingAPI.verifyRemainingPayment('b1', {}, 'K-rem-verify')
+    expect(requests.map(idemOf)).toEqual(['K-book', 'K-rem-create', 'K-rem-verify'])
   })
 
   test('orphan refund is silent (caller owns the error UI)', async () => {
