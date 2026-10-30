@@ -156,6 +156,7 @@ function Cart() {
   const couponRequestRef = useRef(0);
   const [availableCoupons, setAvailableCoupons] = useState([]);
   const [taxConfig, setTaxConfig] = useState({ gstPct: 0, servicePct: 0, additionalCharges: [] });
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [pairingItems, setPairingItems] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -188,21 +189,29 @@ function Cart() {
   //      so the client check was the only (buggy) enforcement.
   // If hour-based enforcement is needed later, it belongs on the backend
   // createOrder path so all clients share one rule.
+  // taxConfig starts at zero tax, so an order placed before this succeeds
+  // would send a total with no GST / charges (TOTAL_MISMATCH). settingsLoaded
+  // lets usePlaceOrder refuse to submit until the real settings are in, and
+  // reloadSettings lets it re-pull them after a TOTAL_MISMATCH.
+  const loadSettings = () => settingsAPI.getSettings().then(res => {
+    const taxes = res.data?.taxes;
+    if (taxes) {
+      setTaxConfig(toTaxConfig(taxes));
+      setSettingsLoaded(true);
+    }
+    const delivery = res.data?.delivery;
+    if (delivery) {
+      setDeliveryConfig({
+        enabled: !!delivery.enabled,
+        slabs: Array.isArray(delivery.slabs) ? delivery.slabs : [],
+        minOrderValue: Number(delivery.minOrderValue) || 0,
+      });
+    }
+    return !!taxes;
+  });
+
   useEffect(() => {
-    settingsAPI.getSettings().then(res => {
-      const taxes = res.data?.taxes;
-      if (taxes) {
-        setTaxConfig(toTaxConfig(taxes));
-      }
-      const delivery = res.data?.delivery;
-      if (delivery) {
-        setDeliveryConfig({
-          enabled: !!delivery.enabled,
-          slabs: Array.isArray(delivery.slabs) ? delivery.slabs : [],
-          minOrderValue: Number(delivery.minOrderValue) || 0,
-        });
-      }
-    }).catch((err) => {
+    loadSettings().catch((err) => {
       console.error('Failed to load settings:', err);
       toast.error('Could not load cafe settings. Some features may be unavailable.');
     });
@@ -671,7 +680,7 @@ function Cart() {
     selectedSlabIndex, selectedSlab, setDeliveryError, setBranchError, deliveryConfig,
     deliveryCoords, deliveryFee, subtotal, finalTakeawayTotal, cartItems, couponDiscount,
     appliedCoupon, appliedPoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
-    taxConfig, syncCartPrices,
+    taxConfig, syncCartPrices, settingsLoaded, reloadSettings: loadSettings,
   });
 
 

@@ -22,7 +22,7 @@ export default function usePlaceOrder({
   selectedSlabIndex, selectedSlab, setDeliveryError, setBranchError, deliveryConfig,
   deliveryCoords, deliveryFee, subtotal, finalTakeawayTotal, cartItems, couponDiscount,
   appliedCoupon, appliedPoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
-  taxConfig, syncCartPrices,
+  taxConfig, syncCartPrices, settingsLoaded = true, reloadSettings,
 }) {
   // Handle Place Order. `payChoice` ('payFirst' | 'payAfter') is the
   // customer's pick when the operations profile says payment.dineIn is
@@ -42,6 +42,16 @@ export default function usePlaceOrder({
     }
   };
   const placeOrderInner = async (payChoice) => {
+    // Never submit with the zero-tax placeholder: the total would omit GST
+    // and charges and the server would reject it (TOTAL_MISMATCH).
+    if (!settingsLoaded) {
+      let ok = false;
+      try { ok = !!(reloadSettings && await reloadSettings()); } catch { ok = false; }
+      toast.error(ok
+        ? 'Bill updated with taxes and charges — please review the total and place the order again.'
+        : "Couldn't load this restaurant's taxes and charges. Check your connection and try again.");
+      return;
+    }
 
     // GST-005 — 24h FE cap. Block guest checkout when guest_session_start
     // is older than a day. The backend's 4h scanToken JWT is the hard
@@ -435,6 +445,11 @@ export default function usePlaceOrder({
       // GST or service-charge settings changed while the cart was open).
       if (error.response?.status === 400 && ['TOTAL_TAMPERED', 'TOTAL_MISMATCH'].includes(error.response?.data?.code)) {
         try {
+          // TOTAL_MISMATCH usually means the cart's tax / charge settings
+          // are stale — pull the current ones so the next total is right.
+          if (error.response?.data?.code === 'TOTAL_MISMATCH' && reloadSettings) {
+            try { await reloadSettings(); } catch { /* the price re-sync below still runs */ }
+          }
           const { changed, removed } = await syncCartPrices();
           if (changed > 0 || removed > 0) {
             toast.error(
