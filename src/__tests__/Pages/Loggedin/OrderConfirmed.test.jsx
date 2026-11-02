@@ -123,3 +123,30 @@ describe('OrderConfirmed — token-number mode (§12.2) and tracking off (§12.3
     expect(screen.getByText(/arrive at the pickup location/)).toBeInTheDocument()
   })
 })
+
+describe('OrderConfirmed — mixed cart split into kitchen + counter orders', () => {
+  const KITCHEN = {
+    orderId: 'ORD-K', type: 'dine-in', total: 148.6, status: 'awaiting-payment', paymentMethod: 'cash', paymentStatus: 'Pending',
+    items: [{ name: 'Garlic Naan', price: 60, quantity: 1 }],
+    gst: 39.6, gstPercentage: 18, serviceCharge: 33, serviceChargePercentage: 15,
+    additionalCharges: [{ name: 'Rohit Tax', type: 'Flat', value: 16, amount: 16 }], additionalChargesTotal: 16,
+  }
+  const COUNTER = {
+    orderId: 'ORD-C', type: 'dine-in', total: 160, status: 'awaiting-payment', paymentMethod: 'cash', paymentStatus: 'Pending',
+    items: [{ name: 'Cold Coffee', price: 120, quantity: 1 }, { name: 'Masala Chai', price: 40, quantity: 1 }],
+  }
+
+  test('shows ONE combined bill: subtotal 220, taxes, total 308.60, both order ids', async () => {
+    settingsAPI.getSettings.mockResolvedValue({ data: { taxes: { gst: { enabled: true, value: 18 }, serviceCharge: { enabled: true, value: 15 } } } })
+    api.get.mockImplementation((url) => Promise.resolve({
+      data: { success: true, order: url.includes('ORD-K') ? KITCHEN : COUNTER },
+    }))
+    renderPage({ orderId: 'ORD-K', splitOrderId: 'ORD-C', items: [], total: 0, payFirstDineIn: true, payAtCounter: true })
+    expect(await screen.findByText('₹308.60')).toBeInTheDocument()   // Total Payment
+    expect(screen.getByText('₹220.00')).toBeInTheDocument()          // Subtotal of all three items
+    expect(screen.getByText('₹39.60')).toBeInTheDocument()           // GST — now on a ₹220 subtotal
+    expect(screen.getByText('Cold Coffee')).toBeInTheDocument()
+    expect(screen.getByText('Garlic Naan')).toBeInTheDocument()
+    expect(screen.getByTestId('pay-at-counter-note')).toHaveTextContent('#ORD-C')
+  })
+})

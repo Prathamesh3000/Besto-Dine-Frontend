@@ -20,6 +20,8 @@ export default function SupplierInvoices() {
     const [form, setForm] = useState(EMPTY_INV)
     const [pay, setPay] = useState(null) // { invoice, amount, method, reference }
     const [busy, setBusy] = useState(false)
+    const [detailId, setDetailId] = useState(null) // invoice whose details popup is open
+    const [edit, setEdit] = useState(null)         // edit form values while editing inside the popup
 
     const invoices = useQuery({
         queryKey: ['admin', 'supplier-invoices', 'list', status],
@@ -40,6 +42,12 @@ export default function SupplierInvoices() {
         queryKey: ['admin', 'supplier-invoices', 'match'],
         queryFn: async () => (await supplierInvoiceAPI.threeWay({})).data,
         enabled: tab === 'match',
+    })
+
+    const detail = useQuery({
+        queryKey: ['admin', 'supplier-invoices', 'detail', detailId],
+        queryFn: async () => (await supplierInvoiceAPI.get(detailId)).data,
+        enabled: !!detailId,
     })
 
     const refresh = () => qc.invalidateQueries({ queryKey: ['admin', 'supplier-invoices'] })
@@ -64,6 +72,20 @@ export default function SupplierInvoices() {
             amount: Number(pay.amount), method: pay.method, reference: pay.reference,
         }), 'Payment recorded')
         if (ok) setPay(null)
+    }
+
+    const ymd = (d) => (d ? new Date(d).toLocaleDateString('en-CA') : '')
+    const closeDetail = () => { setDetailId(null); setEdit(null) }
+    const startEdit = (inv) => setEdit({
+        invoiceNo: inv.invoiceNo, dueDate: ymd(inv.dueDate), notes: inv.notes || '',
+        invoiceDate: ymd(inv.invoiceDate), subtotal: String(inv.subtotal), tax: String(inv.tax || 0),
+    })
+    const saveEdit = async (e, locked) => {
+        e.preventDefault()
+        const payload = { invoiceNo: edit.invoiceNo.trim(), dueDate: edit.dueDate, notes: edit.notes }
+        if (!locked) Object.assign(payload, { invoiceDate: edit.invoiceDate, subtotal: Number(edit.subtotal), tax: Number(edit.tax) || 0 })
+        const ok = await run(() => supplierInvoiceAPI.update(detailId, payload), 'Invoice updated')
+        if (ok) setEdit(null)
     }
 
     return (
@@ -113,8 +135,9 @@ export default function SupplierInvoices() {
                     )}
 
                     {pay && (
-                        <form className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4 grid md:grid-cols-5 gap-3 items-end" onSubmit={submitPayment} aria-label="Record supplier payment">
-                            <div className="text-[13px]">Paying <b>{pay.invoice.invoiceNo}</b><br />Outstanding {money(pay.invoice.outstanding)}</div>
+                      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setPay(null)}>
+                        <form className="bg-white rounded-2xl w-full max-w-[460px] p-5 grid gap-3" onClick={e => e.stopPropagation()} onSubmit={submitPayment} aria-label="Record supplier payment">
+                            <div className="text-[14px]">Paying <b>{pay.invoice.invoiceNo}</b><br />Outstanding {money(pay.invoice.outstanding)}</div>
                             <div><label className={labelCls} htmlFor="sp-amount">Amount</label>
                                 <input id="sp-amount" type="number" min="0.01" max={pay.invoice.outstanding} step="0.01" className={inputCls} value={pay.amount} onChange={e => setPay(p => ({ ...p, amount: e.target.value }))} required /></div>
                             <div><label className={labelCls} htmlFor="sp-method">Method</label>
@@ -126,6 +149,7 @@ export default function SupplierInvoices() {
                             <div className="flex gap-2"><button className={btnCls} disabled={busy || !(Number(pay.amount) > 0) || Number(pay.amount) > pay.invoice.outstanding + 0.005}>Record payment</button>
                                 <button type="button" className="px-3 py-2 text-[14px] text-gray-600" onClick={() => setPay(null)}>Cancel</button></div>
                         </form>
+                      </div>
                     )}
 
                     <div className="overflow-x-auto bg-white border border-gray-200 rounded-xl">
@@ -142,7 +166,10 @@ export default function SupplierInvoices() {
                                         <td className="p-2 text-right">{money(i.amountPaid)}</td>
                                         <td className="p-2 text-right font-semibold">{money(i.outstanding)}</td>
                                         <td className="p-2"><span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${STATUS_CLS[i.status] || ''}`}>{i.status}</span></td>
-                                        <td className="p-2">{i.outstanding > 0 && <button className="text-orange-600 font-semibold" onClick={() => setPay({ invoice: i, amount: String(i.outstanding), method: 'cash', reference: '' })}>Pay</button>}</td>
+                                        <td className="p-2 whitespace-nowrap">
+                                            <button className="text-gray-700 font-semibold mr-3" onClick={() => setDetailId(i._id)}>View</button>
+                                            {i.outstanding > 0 && <button className="text-orange-600 font-semibold" onClick={() => setPay({ invoice: i, amount: String(i.outstanding), method: 'cash', reference: '' })}>Pay</button>}
+                                        </td>
                                     </tr>
                                 ))}
                                 {invoices.data?.length === 0 && <tr><td colSpan={9} className="p-4 text-center text-gray-400" data-testid="si-empty">No invoices yet.</td></tr>}
@@ -188,6 +215,100 @@ export default function SupplierInvoices() {
                             {match.data.results.length === 0 && <tr><td colSpan={7} className="p-4 text-center text-gray-400">No purchase orders to match.</td></tr>}
                         </tbody>
                     </table>
+                </div>
+            )}
+
+            {detailId && (
+                <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Supplier invoice details" onClick={closeDetail}>
+                    <div className="bg-white rounded-2xl w-full max-w-[680px] max-h-[90vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()} data-testid="si-detail">
+                        {detail.isLoading && <p className="text-[13px] text-gray-500">Loading...</p>}
+                        {detail.isError && <p className="text-[13px] text-red-600">Could not load the invoice.</p>}
+                        {detail.data && (() => {
+                            const inv = detail.data.invoice
+                            const payments = detail.data.payments || []
+                            const locked = !!detail.data.locked
+                            return (
+                                <>
+                                    <div className="flex items-start justify-between gap-3 mb-4">
+                                        <div>
+                                            <h2 className="text-[18px] font-bold text-[#1A181B]">Invoice {inv.invoiceNo}</h2>
+                                            <p className="text-[13px] text-gray-500">{inv.supplier?.name || ''}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${STATUS_CLS[inv.status] || ''}`}>{inv.status}</span>
+                                            <button className="text-gray-500 text-[20px] leading-none px-1" aria-label="Close" onClick={closeDetail}>×</button>
+                                        </div>
+                                    </div>
+
+                                    {!edit ? (
+                                        <>
+                                            <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-3 text-[13px] mb-4">
+                                                <div><dt className="text-gray-500">Invoice date</dt><dd className="font-semibold">{ymd(inv.invoiceDate)}</dd></div>
+                                                <div><dt className="text-gray-500">Due date</dt><dd className="font-semibold">{ymd(inv.dueDate)}</dd></div>
+                                                <div><dt className="text-gray-500">Subtotal</dt><dd className="font-semibold">{money(inv.subtotal)}</dd></div>
+                                                <div><dt className="text-gray-500">Tax</dt><dd className="font-semibold">{money(inv.tax)}</dd></div>
+                                                <div><dt className="text-gray-500">Total</dt><dd className="font-semibold">{money(inv.total)}</dd></div>
+                                                <div><dt className="text-gray-500">Paid</dt><dd className="font-semibold">{money(inv.amountPaid)}</dd></div>
+                                                <div><dt className="text-gray-500">Outstanding</dt><dd className="font-semibold" data-testid="si-detail-outstanding">{money(inv.outstanding)}</dd></div>
+                                                {inv.notes ? <div className="col-span-2 md:col-span-3"><dt className="text-gray-500">Notes</dt><dd>{inv.notes}</dd></div> : null}
+                                            </dl>
+
+                                            <h3 className="text-[14px] font-bold mb-2">Payments</h3>
+                                            <div className="border border-gray-200 rounded-xl overflow-hidden mb-4">
+                                                <table className="w-full text-[13px]">
+                                                    <thead><tr className="text-left text-gray-500 border-b bg-gray-50"><th className="p-2">Date</th><th className="p-2 text-right">Amount</th><th className="p-2">Method</th><th className="p-2">Reference</th></tr></thead>
+                                                    <tbody>
+                                                        {payments.map(pm => (
+                                                            <tr key={pm._id} className="border-b border-gray-100" data-testid="si-payment-row">
+                                                                <td className="p-2">{ymd(pm.date)}</td>
+                                                                <td className="p-2 text-right font-semibold">{money(pm.amount)}</td>
+                                                                <td className="p-2 capitalize">{String(pm.method || '').replace('-', ' ')}</td>
+                                                                <td className="p-2">{pm.reference || ''}</td>
+                                                            </tr>
+                                                        ))}
+                                                        {payments.length === 0 && <tr><td colSpan={4} className="p-3 text-center text-gray-400">No payments recorded yet.</td></tr>}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2">
+                                                <button className={btnCls} onClick={() => startEdit(inv)}>Edit</button>
+                                                {inv.outstanding > 0 && (
+                                                    <button className="px-4 py-2 rounded-lg text-[14px] font-semibold border border-orange-300 text-orange-700 hover:bg-orange-50"
+                                                        onClick={() => { setPay({ invoice: inv, amount: String(inv.outstanding), method: 'cash', reference: '' }); closeDetail() }}>Record payment</button>
+                                                )}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <form onSubmit={(e) => saveEdit(e, locked)} aria-label="Edit supplier invoice" className="grid md:grid-cols-2 gap-3">
+                                            {locked && (
+                                                <p className="md:col-span-2 text-[12px] bg-yellow-50 border border-yellow-200 rounded-lg p-2 text-yellow-800">
+                                                    This invoice is already in the ledger, so its date and amounts are locked. You can still change the invoice number, due date and notes.
+                                                </p>
+                                            )}
+                                            <div><label className={labelCls} htmlFor="se-no">Invoice no.</label>
+                                                <input id="se-no" className={inputCls} value={edit.invoiceNo} onChange={e => setEdit(f => ({ ...f, invoiceNo: e.target.value }))} required /></div>
+                                            <div><label className={labelCls} htmlFor="se-due">Due date</label>
+                                                <input id="se-due" type="date" className={inputCls} value={edit.dueDate} onChange={e => setEdit(f => ({ ...f, dueDate: e.target.value }))} /></div>
+                                            <div><label className={labelCls} htmlFor="se-date">Invoice date</label>
+                                                <input id="se-date" type="date" className={inputCls} value={edit.invoiceDate} disabled={locked} onChange={e => setEdit(f => ({ ...f, invoiceDate: e.target.value }))} /></div>
+                                            <div className="text-[13px] text-gray-600 self-end pb-2">Total: <b>{money((Number(edit.subtotal) || 0) + (Number(edit.tax) || 0))}</b> (already paid {money(inv.amountPaid)})</div>
+                                            <div><label className={labelCls} htmlFor="se-sub">Subtotal</label>
+                                                <input id="se-sub" type="number" min="0" step="0.01" className={inputCls} value={edit.subtotal} disabled={locked} onChange={e => setEdit(f => ({ ...f, subtotal: e.target.value }))} required /></div>
+                                            <div><label className={labelCls} htmlFor="se-tax">Tax</label>
+                                                <input id="se-tax" type="number" min="0" step="0.01" className={inputCls} value={edit.tax} disabled={locked} onChange={e => setEdit(f => ({ ...f, tax: e.target.value }))} /></div>
+                                            <div className="md:col-span-2"><label className={labelCls} htmlFor="se-notes">Notes</label>
+                                                <textarea id="se-notes" rows={2} maxLength={500} className={inputCls} value={edit.notes} onChange={e => setEdit(f => ({ ...f, notes: e.target.value }))} /></div>
+                                            <div className="md:col-span-2 flex gap-2">
+                                                <button className={btnCls} disabled={busy}>Save changes</button>
+                                                <button type="button" className="px-3 py-2 text-[14px] text-gray-600" onClick={() => setEdit(null)}>Cancel</button>
+                                            </div>
+                                        </form>
+                                    )}
+                                </>
+                            )
+                        })()}
+                    </div>
                 </div>
             )}
         </div>

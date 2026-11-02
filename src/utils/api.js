@@ -654,6 +654,14 @@ api.interceptors.response.use(
         // hit 401 and trigger the redirect normally.
         if (status === 401) {
             const cfg = error.config || {};
+            // SCAN_TOKEN_* = the TABLE session (QR scan, 4 h) is missing or
+            // expired — not the customer's login. Logging the customer out
+            // here hid the real cause ("session expired, log in again") and
+            // logging in again could never fix it. Pass it to the page
+            // (usePlaceOrder / Payment) so it can ask for a re-scan.
+            if (/^SCAN_TOKEN_/.test(String(error.response?.data?.code || ''))) {
+                return Promise.reject(error);
+            }
             const aud = cfg._aud || currentAudience();
             const url = cfg.url || '';
             // #28 — try one silent refresh + retry before giving up.

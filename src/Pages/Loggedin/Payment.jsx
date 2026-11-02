@@ -10,6 +10,8 @@ import { useCart } from '../../Context/CartContext';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import { rememberOrderIds, getCustomerOrderSession } from '../../utils/customerOrderIds';
 import { getCustomerOperations } from '../../utils/operations';
+import { activeRestaurantPath } from '../../utils/tenant';
+import { clearGuestSession } from '../../utils/guestSession';
 import toast from 'react-hot-toast';
 import { generateIdempotencyKey, withIdempotencyKey, createKeyStore, createActionGuard } from '../../utils/idempotency';
 
@@ -181,6 +183,10 @@ function Payment() {
   // in the same tick both read false; this ref flips instantly. Held for the
   // whole attempt, including while the Razorpay modal is open.
   const payGuardRef = useRef(createActionGuard());
+  // Mixed carts are split server-side into a kitchen order and a counter
+  // order (data.splitOrder). The confirmation page needs the second id to
+  // show ONE combined bill instead of the kitchen order's taxes alone.
+  const splitOrderIdRef = useRef(null);
   // True from rzp.open() until the modal is dismissed / the handler finishes:
   // a second Razorpay checkout must never open while one is on screen (the
   // modal stays open after payment.failed so the customer can retry in it).
@@ -365,7 +371,9 @@ function Payment() {
 
     // Remember only the order ID (#22) so the Orders / Bill screens can
     // re-fetch it from the server — no order objects on the device.
-    rememberOrderIds(getCustomerOrderSession(user, isLoggedIn), [String(data.order.orderId)]);
+    const splitId = data.isSplit && data.splitOrder?.orderId ? String(data.splitOrder.orderId) : null;
+    splitOrderIdRef.current = splitId;
+    rememberOrderIds(getCustomerOrderSession(user, isLoggedIn), [String(data.order.orderId), ...(splitId ? [splitId] : [])]);
     window.dispatchEvent(new Event('storage_sync'));
 
     // Pay-first dine-in: the order now exists, so the cart it was built
@@ -401,6 +409,7 @@ function Payment() {
         replace: true,
         state: {
           orderId: oid,
+          splitOrderId: splitOrderIdRef.current,
           items: cartItemsForStorage || [],
           total: totalAmount,
           isTakeaway: false,
@@ -677,7 +686,18 @@ function Payment() {
       return;
     } catch (err) {
       console.error('Cash payment error:', err);
-      toast.error('Failed to update order. Please inform the staff.', { id: 'pay-cash-err' });
+      const code = String(err?.response?.data?.code || '');
+      if ([401, 403].includes(err?.response?.status) && /^SCAN_TOKEN_/.test(code)) {
+        // The table (QR-scan) session is gone — not the customer's login.
+        toast.error(err.response.data.message || 'Your table session has expired. Please re-scan the table QR.',
+          { id: 'pay-cash-err', duration: 6000 });
+        clearGuestSession();
+        navigate(activeRestaurantPath());
+        return;
+      }
+      // Show the server's reason when it gave one (e.g. a total mismatch)
+      // instead of hiding every failure behind the same generic line.
+      toast.error(err?.response?.data?.message || 'Failed to update order. Please inform the staff.', { id: 'pay-cash-err' });
     } finally {
       endProcessing();
     }

@@ -1744,13 +1744,24 @@ function Orders() {
         </div>
         {(() => {
           const isTakeaway = effectiveShowConfirmation || orderType === 'takeaway';
-          // Dine-in guest who hasn't scanned a QR yet has no tableNumber —
-          // suppress the chip entirely instead of rendering "Table —".
-          if (!isTakeaway && (!tableNumber || customerSession.isSettled)) return null;
+          // Dine-in / Takeaway switch. The list below only shows orders of the
+          // selected kind, so a customer with orders of both kinds (or a stale
+          // saved mode) needs a way to flip between them without re-scanning.
+          const showTable = tableNumber && !customerSession.isSettled;
+          const choose = (mode) => {
+            try { localStorage.setItem('orderType', mode); } catch { /* noop */ }
+            setOrderType(mode);
+          };
+          const seg = (active) => `px-3 py-1 rounded-full text-[13px] sm:text-[14px] font-nunito font-medium transition-colors ${active ? 'bg-white text-[#1A181B] shadow-sm' : 'text-[#8D848F]'}`;
           return (
-            <span className="text-[#8D848F] text-[13px] sm:text-[14px] font-nunito font-medium bg-gray-50 px-3 py-1 rounded-full">
-              {isTakeaway ? 'Takeaway' : `Table ${tableNumber}`}
-            </span>
+            <div className="flex items-center bg-gray-100 p-0.5 rounded-full" role="group" aria-label="Order type" data-testid="order-type-toggle">
+              <button type="button" onClick={() => choose('dine-in')} aria-pressed={!isTakeaway} className={seg(!isTakeaway)}>
+                {showTable ? `Table ${tableNumber}` : 'Dine-in'}
+              </button>
+              <button type="button" onClick={() => choose('takeaway')} aria-pressed={isTakeaway} className={seg(isTakeaway)}>
+                Takeaway
+              </button>
+            </div>
           );
         })()}
       </header>

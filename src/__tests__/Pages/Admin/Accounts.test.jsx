@@ -118,6 +118,66 @@ describe('SupplierInvoices page', () => {
     expect(screen.getByTestId('si-total')).toHaveTextContent('118.00')
   })
 
+  describe('details popup and edit', () => {
+    const DETAIL_INV = { ...INV, invoiceDate: '2026-10-01T00:00:00Z', subtotal: 1000, tax: 0, notes: 'for october' }
+    const PAYMENTS = [
+      { _id: 'p1', amount: 150, method: 'cash', reference: '', date: '2026-10-02T00:00:00Z' },
+      { _id: 'p2', amount: 250, method: 'upi', reference: 'UTR9', date: '2026-10-03T00:00:00Z' },
+    ]
+    function route(locked) {
+      api.get.mockImplementation((url) => Promise.resolve({
+        data: url === '/supplier-invoices/i1'
+          ? { success: true, invoice: DETAIL_INV, payments: PAYMENTS, locked }
+          : { success: true, invoices: [INV] },
+      }))
+    }
+
+    test('View shows the invoice details and every payment made', async () => {
+      route(false)
+      renderPage(<SupplierInvoices />)
+      await screen.findByText('FF-1')
+      fireEvent.click(screen.getByRole('button', { name: 'View' }))
+      expect(await screen.findByTestId('si-detail-outstanding')).toHaveTextContent('600.00')
+      const rows = screen.getAllByTestId('si-payment-row')
+      expect(rows).toHaveLength(2)
+      expect(rows[1]).toHaveTextContent('250.00')
+      expect(rows[1]).toHaveTextContent('UTR9')
+      expect(screen.getByText('for october')).toBeInTheDocument()
+    })
+
+    test('Edit saves changed fields to PATCH, including amounts when the invoice is not in the ledger', async () => {
+      route(false)
+      api.patch.mockResolvedValue({ data: { success: true } })
+      renderPage(<SupplierInvoices />)
+      await screen.findByText('FF-1')
+      fireEvent.click(screen.getByRole('button', { name: 'View' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      fireEvent.change(screen.getByLabelText('Invoice no.'), { target: { value: 'FF-1A' } })
+      fireEvent.change(screen.getByLabelText('Subtotal'), { target: { value: '1100' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/supplier-invoices/i1',
+        expect.objectContaining({ invoiceNo: 'FF-1A', subtotal: 1100 }), expect.anything()))
+    })
+
+    test('a ledger-locked invoice disables amounts and date and does not send them', async () => {
+      route(true)
+      api.patch.mockResolvedValue({ data: { success: true } })
+      renderPage(<SupplierInvoices />)
+      await screen.findByText('FF-1')
+      fireEvent.click(screen.getByRole('button', { name: 'View' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      expect(screen.getByLabelText('Subtotal')).toBeDisabled()
+      expect(screen.getByLabelText('Invoice date')).toBeDisabled()
+      fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'fixed typo' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(api.patch).toHaveBeenCalled())
+      const body = api.patch.mock.calls[0][1]
+      expect(body.notes).toBe('fixed typo')
+      expect(body.subtotal).toBeUndefined()
+      expect(body.invoiceDate).toBeUndefined()
+    })
+  })
+
   test('outstanding tab shows aging rows', async () => {
     api.get.mockImplementation((url) => Promise.resolve({ data: url.includes('outstanding')
       ? { success: true, rows: [{ supplier: 's1', supplierName: 'Fresh Farms', notDue: 0, d1_30: 100, d31_60: 0, d61_90: 0, over90: 50, total: 150 }], totals: { notDue: 0, d1_30: 100, d31_60: 0, d61_90: 0, over90: 50, total: 150 } }

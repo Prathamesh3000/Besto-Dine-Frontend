@@ -20,7 +20,9 @@ export const expenseAPI = {
 
 export const supplierInvoiceAPI = {
     list: (params) => api.get('/supplier-invoices', { params, ...quiet }),
+    get: (id) => api.get(`/supplier-invoices/${id}`, quiet),
     create: (data) => api.post('/supplier-invoices', data, quiet),
+    update: (id, data) => api.patch(`/supplier-invoices/${id}`, data, quiet),
     pay: (id, data) => api.post(`/supplier-invoices/${id}/payments`, data, quiet),
     outstanding: (params) => api.get('/supplier-invoices/reports/outstanding', { params, ...quiet }),
     threeWay: (params) => api.get('/supplier-invoices/reports/three-way-match', { params, ...quiet }),

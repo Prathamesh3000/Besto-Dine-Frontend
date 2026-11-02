@@ -110,7 +110,7 @@ const TimelineEvent = ({ icon: Icon, tone, title, meta, detail, last }) => {
 const buildReceiptHTML = (payment) => {
     const {
         table, id, customer, phone, method, status, date, time,
-        items = [], subtotal = 0, serviceCharge = 0, gst = 0, discount = 0,
+        items = [], subtotal = 0, serviceCharge = 0, gst = 0, discount = 0, additionalCharges = [],
         taxesAndCharges = 0, tipAmount = 0, couponCode = '', couponDiscount = 0,
         pointsRedeemed = 0, total = 0,
         amountPaid = 0, refundedAmount = 0, refunds = [],
@@ -177,7 +177,8 @@ const buildReceiptHTML = (payment) => {
     <div class="row"><span>Subtotal</span><span>${r(subtotal)}</span></div>
     ${serviceCharge > 0 ? `<div class="row"><span>Service charge</span><span>+${r(serviceCharge)}</span></div>` : ''}
     ${gst > 0 ? `<div class="row"><span>GST</span><span>+${r(gst)}</span></div>` : ''}
-    ${serviceCharge === 0 && gst === 0 && taxesAndCharges > 0 ? `<div class="row"><span>Taxes &amp; charges</span><span>+${r(taxesAndCharges)}</span></div>` : ''}
+    ${(additionalCharges || []).map(c => `<div class="row"><span>${escape(c.name)}${c.type === 'Percentage' ? ` (${escape(c.value)}%)` : ''}</span><span>+${r(c.amount)}</span></div>`).join('')}
+    ${serviceCharge === 0 && gst === 0 && !(additionalCharges || []).length && taxesAndCharges > 0 ? `<div class="row"><span>Taxes &amp; charges</span><span>+${r(taxesAndCharges)}</span></div>` : ''}
     ${couponDiscount > 0 ? `<div class="row"><span>${couponCode ? `Coupon (${escape(couponCode)})` : 'Coupon discount'}</span><span>-${r(couponDiscount)}</span></div>` : ''}
     ${pointsRedeemed > 0 ? `<div class="row"><span>Loyalty points</span><span>-${r(pointsRedeemed)}</span></div>` : ''}
     ${discount > 0 ? `<div class="row"><span>Discount</span><span>-${r(discount)}</span></div>` : ''}
@@ -444,10 +445,18 @@ const PaymentDetailsModal = ({ payment, onClose, onRefundComplete }) => {
                                     {(payment.gst ?? 0) > 0 && (
                                         <InfoRow label="GST" value={`+${money(payment.gst)}`} />
                                     )}
+                                    {(payment.additionalCharges || []).map((c, i) => (
+                                        <InfoRow
+                                            key={c.name + i}
+                                            label={c.type === 'Percentage' ? `${c.name} (${c.value}%)` : c.name}
+                                            value={`+${money(c.amount)}`}
+                                        />
+                                    ))}
                                     {/* Fallback for orders whose component breakdown isn't
                                         persisted — keeps subtotal → total reconciled. */}
                                     {(payment.serviceCharge ?? 0) === 0 &&
                                      (payment.gst ?? 0) === 0 &&
+                                     !(payment.additionalCharges || []).length &&
                                      (payment.taxesAndCharges ?? 0) > 0 && (
                                         <InfoRow label="Taxes & charges" value={`+${money(payment.taxesAndCharges)}`} />
                                     )}

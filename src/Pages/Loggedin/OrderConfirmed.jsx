@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import api, { settingsAPI } from "../../utils/api";
 import useBlockBackNav from "../../hooks/useBlockBackNav";
-import { billFromOrder, toTaxConfig } from '../../utils/billing';
+import { billFromOrder, billFromOrders, toTaxConfig } from '../../utils/billing';
 import { tokenOrderStatusLabel } from '../../utils/customerOrdering';
 
 function OrderConfirmed() {
@@ -19,6 +19,9 @@ function OrderConfirmed() {
 
   const {
     orderId = "",
+    // Mixed cart: the server split it into a kitchen order (carries ALL the
+    // taxes) and a counter order (bare items). Shown as one combined bill.
+    splitOrderId = null,
     items: stateItems = [],
     total: stateTotal = 0,
     isTakeaway = false,
@@ -45,6 +48,7 @@ function OrderConfirmed() {
   // (couponDiscount, walletAmountPaid, paymentMethod after verify) that
   // location.state doesn't carry. Falls back to state if fetch fails.
   const [order, setOrder] = useState(null);
+  const [splitOrder, setSplitOrder] = useState(null);
 
   useEffect(() => {
     settingsAPI.getSettings().then((res) => {
@@ -72,9 +76,26 @@ function OrderConfirmed() {
       .catch(() => { /* keep state-based fallback */ });
   }, [orderId]);
 
+  useEffect(() => {
+    if (!splitOrderId) return;
+    api.get(`/orders/${splitOrderId}/detail`)
+      .then((res) => {
+        if (res.data?.success && res.data.order) setSplitOrder(res.data.order);
+      })
+      .catch(() => { /* the kitchen order alone is still shown */ });
+  }, [splitOrderId]);
+
+  // Both halves of a split cart must be loaded before they are combined —
+  // showing only one would put the whole cart's taxes on part of the items.
+  const isCombined = !!(order && splitOrder);
+
   // Prefer authoritative order data; fall back to location.state.
-  const items = order?.items?.length ? order.items : stateItems;
-  const grandTotal = Number(order?.total ?? stateTotal) || 0;
+  const items = isCombined
+    ? [...(order.items || []), ...(splitOrder.items || [])]
+    : (order?.items?.length ? order.items : stateItems);
+  const grandTotal = isCombined
+    ? Math.round((Number(order.total || 0) + Number(splitOrder.total || 0)) * 100) / 100
+    : (Number(order?.total ?? stateTotal) || 0);
   const couponCode = order?.couponCode || "";
   const couponDiscount = Number(order?.couponDiscount) || 0;
   const walletAmountPaid = Number(order?.walletAmountPaid) || 0;
@@ -96,12 +117,16 @@ function OrderConfirmed() {
   // recomputed — via computeBill, so rounding and the takeaway
   // no-service-charge rule match the server.
   const bill = useMemo(
-    () => billFromOrder(
-      order || { items, total: stateTotal, type: isTakeaway ? 'takeaway' : 'dine-in' },
-      taxConfig,
-      items,
-    ),
-    [order, items, stateTotal, isTakeaway, taxConfig],
+    () => (isCombined
+      // null fallback: the counter order carries no taxes, so it must not be
+      // re-priced from the current rates.
+      ? billFromOrders([order, splitOrder], null)
+      : billFromOrder(
+        order || { items, total: stateTotal, type: isTakeaway ? 'takeaway' : 'dine-in' },
+        taxConfig,
+        items,
+      )),
+    [order, splitOrder, isCombined, items, stateTotal, isTakeaway, taxConfig],
   );
   const { subtotal, gst, serviceCharge } = bill;
 
@@ -138,7 +163,8 @@ function OrderConfirmed() {
         </h1>
         {payAtCounter ? (
           <p className="text-[14px] font-varela text-[#645E66] text-center px-8" data-testid="pay-at-counter-note">
-            Show order <span className="font-semibold text-[#1A181B]">#{orderId}</span> at the counter.
+            Show order <span className="font-semibold text-[#1A181B]">#{orderId}</span>
+            {splitOrderId && <> and <span className="font-semibold text-[#1A181B]">#{splitOrderId}</span></>} at the counter.
             Your order goes to the kitchen as soon as it is paid.
           </p>
         ) : payFirstDineIn && !tracking ? (
