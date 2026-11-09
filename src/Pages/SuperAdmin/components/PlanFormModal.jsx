@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { Receipt, Check } from 'lucide-react';
 import api from '../../../utils/api';
 import { Button, Field, inputClass, ModalShell } from './ui';
+import { validateCyclePrices, monthlyEquivalent, savingsPct, formatINR, DEFAULT_GST_RATE } from '../../../utils/billingCycles';
 
 /**
  * PlanFormModal — create or edit a SubscriptionPlan from the
@@ -70,6 +71,8 @@ const EMPTY_PLAN = {
     slug: '',
     description: '',
     price: 0,
+    annualPrice: '',
+    biennialPrice: '',
     billingCycle: 'monthly',
     trialDays: 0,
     sortOrder: 0,
@@ -106,7 +109,9 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                 name: plan.name || '',
                 slug: plan.slug || '',
                 description: plan.description || '',
-                price: plan.price ?? 0,
+                price: plan.prices?.monthly ?? plan.price ?? 0,
+                annualPrice: plan.prices?.annual ?? '',
+                biennialPrice: plan.prices?.biennial ?? '',
                 billingCycle: plan.billingCycle || 'monthly',
                 trialDays: plan.trialDays ?? 0,
                 sortOrder: plan.sortOrder ?? 0,
@@ -160,9 +165,12 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
         if (!form.name.trim())                                                                   errs.name = 'Plan name is required';
         if (!isEdit && !form.slug.trim())                                                        errs.slug = 'Slug is required';
         if (form.price === '' || form.price === null || isNaN(+form.price) || +form.price < 0)   errs.price = 'Price must be zero or greater';
+        const cycleErrs = validateCyclePrices({ monthly: form.price, annual: form.annualPrice, biennial: form.biennialPrice });
+        if (cycleErrs.annual) errs.annualPrice = cycleErrs.annual;
+        if (cycleErrs.biennial) errs.biennialPrice = cycleErrs.biennial;
         setErrors(errs);
         if (Object.keys(errs).length) {
-            const firstBad = ['name', 'slug', 'price'].find(k => errs[k]);
+            const firstBad = ['name', 'slug', 'price', 'annualPrice', 'biennialPrice'].find(k => errs[k]);
             if (firstBad) {
                 setTimeout(() => {
                     const el = document.getElementById(`plan-${firstBad}`);
@@ -177,7 +185,21 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
             // Slug is immutable on edit — strip it from the payload so the
             // backend rejects any tampering at the call site, not just at
             // the validator layer.
-            const payload = { ...form, price: +form.price, trialDays: +form.trialDays || 0, sortOrder: +form.sortOrder || 0 };
+            const blankToNull = (v) => (v === '' || v === null || v === undefined || !(Number(v) > 0) ? null : Number(v));
+            const payload = {
+                ...form,
+                price: +form.price,
+                // Per-cycle list prices, base rupees excl. GST; null = not sold.
+                prices: {
+                    monthly: blankToNull(form.price),
+                    annual: blankToNull(form.annualPrice),
+                    biennial: blankToNull(form.biennialPrice),
+                },
+                trialDays: +form.trialDays || 0,
+                sortOrder: +form.sortOrder || 0,
+            };
+            delete payload.annualPrice;
+            delete payload.biennialPrice;
             if (isEdit) delete payload.slug;
 
             // _silent so the global interceptor doesn't fire a duplicate
@@ -309,7 +331,7 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                 {/* ── Pricing ───────────────────────────────────────── */}
                 <FormSection title="Pricing">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <Field label="Price (₹)" required error={errors.price}>
+                        <Field label="Monthly price (₹)" required error={errors.price} hint="Excl. GST">
                             <input
                                 id="plan-price"
                                 type="number"
@@ -323,7 +345,7 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                                 className={`${inputClass} ${errors.price ? 'border-rose-400! focus:border-rose-500!' : ''}`}
                             />
                         </Field>
-                        <Field label="Billing cycle">
+                        <Field label="Legacy billing label" hint="Kept for older plans">
                             <select
                                 value={form.billingCycle}
                                 onChange={e => setField('billingCycle', e.target.value)}
@@ -342,6 +364,35 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                             />
                         </Field>
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Field label="Annual price (₹, 12 months)" error={errors.annualPrice} hint="Excl. GST — blank = not sold annually">
+                            <input
+                                id="plan-annualPrice"
+                                type="number"
+                                inputMode="decimal"
+                                min="0"
+                                step="1"
+                                value={form.annualPrice}
+                                onChange={e => { setField('annualPrice', e.target.value); if (errors.annualPrice) setErrors(prev => ({ ...prev, annualPrice: undefined })) }}
+                                aria-invalid={errors.annualPrice ? 'true' : 'false'}
+                                className={`${inputClass} ${errors.annualPrice ? 'border-rose-400! focus:border-rose-500!' : ''}`}
+                            />
+                        </Field>
+                        <Field label="2-year price (₹, 24 months prepay)" error={errors.biennialPrice} hint="Excl. GST — blank = not sold for 2 years">
+                            <input
+                                id="plan-biennialPrice"
+                                type="number"
+                                inputMode="decimal"
+                                min="0"
+                                step="1"
+                                value={form.biennialPrice}
+                                onChange={e => { setField('biennialPrice', e.target.value); if (errors.biennialPrice) setErrors(prev => ({ ...prev, biennialPrice: undefined })) }}
+                                aria-invalid={errors.biennialPrice ? 'true' : 'false'}
+                                className={`${inputClass} ${errors.biennialPrice ? 'border-rose-400! focus:border-rose-500!' : ''}`}
+                            />
+                        </Field>
+                    </div>
+                    <CyclePreview monthly={form.price} annual={form.annualPrice} biennial={form.biennialPrice} />
                     <Field label="Sort order" hint="Lower numbers appear first on the pricing page">
                         <input
                             type="number"
@@ -411,6 +462,32 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                 </FormSection>
             </form>
         </ModalShell>
+    );
+};
+
+// Per-month equivalents + GST-inclusive totals so the admin sees what the
+// owner will actually pay (backend adds GST at checkout).
+const CyclePreview = ({ monthly, annual, biennial }) => {
+    const m = Number(monthly) > 0 ? Number(monthly) : null;
+    const rows = [
+        ['monthly', 'Monthly', m],
+        ['annual', 'Annual', Number(annual) > 0 ? Number(annual) : null],
+        ['biennial', '2-year', Number(biennial) > 0 ? Number(biennial) : null],
+    ].filter(([, , v]) => v);
+    if (!rows.length) return null;
+    return (
+        <ul data-testid="cycle-preview" className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[11px] text-slate-600 space-y-1">
+            {rows.map(([key, label, v]) => (
+                <li key={key} className="flex flex-wrap justify-between gap-2">
+                    <span className="font-semibold text-slate-700">{label}</span>
+                    <span>
+                        {formatINR(monthlyEquivalent(v, key))}/month
+                        {key !== 'monthly' && savingsPct(v, key, m) > 0 && ` · saves ${savingsPct(v, key, m)}% vs monthly`}
+                        {` · owner pays ${formatINR(Math.round(v * (100 + DEFAULT_GST_RATE)) / 100)} incl. ${DEFAULT_GST_RATE}% GST`}
+                    </span>
+                </li>
+            ))}
+        </ul>
     );
 };
 

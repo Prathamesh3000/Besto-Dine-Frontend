@@ -42,6 +42,7 @@ const APP_ROUTE_SEGMENTS = [
     'superadmin',
     'switch-restaurant',
     'terms',
+    'trial-expired',
     'unauthorized',
     'waiter',
 ];

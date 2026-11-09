@@ -12,6 +12,7 @@ import { useAdminPrefetch } from '../../hooks/queries/useAdminPrefetch'
 import { openUpgradePrompt } from '../../utils/upgradePromptBus'
 import { buildAdminNavItems } from '../../utils/adminNav'
 import InstallAppBanner from '../../Components/Common/InstallAppBanner'
+import TrialBanner from '../../Components/Common/TrialBanner'
 
 
 // Small inline component for the read-only banner's exit action. It
@@ -435,6 +436,7 @@ const AdminLayoutInner = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col pt-4 px-4 md:pt-4 md:px-6 overflow-visible w-full max-w-[1920px] mx-auto">
+        <TrialBanner />
         <InstallAppBanner className="mb-4" />
         <Outlet />
       </main>

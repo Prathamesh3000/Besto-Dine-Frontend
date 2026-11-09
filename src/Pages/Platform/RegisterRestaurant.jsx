@@ -5,7 +5,7 @@
 // SIGNUP_PENDING, which Pages/Login.jsx renders as a status panel).
 import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -13,6 +13,8 @@ import {
     CheckCircle2, XCircle, Loader2, BadgeCheck, MailCheck, LogIn, Clock4, AlertCircle,
 } from 'lucide-react';
 import { publicAPI } from '../../utils/api';
+import { useAuth } from '../../Context/AuthContext';
+import { setActiveTenant } from '../../utils/tenant';
 import { getPublicAppOrigin } from '../../utils/customerLinks';
 import { sanitizeMobileInput, mobileError, mobileInputAttrs } from '../../utils/mobile';
 import { passwordError, MIN_LENGTH } from '../../utils/passwordPolicy';
@@ -35,6 +37,7 @@ const CODE_FIELDS = {
     WEAK_PASSWORD: 'password',
     SLUG_RESERVED: 'slug', INVALID_SLUG: 'slug', SLUG_TAKEN: 'slug',
     EMAIL_IN_USE: 'contactEmail',
+    PHONE_IN_USE: 'contactPhone',
 };
 const FORM_FIELDS = new Set([
     'restaurantName', 'city', 'slug', 'planId', 'ownerName', 'contactEmail',
@@ -98,6 +101,8 @@ function IconInput({ icon, id, error, className = '', ...props }) {
 const RegisterRestaurant = () => {
     const { t } = useTranslation();
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
+    const { startSession } = useAuth();
     const [searchParams] = useSearchParams();
     usePageMeta(
         t('register_hotel.meta_title', 'Register your hotel — BestoDine'),
@@ -302,6 +307,21 @@ const RegisterRestaurant = () => {
         try {
             const res = await publicAPI.registerRestaurant(payload);
             const data = res.data?.data || {};
+            // INSTANT START (201): the response is the /auth/login body plus
+            // data.trialStarted — sign the owner in and open the dashboard.
+            // (202 = approval mode: no tokens, show the pending screen.)
+            if (res.status === 201 && data.trialStarted && (res.data?.token || res.data?.cookieAuth)) {
+                // eslint-disable-next-line no-unused-vars
+                const { success, data: _d, message: _m, ...loginBody } = res.data;
+                const session = startSession(loginBody);
+                if (session?.success) {
+                    const tn = session.user?.tenant;
+                    if (tn?.slug) setActiveTenant({ slug: tn.slug, name: tn.name, _id: tn._id });
+                    toast.success(t('register_hotel.toast_trial_started', 'Your 14-day free trial has started'), { id: 'register-hotel-success' });
+                    navigate('/admin/dashboard', { replace: true });
+                    return;
+                }
+            }
             setResult({
                 name: data.restaurant?.name || trimmedName,
                 slug: data.restaurant?.slug || sendSlug || '',
@@ -432,10 +452,10 @@ const RegisterRestaurant = () => {
             <div className="bg-white rounded-3xl border border-[#EAECF0] shadow-[0_12px_40px_rgba(16,24,40,0.08)] overflow-hidden">
                 <div className="px-5 sm:px-8 pt-6 sm:pt-8 pb-5 border-b border-[#F2F4F7]">
                     <h1 className="text-[24px] sm:text-[26px] font-extrabold tracking-tight text-[#101828]">
-                        {t('register_hotel.title', 'Register your hotel')}
+                        {t('register_hotel.title', 'Start your 14-day free trial')}
                     </h1>
                     <p className="mt-1 text-[14px] text-[#667085]">
-                        {t('register_hotel.subtitle', 'Two quick steps. We review every application before it goes live.')}
+                        {t('register_hotel.subtitle', 'Two quick steps. No card needed — you get instant access to every feature.')}
                     </p>
                     <ol className="mt-5 flex items-center gap-2" aria-label={t('register_hotel.progress', 'Progress')}>
                         {stepLabels.map((label, i) => {
@@ -626,7 +646,7 @@ const RegisterRestaurant = () => {
                                     placeholder="you@yourhotel.com"
                                 />
                                 {!errors.contactEmail && (
-                                    <p className="mt-1.5 text-[12px] text-[#667085]">{t('register_hotel.email_hint', 'You’ll use this to sign in. We’ll email you here when you’re approved.')}</p>
+                                    <p className="mt-1.5 text-[12px] text-[#667085]">{t('register_hotel.email_hint', 'You’ll use this to sign in. We’ll send your trial details here.')}</p>
                                 )}
                                 <FieldError id="contactEmail-error" message={errors.contactEmail} />
                             </div>
@@ -730,7 +750,7 @@ const RegisterRestaurant = () => {
                                 >
                                     {submitting
                                         ? <><Loader2 size={17} className="animate-spin" /> {t('register_hotel.submitting', 'Submitting…')}</>
-                                        : <><BadgeCheck size={17} /> {t('register_hotel.submit', 'Submit application')}</>}
+                                        : <><BadgeCheck size={17} /> {t('register_hotel.submit', 'Start free trial')}</>}
                                 </button>
                             </div>
                         </form>
@@ -738,7 +758,7 @@ const RegisterRestaurant = () => {
                 </div>
             </div>
             <p className="mt-5 text-center text-[13px] text-[#667085]">
-                {t('register_hotel.have_account', 'Already approved?')}{' '}
+                {t('register_hotel.have_account', 'Already have an account?')}{' '}
                 <Link to="/staff-login" className="font-semibold text-[#FE8301] hover:underline">{t('platform.nav.staff_login', 'Staff login')}</Link>
                 {' · '}
                 <Link to="/request-demo" className="font-semibold text-[#FE8301] hover:underline">{t('platform.cta.demo', 'Request a demo')}</Link>
@@ -831,7 +851,7 @@ function Shell({ children }) {
                         ))}
                     </ul>
                     <p className="mt-8 text-[13px] text-white/85 leading-relaxed">
-                        {t('register_hotel.aside_note', 'Every application is reviewed by our team — usually within one business day.')}
+                        {t('register_hotel.aside_note', '14 days free, no card needed, instant access — pick a plan only when you are ready.')}
                     </p>
                 </aside>
                 <div className="w-full max-w-xl mx-auto lg:mx-0">{children}</div>

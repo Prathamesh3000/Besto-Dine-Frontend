@@ -138,6 +138,10 @@ function tokenExpiresAtMs(token) {
 // login — keeping any guest QR scan session / cart — shows "Your session
 // expired, please log in again" and routes to the restaurant page.
 export const CUSTOMER_SESSION_EXPIRED_EVENT = 'bd:customer-session-expired';
+// Fired when any call answers 403 TRIAL_EXPIRED (the owner's free trial ended
+// unpaid). AuthContext marks the session locked; ProtectedRoute then shows the
+// full-page lock screen instead of a stream of error toasts.
+export const TRIAL_EXPIRED_EVENT = 'bd:trial-expired';
 let _customerExpiryAnnounced = false;
 function announceCustomerSessionExpired(code) {
     if (_customerExpiryAnnounced) return;
@@ -629,6 +633,23 @@ api.interceptors.response.use(
                 } catch { /* ignore */ }
             }
             error.config = { ...(error.config || {}), _silent: true };
+            return Promise.reject(error);
+        }
+
+        // Free trial ended unpaid: lock the owner into the billing screen.
+        // /auth/* (login) reports it inline on the login page instead.
+        if (status === 403 && error.response?.data?.code === 'TRIAL_EXPIRED') {
+            if (!/\/auth\//.test(String(error.config?.url || ''))) {
+                try {
+                    window.dispatchEvent(new CustomEvent(TRIAL_EXPIRED_EVENT, {
+                        detail: {
+                            trialEndDate: error.response.data.trialEndDate || null,
+                            message: error.response.data.message || '',
+                        },
+                    }));
+                } catch { /* ignore */ }
+            }
+            // No toast — the lock screen explains it.
             return Promise.reject(error);
         }
 

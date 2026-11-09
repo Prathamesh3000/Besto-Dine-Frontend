@@ -204,6 +204,7 @@ const SuperAdminDashboard = () => {
     const growth = data?.growth || {};
     const conversion = growth.conversion || {};
     const trials = data?.trialsExpiringSoon || { count: 0, tenants: [] };
+    const trialsExpired = data?.trialsExpired || { count: 0, tenants: [] };
     const pending = data?.pendingApprovals || { signups: 0, planChanges: 0, payments: 0, total: 0 };
     const today = data?.today || [];
     const health = data?.systemHealth || {};
@@ -592,6 +593,54 @@ const SuperAdminDashboard = () => {
                                     </li>
                                 );
                             })}
+                        </ul>
+                    )}
+                </SectionCard>
+            </section>
+
+            {/* ── Trials that ended unpaid (win-back list) ─────────── */}
+            <section className="mb-5" data-testid="trials-expired">
+                <SectionCard
+                    title={`Trials expired${trialsExpired.count ? ` (${trialsExpired.count})` : ''}`}
+                    subtitle="Free trials that ended unpaid in the last 30 days — data is kept, win them back."
+                    icon={Clock4}
+                    actions={
+                        <Link
+                            to="/superadmin/restaurants"
+                            className="text-xs font-semibold text-[#FE8301] hover:text-[#e57601] inline-flex items-center gap-1"
+                        >
+                            View all <ChevronRight size={13} />
+                        </Link>
+                    }
+                >
+                    {loading ? (
+                        <SkeletonList rows={3} />
+                    ) : trialsExpired.tenants.length === 0 ? (
+                        <EmptyState
+                            icon={Sparkles}
+                            title="No expired trials"
+                            description="No trial has lapsed unpaid in the last 30 days."
+                        />
+                    ) : (
+                        <ul className="divide-y divide-gray-100 -my-2">
+                            {trialsExpired.tenants.map(t => (
+                                <li key={t._id} className="py-3 flex items-center justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                        <Link
+                                            to={`/superadmin/restaurants/${t._id}`}
+                                            className="font-semibold text-sm text-gray-900 hover:text-[#FE8301] truncate block transition"
+                                        >
+                                            {t.name}
+                                        </Link>
+                                        <div className="text-xs text-gray-500 truncate mt-0.5">
+                                            <span className="capitalize">{t.planName || 'unassigned'}</span> · expired{' '}
+                                            {(t.trialExpiredAt || t.trialEndDate) ? new Date(t.trialExpiredAt || t.trialEndDate).toLocaleDateString() : '—'}
+                                            {t.contactEmail ? ` · ${t.contactEmail}` : ''}
+                                        </div>
+                                    </div>
+                                    <Badge tone="danger" dot>expired</Badge>
+                                </li>
+                            ))}
                         </ul>
                     )}
                 </SectionCard>

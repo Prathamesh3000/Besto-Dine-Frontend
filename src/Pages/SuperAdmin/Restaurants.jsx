@@ -19,6 +19,7 @@ import {
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import CreateRestaurantModal from './components/CreateRestaurantModal';
+import { formatTenantPrice } from '../../utils/billingCycles';
 import {
     PageHeader,
     Card,
@@ -50,6 +51,14 @@ const STATUS_TONES = {
 };
 
 const STATUS_FILTERS = ['all', 'active', 'trial', 'suspended', 'cancelled'];
+
+// Agreed per-cycle base price when the tenant has a snapshot (annual / 2-year
+// tenants pay once per term), else the plan's monthly list price.
+const tenantPriceLabel = (r) => {
+    const snap = r.subscription?.price;
+    if (typeof snap === 'number' && snap > 0) return formatTenantPrice(snap, r.subscription?.billingCycle);
+    return formatTenantPrice(r.planPrice, 'monthly');
+};
 
 const fmtMoney = (n) => {
     try {
@@ -252,7 +261,7 @@ const Restaurants = () => {
                                             <div className="leading-tight">
                                                 <div className="text-sm text-gray-800 capitalize">{r.subscription.planName}</div>
                                                 <div className="text-[11px] text-gray-500 tabular-nums">
-                                                    {r.planPrice > 0 ? `${fmtMoney(r.planPrice)}/mo` : 'Free'}
+                                                    {tenantPriceLabel(r)}
                                                 </div>
                                             </div>
                                         ) : (
@@ -330,7 +339,7 @@ const Restaurants = () => {
                                                     <Badge tone={tone} dot>{r.status}</Badge>
                                                     <span className="text-[11px] text-gray-500 capitalize">
                                                         {r.subscription?.planName || 'unassigned'}
-                                                        {r.planPrice > 0 && ` · ${fmtMoney(r.planPrice)}/mo`}
+                                                        {r.planPrice > 0 && ` · ${tenantPriceLabel(r)}`}
                                                     </span>
                                                     <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
                                                         <GitBranch size={11} />{r.activeBranchCount ?? 0}

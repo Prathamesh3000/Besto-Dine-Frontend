@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 import { QueryClientContext } from '@tanstack/react-query';
-import api, { CUSTOMER_SESSION_EXPIRED_EVENT } from '../utils/api';
+import api, { CUSTOMER_SESSION_EXPIRED_EVENT, TRIAL_EXPIRED_EVENT } from '../utils/api';
 import { toast } from 'react-hot-toast';
 import { disconnectSocket, reconnectWithAuth } from '../utils/socket';
 import { isGuestSessionExpired, clearGuestSession } from '../utils/guestSession';
@@ -200,6 +200,54 @@ export function AuthProvider({ children }) {
         };
     }, []);
 
+    // Stores a login-shaped payload ({ token, refreshToken, ...user }) as the
+    // active session. Shared by signIn and the self-signup auto-login
+    // (POST /public/register-restaurant answers with the /auth/login body).
+    const applySession = (payloadData, wasGuest) => {
+        // #28 — refreshToken is kept out of the user object and stored
+        // separately (audience-scoped) for silent session renewal.
+        const { token, refreshToken, cookieAuth, csrfToken, accessExpiresAt, sessionExpiresAt, ...userData } = payloadData;
+        const cookieMeta = cookieAuth ? { csrfToken, accessExpiresAt, sessionExpiresAt } : undefined;
+
+        // Another customer's cached orders / cart / allergies must never
+        // surface in this account. Staff logins don't touch customer data.
+        if (userData.role === 'customer') {
+            claimCustomerData(userData._id || userData.id, { keepUnowned: wasGuest });
+        }
+
+        // Store under the audience-scoped keys so a login here can't
+        // clobber a session of another audience open in another tab.
+        // On the customer login page that's the customer audience; on
+        // the shared /staff-login it's picked from the returned role
+        // (superadmin → 'platform', tenant staff → 'staff'), and the
+        // tab remembers it so /force-change-password reads the same
+        // session.
+        const tabAud = currentAudience();
+        const aud = tabAud === 'customer' ? 'customer' : (audienceForUser(userData) || tabAud);
+        if (STAFF_SIDE_AUDIENCES.includes(aud)) setEntryAudience(aud);
+        setAuth(token, userData, aud, refreshToken, cookieMeta);
+        setTabIdentity(aud, userData);
+        setAudience(aud);
+        setSessionChange(null);
+        localStorage.removeItem('isGuest');
+
+        userRef.current = userData;
+        setUser(userData);
+        setIsLoggedIn(true);
+        setIsGuest(false);
+
+        // Force the singleton socket to re-handshake with the new
+        // token. Without this, a socket opened pre-login keeps its
+        // null auth — server-side `socket.data.role` stays null and
+        // every subsequent `join` is silently rejected, so chef /
+        // waiter never get live events until a page reload.
+        reconnectWithAuth();
+        return { success: true, role: userData.role, user: userData, audience: aud };
+    };
+
+    /** Sign in from a login-shaped payload obtained outside /auth/login. */
+    const startSession = (payloadData) => applySession(payloadData, localStorage.getItem('isGuest') === 'true');
+
     // Shared by /auth/login and the 2FA step (/auth/2fa/verify): both end
     // in the same { token, refreshToken, ...user } session payload.
     const signIn = async (path, payload) => {
@@ -218,46 +266,7 @@ export function AuthProvider({ children }) {
             if (response.data?.twoFactorRequired) {
                 return { success: false, twoFactorRequired: true, challengeToken: response.data.challengeToken };
             }
-            // #28 — refreshToken is kept out of the user object and stored
-            // separately (audience-scoped) for silent session renewal.
-            const { token, refreshToken, cookieAuth, csrfToken, accessExpiresAt, sessionExpiresAt, ...userData } = response.data;
-            const cookieMeta = cookieAuth ? { csrfToken, accessExpiresAt, sessionExpiresAt } : undefined;
-
-            // Another customer's cached orders / cart / allergies must never
-            // surface in this account. Staff logins don't touch customer data.
-            if (userData.role === 'customer') {
-                claimCustomerData(userData._id || userData.id, { keepUnowned: wasGuest });
-            }
-            
-            // Store under the audience-scoped keys so a login here can't
-            // clobber a session of another audience open in another tab.
-            // On the customer login page that's the customer audience; on
-            // the shared /staff-login it's picked from the returned role
-            // (superadmin → 'platform', tenant staff → 'staff'), and the
-            // tab remembers it so /force-change-password reads the same
-            // session.
-            const tabAud = currentAudience();
-            const aud = tabAud === 'customer' ? 'customer' : (audienceForUser(userData) || tabAud);
-            if (STAFF_SIDE_AUDIENCES.includes(aud)) setEntryAudience(aud);
-            setAuth(token, userData, aud, refreshToken, cookieMeta);
-            setTabIdentity(aud, userData);
-            setAudience(aud);
-            setSessionChange(null);
-            localStorage.removeItem('isGuest');
-
-            userRef.current = userData;
-            setUser(userData);
-            setIsLoggedIn(true);
-            setIsGuest(false);
-
-            // Force the singleton socket to re-handshake with the new
-            // token. Without this, a socket opened pre-login keeps its
-            // null auth — server-side `socket.data.role` stays null and
-            // every subsequent `join` is silently rejected, so chef /
-            // waiter never get live events until a page reload.
-            reconnectWithAuth();
-
-            return { success: true, role: userData.role, user: userData, audience: aud };
+            return applySession(response.data, wasGuest);
         } catch (error) {
             console.error('Login error:', error);
             return {
@@ -516,6 +525,30 @@ export function AuthProvider({ children }) {
     }, [setAudience]);
 
 
+    // Any API call answered 403 TRIAL_EXPIRED: flag the cached tenant as
+    // locked so the route guard shows the trial-ended screen. Only the owner
+    // (admin) is ever locked in-session; other roles are stopped at login.
+    useEffect(() => {
+        const onTrialExpired = (e) => {
+            const cur = userRef.current;
+            if (!cur || cur.role !== 'admin' || cur.tenant?.trialExpired) return;
+            const next = {
+                ...cur,
+                tenant: {
+                    ...(cur.tenant || {}),
+                    trialExpired: true,
+                    trialEndDate: e?.detail?.trialEndDate || cur.tenant?.trialEndDate || null,
+                    daysLeft: 0,
+                },
+            };
+            userRef.current = next;
+            setUser(next);
+            try { setStoredUser(next, audRef.current || currentAudience()); } catch { /* ignore */ }
+        };
+        window.addEventListener(TRIAL_EXPIRED_EVENT, onTrialExpired);
+        return () => window.removeEventListener(TRIAL_EXPIRED_EVENT, onTrialExpired);
+    }, []);
+
     const setGuestMode = () => {
         setUser(null);
         setIsLoggedIn(false);
@@ -677,6 +710,7 @@ export function AuthProvider({ children }) {
         superadminLevel: user?.superadminLevel || '',
         mustChangePassword,
         login,
+        startSession,
         verifyTwoFactor,
         register,
         loginWithGoogle,

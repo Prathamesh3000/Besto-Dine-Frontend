@@ -18,6 +18,7 @@ import {
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import PlanFormModal from './components/PlanFormModal';
+import { formatINR } from '../../utils/billingCycles';
 import {
     PageHeader,
     Card,
@@ -273,7 +274,7 @@ const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPus
                     {p.isPublic === false && <Badge tone="indigo" dot>Private</Badge>}
                 </div>
                 <div className="text-xs text-gray-500 capitalize mt-0.5">
-                    <span className="font-mono text-gray-600">{p.slug}</span> · {p.billingCycle}
+                    <span className="font-mono text-gray-600">{p.slug}</span>
                 </div>
             </div>
 
@@ -281,13 +282,23 @@ const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPus
             <div className="flex items-baseline gap-1 mb-1">
                 {p.price > 0 ? (
                     <>
-                        <span className="text-3xl font-bold text-gray-900 tabular-nums">₹{p.price}</span>
-                        <span className="text-xs text-gray-500">/{p.billingCycle?.replace('ly', '')}</span>
+                        <span className="text-3xl font-bold text-gray-900 tabular-nums">{formatINR(p.prices?.monthly ?? p.price)}</span>
+                        <span className="text-xs text-gray-500">/month</span>
                     </>
                 ) : (
                     <span className="text-3xl font-bold text-gray-900">Custom</span>
                 )}
             </div>
+            {p.price > 0 && (
+                <div className="text-[11px] text-gray-500 mb-2 tabular-nums" data-testid={`plan-cycle-prices-${p.slug}`}>
+                    {['annual', 'biennial'].map(c => (
+                        <span key={c} className="mr-3">
+                            {c === 'annual' ? 'Annual' : '2-year'}: {p.prices?.[c] > 0 ? formatINR(p.prices[c]) : '—'}
+                        </span>
+                    ))}
+                    <span className="text-gray-400">excl. GST</span>
+                </div>
+            )}
             {p.trialDays > 0 ? (
                 <div className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-semibold mb-4">
                     <Sparkles size={11} />

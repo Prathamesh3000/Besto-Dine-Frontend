@@ -6,6 +6,7 @@ import {
     Layers, Gauge, FileText, Store, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import api from '../../../utils/api';
+import { cycleSuffix } from '../../../utils/billingCycles';
 import { useAuth } from '../../../Context/AuthContext';
 import { Card, SectionCard, Badge, Button, ConfirmModal, PromptModal } from '../components/ui';
 import { PageShell, BackLink, DetailSkeleton, DetailError, StickyActionBar, ActivityTimeline, Row } from './shared';
@@ -351,7 +352,7 @@ const PlanColumn = ({ title, plan, highlight, showTrial = false }) => (
                 <div className="text-sm text-gray-600 mt-0.5">
                     {plan.price === null || plan.price === undefined
                         ? '—'
-                        : plan.price > 0 ? <>{fmtMoney(plan.price, plan.currency)} <span className="text-gray-400">/ {plan.billingCycle || 'month'}</span></> : 'Free'}
+                        : plan.price > 0 ? <>{fmtMoney(plan.price, plan.currency)} <span className="text-gray-400">{cycleSuffix(plan.billingCycle)}</span></> : 'Free'}
                 </div>
                 {showTrial && plan.trialDays > 0 && <div className="text-[11px] text-sky-700 mt-1">{plan.trialDays}-day trial on approval</div>}
             </>

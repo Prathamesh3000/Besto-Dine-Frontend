@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { ArrowUpRight, Check, Wallet, Store, Receipt, Mail, Phone } from 'lucide-react';
 import api from '../../../utils/api';
+import { cycleNoun } from '../../../utils/billingCycles';
 import { useAuth } from '../../../Context/AuthContext';
 import { Card, SectionCard, Badge, Button, PromptModal } from '../components/ui';
 import { PageShell, BackLink, DetailSkeleton, DetailError, StickyActionBar, ActivityTimeline, Row } from './shared';
@@ -102,7 +103,7 @@ const PaymentApprovalDetail = () => {
                         <div className="text-2xl font-bold text-emerald-700 tabular-nums">
                             {amountDue > 0 ? fmtMoney(amountDue, plan.currency) : '—'}
                         </div>
-                        <div className="text-[11px] text-emerald-800/70">per {plan.billingCycle || 'month'}</div>
+                        <div className="text-[11px] text-emerald-800/70">per {cycleNoun(plan.billingCycle)}</div>
                     </div>
                 </div>
             </Card>

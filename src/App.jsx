@@ -278,6 +278,7 @@ const SuperAdminPayments   = lazy(() => import('./Pages/SuperAdmin/Payments'));
 
 // Admin
 const AdminLayout = lazy(() => import('./Pages/Admin/AdminLayout'));
+const TrialExpired = lazy(() => import('./Pages/Admin/TrialExpired'));
 const AdminDashboard = lazy(() => import('./Pages/Admin/Dashboard'));
 const TablesDashboard = lazy(() => import('./Pages/Admin/TablesDashboard'));
 const OrdersDashboard = lazy(() => import('./Pages/Admin/OrdersDashboard'));
@@ -484,6 +485,9 @@ function App() {
                     <Route path="audit-logs"       element={<SuperAdminAuditLogs />} />
                     <Route path="security"         element={<SuperAdminSecurity />} />
                 </Route>
+
+                {/* Free trial ended unpaid — owner-only lock screen. */}
+                <Route path="/trial-expired" element={<ProtectedRoute requiredRole={['admin']}><TrialExpired /></ProtectedRoute>} />
 
                 {/* ── Admin Routes ────────────────────────────────────────── */}
                 <Route path="/admin" element={<ProtectedRoute requiredRole={ADMIN_ROLES}><AdminLayout /></ProtectedRoute>}>

@@ -208,6 +208,7 @@
       "contact_title": "Contact us for pricing",
       "contact_body": "Tell us about your restaurant and we'll recommend the right plan.",
       "trial": "{{days}}-day free trial",
+      "trial_all": "14-day free trial on every plan",
       "choose": "Start with {{name}}",
       "eyebrow": "Pricing",
       "title": "Simple plans that grow with you",
@@ -217,7 +218,9 @@
     "cta": {
       "demo": "Request a demo",
       "register": "Register your hotel",
-      "register_short": "Register"
+      "register_short": "Register",
+      "trial": "Start 14-day free trial",
+      "trial_short": "Start free trial"
     },
     "features": {
       "qr_title": "QR table ordering",
@@ -249,10 +252,10 @@
       "subtitle": "From the guest’s first scan to the end-of-day report, every part of service stays in sync."
     },
     "how": {
-      "s1_title": "Register your hotel",
-      "s1_body": "Tell us your hotel name, city and pick your web address. Takes about two minutes.",
-      "s2_title": "Get approved",
-      "s2_body": "Our team reviews every signup — usually within one business day — and emails you when you’re live.",
+      "s1_title": "Start your free trial",
+      "s1_body": "Tell us your restaurant name, city and pick your web address. Takes about two minutes, no card needed.",
+      "s2_title": "Get instant access",
+      "s2_body": "Your 14-day free trial starts right away — you’re signed in and live as soon as you register.",
       "s3_title": "Set up menu & tables",
       "s3_body": "Sign in to the admin panel, add your menu, tables and staff accounts.",
       "s4_title": "Print QR codes",
@@ -264,10 +267,10 @@
     "faq": {
       "q1": "Do my guests need to install an app?",
       "a1": "No. Guests scan the QR code on their table and order in their phone’s browser. Your staff use BestoDine in the browser too — on a phone, tablet or computer.",
-      "q2": "How long does approval take?",
-      "a2": "We review new registrations within about one business day. You’ll get an email as soon as your account is approved, and you can then sign in from the staff login page.",
+      "q2": "How quickly can I start?",
+      "a2": "Right away. Register your restaurant and your 14-day free trial begins instantly — you’re signed in and can set up your menu and tables in minutes.",
       "q3": "Is there a free trial?",
-      "a3": "Plans that include a trial show the number of free days on their pricing card. If you’re unsure which plan fits, request a demo and we’ll help you choose.",
+      "a3": "Yes — every new restaurant gets 14 days free with all Gold plan features, and no card is needed. Your data is kept safe when the trial ends, and you can choose a plan any time to continue. Not sure which plan fits? Request a demo and we’ll help you choose.",
       "q4": "Can I accept online payments?",
       "a4": "Yes. BestoDine integrates with Razorpay for UPI, cards and net-banking, and your waiters can still settle cash bills at the table or counter.",
       "q5": "I have more than one outlet. Is that supported?",
@@ -279,7 +282,7 @@
     },
     "final": {
       "title": "Ready to take orders the modern way?",
-      "body": "Register your hotel today — we’ll review it within a business day and help you get set up."
+      "body": "Start your 14-day free trial today — no card needed, and we’ll help you get set up."
     },
     "nav": {
       "staff_login": "Staff login",
@@ -335,8 +338,8 @@
     "go_home": "Back to BestoDine",
     "step1": "Your hotel",
     "step2": "Your account",
-    "title": "Register your hotel",
-    "subtitle": "Two quick steps. We review every application before it goes live.",
+    "title": "Start your 14-day free trial",
+    "subtitle": "Two quick steps. No card needed — you get instant access to every feature.",
     "progress": "Progress",
     "name": "Hotel / restaurant name",
     "name_ph": "e.g. Spice Garden",
@@ -358,7 +361,7 @@
     "continue": "Continue",
     "owner": "Your full name",
     "email": "Email",
-    "email_hint": "You’ll use this to sign in. We’ll email you here when you’re approved.",
+    "email_hint": "You’ll use this to sign in. We’ll send your trial details here.",
     "phone": "Mobile number",
     "password": "Password",
     "password_ph": "At least {{n}} characters",
@@ -371,14 +374,15 @@
     "privacy": "Privacy Policy",
     "back": "Back",
     "submitting": "Submitting…",
-    "submit": "Submit application",
-    "have_account": "Already approved?",
+    "submit": "Start free trial",
+    "toast_trial_started": "Your 14-day free trial has started",
+    "have_account": "Already have an account?",
     "perk1": "QR table ordering — no app for your guests",
     "perk2": "Kitchen display, waiter & captain apps",
     "perk3": "Table & hall bookings, wallet and loyalty",
     "perk4": "Razorpay payments and reports",
     "aside_title": "Bring your restaurant online in a day.",
-    "aside_note": "Every application is reviewed by our team — usually within one business day.",
+    "aside_note": "14 days free, no card needed, instant access — pick a plan only when you are ready.",
     "done_plan": "Requested plan:",
     "done_plan_note": "our team will confirm it when approving your account."
   },

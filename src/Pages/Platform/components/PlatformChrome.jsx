@@ -60,7 +60,7 @@ export function PlatformHeader({ onHome = false }) {
                         to="/register-restaurant"
                         className="px-4 py-2 rounded-xl text-[14px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] shadow-[0_4px_14px_rgba(254,131,1,0.3)] transition-colors"
                     >
-                        {t('platform.cta.register', 'Register your hotel')}
+                        {t('platform.cta.trial_short', 'Start free trial')}
                     </Link>
                 </div>
                 <button
@@ -93,7 +93,7 @@ export function PlatformHeader({ onHome = false }) {
                             {t('platform.nav.staff_login', 'Staff login')}
                         </Link>
                         <Link to="/register-restaurant" className="text-center py-3 rounded-xl text-[14px] font-bold text-white bg-[#FE8301]">
-                            {t('platform.cta.register_short', 'Register')}
+                            {t('platform.cta.trial_short', 'Start free trial')}
                         </Link>
                     </div>
                 </div>
@@ -120,7 +120,7 @@ export function PlatformFooter() {
                     </p>
                 </div>
                 <nav className="grid grid-cols-2 gap-x-10 gap-y-3" aria-label={t('platform.footer.label', 'Footer')}>
-                    <Link to="/register-restaurant" className={linkCls}>{t('platform.cta.register', 'Register your hotel')}</Link>
+                    <Link to="/register-restaurant" className={linkCls}>{t('platform.cta.trial', 'Start 14-day free trial')}</Link>
                     <Link to="/request-demo" className={linkCls}>{t('platform.cta.demo', 'Request a demo')}</Link>
                     <Link to="/staff-login" className={linkCls}>{t('platform.nav.staff_login', 'Staff login')}</Link>
                     <Link to="/terms" className={linkCls}>{t('platform.footer.terms', 'Terms')}</Link>

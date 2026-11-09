@@ -3,7 +3,7 @@ import React from 'react'
 import { render, waitFor, act } from '@testing-library/react'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
-vi.mock('@/utils/api', () => ({ default: api, CUSTOMER_SESSION_EXPIRED_EVENT: 'bd:customer-session-expired' }))
+vi.mock('@/utils/api', () => ({ default: api, CUSTOMER_SESSION_EXPIRED_EVENT: 'bd:customer-session-expired', TRIAL_EXPIRED_EVENT: 'bd:trial-expired' }))
 vi.mock('@/utils/socket', () => ({ disconnectSocket: vi.fn(), reconnectWithAuth: vi.fn() }))
 vi.mock('react-hot-toast', () => ({ toast: { error: vi.fn(), success: vi.fn() }, default: { error: vi.fn(), success: vi.fn() } }))
 vi.mock('@/Components/Common/SessionChangedOverlay', () => ({ default: () => null }))

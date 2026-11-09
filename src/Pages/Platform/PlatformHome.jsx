@@ -19,7 +19,7 @@ import { getPublicAppOrigin } from '../../utils/customerLinks';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { PlatformHeader, PlatformFooter } from './components/PlatformChrome';
 import {
-    PLATFORM_TITLE, PLATFORM_DESCRIPTION, usePageMeta, usePublicPlans, formatPlanPrice, planHighlights,
+    PLATFORM_TITLE, PLATFORM_DESCRIPTION, usePageMeta, usePublicPlans, formatPlanCyclePrice, publicCycleOptions, planHighlights,
 } from './platformShared';
 
 const primaryBtn = 'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] shadow-[0_6px_20px_rgba(254,131,1,0.35)] transition-colors';
@@ -179,6 +179,8 @@ function RestaurantSearch() {
 function Pricing() {
     const { t } = useTranslation();
     const { data: plans = [], isLoading, isError } = usePublicPlans();
+    // Annual is the default; falls back to what the catalogue actually sells.
+    const [cycle, setCycle] = useState('annual');
 
     if (isLoading) {
         return (
@@ -205,17 +207,57 @@ function Pricing() {
                 </p>
                 <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
                     <Link to="/request-demo" className={primaryBtn}>{t('platform.cta.demo', 'Request a demo')}</Link>
-                    <Link to="/register-restaurant" className={secondaryBtn}>{t('platform.cta.register', 'Register your hotel')}</Link>
+                    <Link to="/register-restaurant" className={secondaryBtn}>{t('platform.cta.trial', 'Start 14-day free trial')}</Link>
                 </div>
             </div>
         );
     }
 
+    const options = publicCycleOptions(plans);
+    const gstRate = Number.isFinite(Number(plans[0]?.gstRate)) ? Number(plans[0].gstRate) : 18;
+    const activeCycle = options.some(o => o.cycle === cycle) ? cycle : (options[0]?.cycle || 'monthly');
+    const cycleName = {
+        monthly: t('platform.pricing.cycle_monthly', 'Monthly'),
+        annual: t('platform.pricing.cycle_annual', 'Annual'),
+        biennial: t('platform.pricing.cycle_biennial', '2-year'),
+    };
     const cols = plans.length >= 3 ? 'md:grid-cols-2 lg:grid-cols-3' : plans.length === 2 ? 'md:grid-cols-2 max-w-3xl mx-auto' : 'max-w-md mx-auto';
     return (
+        <>
+        <div className="flex flex-col items-center gap-2 mb-8">
+            <p className="text-[14px] font-semibold text-[#067647]">
+                {t('platform.pricing.trial_all', '14-day free trial on every plan')}
+            </p>
+            {options.length > 1 && (
+                <div role="group" aria-label={t('platform.pricing.cycle_label', 'Billing period')} className="inline-flex items-center gap-1 rounded-full border border-[#EAECF0] bg-white p-1 shadow-sm">
+                    {options.map(({ cycle: c, savings }) => (
+                        <button
+                            key={c}
+                            type="button"
+                            onClick={() => setCycle(c)}
+                            aria-pressed={activeCycle === c}
+                            data-testid={`pricing-cycle-${c}`}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[14px] font-semibold transition ${
+                                activeCycle === c ? 'bg-[#FE8301] text-white shadow' : 'text-[#475467] hover:bg-[#F9FAFB]'
+                            }`}
+                        >
+                            {cycleName[c]}
+                            {savings > 0 && (
+                                <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${activeCycle === c ? 'bg-white/25 text-white' : 'bg-[#ECFDF3] text-[#067647]'}`}>
+                                    {t('platform.pricing.save', 'Save {{pct}}%', { pct: savings })}
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+            )}
+            <p className="text-[13px] text-[#667085]">
+                {t('platform.pricing.gst_note', 'Prices exclude {{rate}}% GST, added at checkout. Same price at renewal. Cancel monthly plans any time.', { rate: gstRate })}
+            </p>
+        </div>
         <div className={`grid gap-5 ${cols}`}>
             {plans.map((plan) => {
-                const { amount, per } = formatPlanPrice(plan);
+                const { amount, per, perMonth, savingsPct: planSavings, fellBack } = formatPlanCyclePrice(plan, activeCycle);
                 const highlights = planHighlights(plan);
                 const trial = Number(plan.trialDays) || 0;
                 const popular = Boolean(plan.highlight);
@@ -247,6 +289,13 @@ function Pricing() {
                             <span className="text-[34px] font-extrabold tracking-tight text-[#101828]">{amount}</span>
                             {per && <span className="text-[14px] font-semibold text-[#667085]">{per}</span>}
                         </p>
+                        {amount !== 'Free' && (
+                            <p className="mt-1 text-[13px] text-[#667085]" data-testid={`pricing-note-${plan.slug || plan._id}`}>
+                                {t('platform.pricing.plus_gst', '+ {{rate}}% GST', { rate: gstRate })}
+                                {perMonth && !fellBack && <> · {t('platform.pricing.per_month_eq', '{{amount}}/month', { amount: perMonth })}</>}
+                                {planSavings > 0 && !fellBack && <> · <span className="font-semibold text-[#067647]">{t('platform.pricing.save', 'Save {{pct}}%', { pct: planSavings })}</span></>}
+                            </p>
+                        )}
                         {highlights.length > 0 && (
                             <ul className="mt-5 space-y-2.5 flex-1">
                                 {highlights.map(h => (
@@ -260,12 +309,13 @@ function Pricing() {
                             to={plan._id ? `/register-restaurant?plan=${encodeURIComponent(plan._id)}` : '/register-restaurant'}
                             className={`${primaryBtn} mt-6 w-full`}
                         >
-                            {t('platform.pricing.choose', 'Start with {{name}}', { name: plan.name })}
+                            {t('platform.pricing.start_trial', 'Start free trial')}
                         </Link>
                     </Motion.div>
                 );
             })}
         </div>
+        </>
     );
 }
 
@@ -333,16 +383,16 @@ const PlatformHome = () => {
     ];
 
     const steps = [
-        [ClipboardEdit, t('platform.how.s1_title', 'Register your hotel'), t('platform.how.s1_body', 'Tell us your hotel name, city and pick your web address. Takes about two minutes.')],
-        [BadgeCheck, t('platform.how.s2_title', 'Get approved'), t('platform.how.s2_body', 'Our team reviews every signup — usually within one business day — and emails you when you’re live.')],
+        [ClipboardEdit, t('platform.how.s1_title', 'Start your free trial'), t('platform.how.s1_body', 'Tell us your restaurant name, city and pick your web address. Takes about two minutes, no card needed.')],
+        [BadgeCheck, t('platform.how.s2_title', 'Get instant access'), t('platform.how.s2_body', 'Your 14-day free trial starts right away — you’re signed in and live as soon as you register.')],
         [UtensilsCrossed, t('platform.how.s3_title', 'Set up menu & tables'), t('platform.how.s3_body', 'Sign in to the admin panel, add your menu, tables and staff accounts.')],
         [Printer, t('platform.how.s4_title', 'Print QR codes'), t('platform.how.s4_body', 'Download a QR code for each table, stick them up, and start taking orders.')],
     ];
 
     const faqs = [
         [t('platform.faq.q1', 'Do my guests need to install an app?'), t('platform.faq.a1', 'No. Guests scan the QR code on their table and order in their phone’s browser. Your staff use BestoDine in the browser too — on a phone, tablet or computer.')],
-        [t('platform.faq.q2', 'How long does approval take?'), t('platform.faq.a2', 'We review new registrations within about one business day. You’ll get an email as soon as your account is approved, and you can then sign in from the staff login page.')],
-        [t('platform.faq.q3', 'Is there a free trial?'), t('platform.faq.a3', 'Plans that include a trial show the number of free days on their pricing card. If you’re unsure which plan fits, request a demo and we’ll help you choose.')],
+        [t('platform.faq.q2', 'How quickly can I start?'), t('platform.faq.a2', 'Right away. Register your restaurant and your 14-day free trial begins instantly — you’re signed in and can set up your menu and tables in minutes.')],
+        [t('platform.faq.q3', 'Is there a free trial?'), t('platform.faq.a3', 'Yes — every new restaurant gets 14 days free with all Gold plan features, and no card is needed. Your data is kept safe when the trial ends, and you can choose a plan any time to continue. Not sure which plan fits? Request a demo and we’ll help you choose.')],
         [t('platform.faq.q4', 'Can I accept online payments?'), t('platform.faq.a4', 'Yes. BestoDine integrates with Razorpay for UPI, cards and net-banking, and your waiters can still settle cash bills at the table or counter.')],
         [t('platform.faq.q5', 'I have more than one outlet. Is that supported?'), t('platform.faq.a5', 'Yes — plans with multi-branch support let you manage several locations from one account, each with its own tables, staff and QR codes.')],
         [t('platform.faq.q6', 'What is my restaurant’s web address?'), t('platform.faq.a6', 'You choose it during registration, for example {{host}}. It becomes your public page with your menu, takeaway and booking options.', { host: exampleHost })],
@@ -370,10 +420,13 @@ const PlatformHome = () => {
                             </p>
                             <div className="mt-7 flex flex-col sm:flex-row gap-3">
                                 <Link to="/register-restaurant" className={primaryBtn}>
-                                    {t('platform.cta.register', 'Register your hotel')} <ArrowRight size={18} />
+                                    {t('platform.cta.trial', 'Start 14-day free trial')} <ArrowRight size={18} />
                                 </Link>
                                 <Link to="/request-demo" className={secondaryBtn}>{t('platform.cta.demo', 'Request a demo')}</Link>
                             </div>
+                            <p className="mt-3 text-[13px] font-semibold text-[#067647]">
+                                {t('platform.hero.trial_note', '14 days free · No card needed · Start in minutes')}
+                            </p>
                             <div className="mt-10">
                                 <RestaurantSearch />
                             </div>
@@ -458,11 +511,11 @@ const PlatformHome = () => {
                             {t('platform.final.title', 'Ready to take orders the modern way?')}
                         </h2>
                         <p className="relative mt-3 text-[15px] sm:text-[17px] text-white/90 max-w-xl mx-auto">
-                            {t('platform.final.body', 'Register your hotel today — we’ll review it within a business day and help you get set up.')}
+                            {t('platform.final.body', 'Start your 14-day free trial today — no card needed, and we’ll help you get set up.')}
                         </p>
                         <div className="relative mt-7 flex flex-col sm:flex-row gap-3 justify-center">
                             <Link to="/register-restaurant" className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[15px] font-bold text-[#B54708] bg-white hover:bg-[#FFF8F0] transition-colors">
-                                {t('platform.cta.register', 'Register your hotel')} <ArrowRight size={18} />
+                                {t('platform.cta.trial', 'Start 14-day free trial')} <ArrowRight size={18} />
                             </Link>
                             <Link to="/request-demo" className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[15px] font-bold text-white border border-white/50 hover:bg-white/10 transition-colors">
                                 {t('platform.cta.demo', 'Request a demo')}

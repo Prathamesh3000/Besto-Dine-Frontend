@@ -7,6 +7,9 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicAPI } from '../../utils/api';
 import { FEATURE_LABELS } from '../../utils/featureLabels';
+import {
+    CYCLE_KEYS, DEFAULT_GST_RATE, availableCyclesAcross, cycleSuffix, formatINR, maxSavingsFor, rowForCycle,
+} from '../../utils/billingCycles';
 
 export const PLATFORM_TITLE = 'BestoDine — Restaurant management & QR ordering';
 export const PLATFORM_DESCRIPTION =
@@ -53,7 +56,50 @@ export function usePublicPlans() {
     });
 }
 
-const CYCLE_LABEL = { monthly: 'month', quarterly: 'quarter', yearly: 'year' };
+const CYCLE_LABEL = { monthly: 'month', quarterly: 'quarter', yearly: 'year', annual: 'year', biennial: '2 years' };
+
+/**
+ * Price block of a public plan card for a billing cycle (monthly | annual |
+ * biennial). Falls back to the plan's monthly list price when the plan has no
+ * price for that cycle, so a catalogue without annual prices still renders.
+ *
+ * Returns { amount, per, cycle, fellBack, perMonth, savingsPct, total, gst, gstRate }
+ * (money strings formatted; perMonth/savingsPct/total only for a real cycle row).
+ */
+export function formatPlanCyclePrice(plan, cycle = 'monthly') {
+    const gstRate = Number.isFinite(Number(plan?.gstRate)) ? Number(plan.gstRate) : DEFAULT_GST_RATE;
+    const row = rowForCycle(plan, cycle, gstRate);
+    if (!row) {
+        // No price for this cycle: show the monthly (legacy) price instead.
+        const legacy = formatPlanPrice(plan);
+        const monthlyRow = rowForCycle(plan, 'monthly', gstRate);
+        return {
+            ...legacy,
+            ...(monthlyRow ? { amount: formatINR(monthlyRow.price), per: cycleSuffix('monthly') } : {}),
+            cycle: 'monthly', fellBack: cycle !== 'monthly', perMonth: null, savingsPct: 0, total: null, gst: null, gstRate,
+        };
+    }
+    return {
+        amount: formatINR(row.price),
+        per: cycleSuffix(row.cycle),
+        cycle: row.cycle,
+        fellBack: false,
+        perMonth: row.cycle === 'monthly' ? null : formatINR(row.perMonthEquivalent),
+        savingsPct: row.savingsPctVsMonthly || 0,
+        total: formatINR(row.total),
+        gst: formatINR(row.gst),
+        gstRate,
+    };
+}
+
+/** Cycles to offer in the public toggle, plus the best saving per cycle (from the data). */
+export function publicCycleOptions(plans) {
+    const cycles = availableCyclesAcross(plans);
+    return CYCLE_KEYS.filter(c => cycles.includes(c)).map(c => ({
+        cycle: c,
+        savings: c === 'monthly' ? 0 : maxSavingsFor(plans, c),
+    }));
+}
 
 /** { amount: '₹1,499', per: '/ month' } or { amount: 'Free', per: '' }. */
 export function formatPlanPrice(plan) {

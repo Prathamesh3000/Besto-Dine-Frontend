@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth, STAFF_ROLES, CUSTOMER_ROLES } from '../Context/AuthContext';
 import { getActiveTenantSlug } from '../utils/tenant';
+import { isTrialLocked, isTrialAllowedPath } from '../utils/trialLock';
 
 function AuthLoader() {
     return (
@@ -35,7 +36,7 @@ const ProtectedRoute = ({
     allowGuest = false,
     redirectTo,
 }) => {
-    const { isAuthenticated, isGuest, isLoading, hasRole, mustChangePassword, audience } = useAuth();
+    const { isAuthenticated, isGuest, isLoading, hasRole, mustChangePassword, audience, user } = useAuth();
     const location = useLocation();
 
     if (isLoading) return <AuthLoader />;
@@ -91,6 +92,12 @@ const ProtectedRoute = ({
     // ('staff'), so tell it which audience's session to act on.
     if (mustChangePassword) {
         return <Navigate to="/force-change-password" replace state={{ audience }} />;
+    }
+
+    // Free trial ended unpaid: the owner may only reach billing (and the
+    // lock screen). Everything else on a staff route goes to /trial-expired.
+    if (isStaffRoute && isTrialLocked(user) && !isTrialAllowedPath(location.pathname)) {
+        return <Navigate to="/trial-expired" replace />;
     }
 
     // If a specific role is required, check it. Instead of showing a

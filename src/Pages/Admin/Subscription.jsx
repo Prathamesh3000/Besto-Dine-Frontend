@@ -11,6 +11,11 @@ import {
 } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
+import {
+    CYCLE_TERM, CYCLE_TOGGLE_LABEL, DEFAULT_GST_RATE, trialInfo,
+    cyclePer, cycleLabel, normalizeCycle, rowForCycle,
+    availableCyclesAcross, maxSavingsFor, formatINR,
+} from '../../utils/billingCycles';
 
 /* ─── Human-readable labels ──────────────────────────────────────── */
 
@@ -80,14 +85,11 @@ const SETUP_PENDING_RZP_STATUSES = new Set(['created', 'authenticated', 'pending
 // on laptops (no wasted scroll) but doesn't dwarf small screens.
 const TAB_PANEL_CLASS = 'min-h-[min(720px,70vh)]';
 
-const fmtINR = (n) => {
-    if (n == null || Number.isNaN(n)) return '—';
-    try {
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency', currency: 'INR', maximumFractionDigits: 0,
-        }).format(n);
-    } catch { return `₹${n}`; }
-};
+const fmtINR = (n) => (n == null || Number.isNaN(n) ? '—' : formatINR(n));
+
+// Error codes from POST /tenant/billing/upgrade that are shown inline above
+// the plan cards (they explain a rule, not a transient failure).
+const INLINE_UPGRADE_CODES = new Set(['TERM_ACTIVE', 'SAME_PLAN', 'CYCLE_NOT_AVAILABLE', 'INVALID_CYCLE']);
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
@@ -113,20 +115,6 @@ const LoadingSkeleton = () => (
 
 /* ─── Trial countdown helper ─────────────────────────────────────── */
 
-function trialInfo(trialEndDate) {
-    if (!trialEndDate) return null;
-    const now = new Date();
-    const end = new Date(trialEndDate);
-    const diffMs = end - now;
-    if (diffMs <= 0) return { daysLeft: 0, pct: 100, expired: true };
-    const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    // Rough progress: assume 14-day trial for the progress bar
-    const totalDays = 14;
-    const elapsed = totalDays - daysLeft;
-    const pct = Math.min(100, Math.max(0, (elapsed / totalDays) * 100));
-    return { daysLeft, pct, expired: false };
-}
-
 /* ═══════════════════════════════════════════════════════════════════
    Main component
    ═══════════════════════════════════════════════════════════════════ */
@@ -147,6 +135,10 @@ const SubscriptionInner = () => {
     const [exporting, setExporting] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [activeTab, setActiveTab] = useState('plans'); // 'plans' | 'invoices' | 'export'
+    // Billing cycle toggle for the plan cards. Annual is the default.
+    const [cycle, setCycle] = useState('annual');
+    // Inline explanation for an upgrade the backend refused on a billing rule.
+    const [upgradeError, setUpgradeError] = useState(null);
     // Auto-sync should run at most once per page mount when we land in
     // a setup-pending state. The ref prevents re-firing on subsequent
     // re-renders (refetch, tab switches, etc).
@@ -174,6 +166,7 @@ const SubscriptionInner = () => {
                     current: curRes.data?.data || null,
                     plans: plansRes.data?.data?.plans || [],
                     currentPlanSlug: plansRes.data?.data?.currentPlanSlug || '',
+                    gstRate: plansRes.data?.data?.gstRate,
                     invoices: invRes.data?.data || [],
                 };
             } catch (err) {
@@ -186,6 +179,7 @@ const SubscriptionInner = () => {
     const current = subscriptionData?.current ?? null;
     const plans = useMemo(() => subscriptionData?.plans ?? [], [subscriptionData?.plans]);
     const currentPlanSlug = subscriptionData?.currentPlanSlug ?? '';
+    const gstRate = Number.isFinite(Number(subscriptionData?.gstRate)) ? Number(subscriptionData.gstRate) : DEFAULT_GST_RATE;
     const invoices = useMemo(() => subscriptionData?.invoices ?? [], [subscriptionData?.invoices]);
     // ADM-106 follow-up — surfaces the tenant's pending downgrade
     // request (if any) so the page can render the status banner +
@@ -353,12 +347,23 @@ const SubscriptionInner = () => {
 
     const handleUpgrade = async (plan) => {
         if (upgrading) return;
-        const confirmText = `Upgrade to ${plan.name} (${fmtINR(plan.price)}/${plan.billingCycle || 'month'})?\n\nYou'll be redirected to Razorpay to authorize the recurring payment.`;
+        const row = rowForCycle(plan, activeCycle, gstRate);
+        const rate = Number.isFinite(Number(plan.gstRate)) ? Number(plan.gstRate) : gstRate;
+        const confirmText = row
+            ? `Upgrade to ${plan.name} (${cycleLabel(activeCycle)})?\n\n`
+              + `Plan price: ${fmtINR(row.price)} ${cyclePer(activeCycle)}\n`
+              + `GST (${rate}%): ${fmtINR(row.gst)}\n`
+              + `Total payable: ${fmtINR(row.total)}\n\n`
+              + (activeCycle === 'monthly'
+                  ? "You'll be redirected to Razorpay to authorize the recurring monthly payment. Cancel any time."
+                  : `You'll be redirected to Razorpay to pay for the ${CYCLE_TERM[activeCycle]}. The same price applies at renewal.`)
+            : `Upgrade to ${plan.name}?`;
         if (!window.confirm(confirmText)) return;
 
+        setUpgradeError(null);
         setUpgrading(plan._id);
         try {
-            const res = await api.post('/tenant/billing/upgrade', { planId: plan._id }, { _silent: true });
+            const res = await api.post('/tenant/billing/upgrade', { planId: plan._id, billingCycle: activeCycle }, { _silent: true });
             const billing = res.data?.data?.billing;
             // shortUrl lives under pendingUpgrade / billing in the upgrade
             // response — NOT under subscription (which is the CURRENT
@@ -423,12 +428,22 @@ const SubscriptionInner = () => {
             }
         } catch (err) {
             const data = err.response?.data;
+            if (INLINE_UPGRADE_CODES.has(data?.code)) {
+                // Billing-rule refusals (prepaid term running, same plan, cycle
+                // not sold) are explained inline; the backend message already
+                // carries the dates.
+                setUpgradeError({
+                    code: data.code,
+                    message: data.message || 'This change is not available right now.',
+                    renewalWindowOpensAt: data.data?.renewalWindowOpensAt || null,
+                    currentPeriodEnd: data.data?.currentPeriodEnd || null,
+                });
+                return;
+            }
             if (data?.code === 'BILLING_NOT_CONFIGURED') {
                 toast.error('Online billing is not available right now. Contact support to upgrade.');
             } else if (data?.code === 'BILLING_SETUP_FAILED') {
                 toast.error(data.message || 'Razorpay setup failed. Your plan is unchanged.');
-            } else if (data?.code === 'SAME_PLAN') {
-                toast.error("You're already on that plan.");
             } else if (data?.code === 'DOWNGRADE_NOT_SUPPORTED') {
                 // Open the request-to-super-admin modal instead of just
                 // showing an error. Tenant fills in a reason, super
@@ -506,7 +521,14 @@ const SubscriptionInner = () => {
     const sub = current?.subscription || {};
     const statusKey = (sub.razorpayStatus || sub.status || '').toLowerCase();
     const status = BILLING_STATUS[statusKey] || BILLING_STATUS.active;
-    const trial = sub.status === 'trial' ? trialInfo(sub.trialEndDate) : null;
+    const trial = sub.status === 'trial' ? trialInfo(sub.trialEndDate, sub.trialStartDate || sub.startDate) : null;
+    const subCycle = normalizeCycle(sub.billingCycle);
+    // Trial / lapsed owners buy the plan they are on; it is not "current" in the paid sense.
+    const unpaidState = ['trial', 'expired', 'past_due'].includes(sub.status);
+    const prepaidActive = subCycle !== 'monthly' && !!sub.currentPeriodEnd && new Date(sub.currentPeriodEnd) > new Date();
+    // Cycles on offer across the catalogue; the toggle only shows those.
+    const offeredCycles = availableCyclesAcross(plans);
+    const activeCycle = offeredCycles.includes(cycle) ? cycle : (offeredCycles[0] || 'monthly');
 
     // Paid add-ons currently in force (modules bought on top of the plan).
     const activeAddons = useMemo(() => current?.addons || [], [current]);
@@ -596,6 +618,22 @@ const SubscriptionInner = () => {
                                 </span>
                             </div>
 
+                            {/* Cycle + price. `sub.price` is the base amount per billing cycle. */}
+                            {sub.status !== 'trial' && typeof sub.price === 'number' && sub.price > 0 && (
+                                <p className="mt-2 text-sm text-slate-700" data-testid="current-cycle">
+                                    <span className="font-semibold">{cycleLabel(subCycle)} billing</span>
+                                    {' · '}
+                                    {fmtINR(sub.price)} {cyclePer(subCycle)} + {Number.isFinite(Number(sub.gstRate)) ? Number(sub.gstRate) : gstRate}% GST
+                                    <span className="text-slate-500"> · same price at renewal</span>
+                                </p>
+                            )}
+                            {prepaidActive && (
+                                <p className="mt-1 text-xs text-slate-500" data-testid="current-prepaid-note">
+                                    Prepaid until {fmtDate(sub.currentPeriodEnd)}.
+                                    {sub.renewalWindowOpensAt && <> You can renew or change plan from {fmtDate(sub.renewalWindowOpensAt)}.</>}
+                                </p>
+                            )}
+
                             {/* Billing dates */}
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-sm text-slate-500">
                                 {sub.startDate && (
@@ -605,9 +643,9 @@ const SubscriptionInner = () => {
                                     </span>
                                 )}
                                 {sub.currentPeriodEnd && sub.status !== 'trial' && (
-                                    <span className="flex items-center gap-1.5">
+                                    <span className="flex items-center gap-1.5" data-testid="current-renewal">
                                         <CreditCard size={13} />
-                                        Next billing {fmtDate(sub.currentPeriodEnd)}
+                                        {subCycle === 'monthly' ? 'Next billing' : 'Renews on'} {fmtDate(sub.currentPeriodEnd)}
                                     </span>
                                 )}
                                 {sub.lastChargedAt && (
@@ -786,7 +824,7 @@ const SubscriptionInner = () => {
                                 {activeAddons.map(a => (
                                     <li key={a._id || a.key} className="inline-flex items-center gap-2 rounded-lg border border-orange-100 bg-orange-50/50 px-3 py-1.5 text-xs">
                                         <span className="font-semibold text-slate-700">{FEATURE_LABELS[a.key]?.label || a.key}</span>
-                                        <span className="text-slate-500">₹{a.price || 0}/mo{a.endDate ? ` · until ${fmtDate(a.endDate)}` : ''}</span>
+                                        <span className="text-slate-500">₹{a.price || 0}/month (billed monthly){a.endDate ? ` · until ${fmtDate(a.endDate)}` : ''}</span>
                                     </li>
                                 ))}
                             </ul>
@@ -908,10 +946,60 @@ const SubscriptionInner = () => {
                             <p className="text-xs text-slate-400 mt-1">Contact support if you'd like to change your plan.</p>
                         </div>
                     ) : (
+                        <>
+                        {/* Billing-cycle toggle. The savings badge is computed from
+                            the plan data (best saving across plans), never hard-coded. */}
+                        <div className="flex flex-col items-center gap-2 mb-5">
+                            <div role="group" aria-label="Billing cycle" className="inline-flex items-center gap-1 bg-white rounded-xl border border-slate-100 p-1 shadow-sm">
+                                {offeredCycles.map(c => {
+                                    const save = c === 'monthly' ? 0 : maxSavingsFor(plans, c);
+                                    return (
+                                        <button
+                                            key={c}
+                                            type="button"
+                                            onClick={() => { setCycle(c); setUpgradeError(null); }}
+                                            aria-pressed={activeCycle === c}
+                                            data-testid={`cycle-${c}`}
+                                            className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg transition ${
+                                                activeCycle === c
+                                                    ? 'bg-[#FE8301] text-white shadow-sm'
+                                                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                                            }`}
+                                        >
+                                            {CYCLE_TOGGLE_LABEL[c]}
+                                            {save > 0 && (
+                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                                    activeCycle === c ? 'bg-white/25 text-white' : 'bg-emerald-50 text-emerald-700'
+                                                }`}>
+                                                    Save ~{save}%
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                                Prices are before {gstRate}% GST, added at checkout. Same price at renewal. Monthly plans can be cancelled any time.
+                            </p>
+                        </div>
+
+                        {upgradeError && (
+                            <div role="alert" data-testid="upgrade-error" data-code={upgradeError.code} className="mb-5 p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                                <Info size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                                <p className="flex-1 text-xs text-amber-800 leading-relaxed">{upgradeError.message}</p>
+                                <button type="button" onClick={() => setUpgradeError(null)} aria-label="Dismiss" className="text-amber-700 hover:text-amber-900">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                             {plans.map((plan, idx) => {
                                 const isCurrent = plan.slug === currentPlanSlug;
                                 const isFree = plan.price <= 0;
+                                const cycleRow = rowForCycle(plan, activeCycle, gstRate);
+                                // This plan does not sell the chosen cycle (and is not custom-quoted).
+                                const cycleMissing = !cycleRow && plan.price > 0;
                                 // A ₹0 plan in this catalog is never "free" — it's a
                                 // custom-quote tier (e.g. Enterprise, seeded price: 0,
                                 // "quoted individually"). We show "Custom" instead of
@@ -1014,13 +1102,33 @@ const SubscriptionInner = () => {
                                                         <span className="text-[26px] font-extrabold text-slate-800 leading-none">Custom</span>
                                                         <span className="text-xs text-slate-400 font-medium">pricing</span>
                                                     </>
-                                                ) : (
+                                                ) : cycleRow ? (
                                                     <>
-                                                        <span className="text-[26px] font-extrabold text-slate-800 leading-none">{fmtINR(plan.price)}</span>
-                                                        <span className="text-xs text-slate-400 font-medium">/ {plan.billingCycle || 'month'}</span>
+                                                        <span className="text-[26px] font-extrabold text-slate-800 leading-none" data-testid={`price-${plan.slug}`}>{fmtINR(cycleRow.price)}</span>
+                                                        <span className="text-xs text-slate-400 font-medium">{cyclePer(activeCycle)}</span>
                                                     </>
+                                                ) : (
+                                                    <span className="text-sm font-semibold text-slate-500" data-testid={`unavailable-${plan.slug}`}>
+                                                        Not available with {cycleLabel(activeCycle).toLowerCase()} billing
+                                                    </span>
                                                 )}
                                             </div>
+                                            {cycleRow && !isCustom && (
+                                                <div className="mt-1 space-y-0.5" data-testid={`breakdown-${plan.slug}`}>
+                                                    <p className="text-[11px] text-slate-500">+ {plan.gstRate ?? gstRate}% GST</p>
+                                                    {activeCycle !== 'monthly' && (
+                                                        <p className="text-[11px] text-slate-500">
+                                                            {fmtINR(cycleRow.perMonthEquivalent)}/month
+                                                            {cycleRow.savingsPctVsMonthly > 0 && (
+                                                                <span className="ml-1 font-semibold text-emerald-600">Save {cycleRow.savingsPctVsMonthly}%</span>
+                                                            )}
+                                                        </p>
+                                                    )}
+                                                    <p className="text-[11px] font-semibold text-slate-700">
+                                                        Total payable {fmtINR(cycleRow.total)}
+                                                    </p>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Limits — always a 2×N grid so cards align
@@ -1083,26 +1191,29 @@ const SubscriptionInner = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleUpgrade(plan)}
-                                                disabled={isCurrent || isFree || !!upgrading}
+                                                disabled={isFree || cycleMissing || !!upgrading || (isCurrent && !unpaidState && activeCycle === subCycle && !!sub.razorpaySubscriptionId && !prepaidActive)}
                                                 title={
                                                     isCustom ? 'Custom-priced plan — contact sales to switch'
-                                                    : isCurrent ? "You're already on this plan"
+                                                    : cycleMissing ? `Not available with ${cycleLabel(activeCycle).toLowerCase()} billing`
+                                                    : isCurrent ? `Your current plan (${cycleLabel(subCycle)}). Pick another cycle to switch.`
                                                     : ''
                                                 }
                                                 className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-                                                    isCurrent
-                                                        ? 'bg-slate-100 text-slate-400 cursor-default'
-                                                        : isFree || upgrading
+                                                    isFree || cycleMissing || upgrading
                                                         ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                        : isCurrent
+                                                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                                         : 'bg-[#FE8301] hover:bg-[#e57500] text-white shadow-sm hover:shadow-md'
                                                 }`}
                                             >
                                                 {upgrading === plan._id ? (
                                                     <><RefreshCw size={14} className="animate-spin" /> Setting up...</>
-                                                ) : isCurrent ? (
-                                                    <><Check size={15} /> Current Plan</>
                                                 ) : isCustom ? (
                                                     <>Contact Sales</>
+                                                ) : isCurrent && !unpaidState ? (
+                                                    activeCycle === subCycle
+                                                        ? <><Check size={15} /> {prepaidActive ? 'Renew' : 'Current Plan'}</>
+                                                        : <><ArrowRight size={15} /> Switch to {cycleLabel(activeCycle)}</>
                                                 ) : (
                                                     <><ArrowRight size={15} /> Upgrade to {plan.name}</>
                                                 )}
@@ -1112,6 +1223,7 @@ const SubscriptionInner = () => {
                                 );
                             })}
                         </div>
+                        </>
                     )}
                 </section>
             )}
@@ -1137,8 +1249,11 @@ const SubscriptionInner = () => {
                                             <th className="text-left px-5 py-3 font-semibold">Invoice #</th>
                                             <th className="text-left px-5 py-3 font-semibold">Date</th>
                                             <th className="text-left px-5 py-3 font-semibold">Plan</th>
+                                            <th className="text-left px-5 py-3 font-semibold">Cycle</th>
                                             <th className="text-left px-5 py-3 font-semibold">Period</th>
-                                            <th className="text-right px-5 py-3 font-semibold">Amount</th>
+                                            <th className="text-right px-5 py-3 font-semibold">Base</th>
+                                            <th className="text-right px-5 py-3 font-semibold">GST</th>
+                                            <th className="text-right px-5 py-3 font-semibold">Total</th>
                                             <th className="text-center px-5 py-3 font-semibold">Status</th>
                                             <th className="text-right px-5 py-3 font-semibold"></th>
                                         </tr>
@@ -1149,11 +1264,14 @@ const SubscriptionInner = () => {
                                                 <td className="px-5 py-3.5 font-mono text-xs text-slate-700 font-medium">{inv.invoiceNumber}</td>
                                                 <td className="px-5 py-3.5 text-xs text-slate-600">{fmtDate(inv.paidAt || inv.createdAt)}</td>
                                                 <td className="px-5 py-3.5 text-slate-800 font-medium">{inv.planName || '—'}</td>
+                                                <td className="px-5 py-3.5 text-xs text-slate-600">{cycleLabel(inv.billingCycle)}</td>
                                                 <td className="px-5 py-3.5 text-xs text-slate-500">
                                                     {inv.periodStart && inv.periodEnd
                                                         ? `${fmtDate(inv.periodStart)} – ${fmtDate(inv.periodEnd)}`
                                                         : '—'}
                                                 </td>
+                                                <td className="px-5 py-3.5 text-right text-xs text-slate-600">{inv.baseAmount != null ? fmtINR(inv.baseAmount / 100) : '—'}</td>
+                                                <td className="px-5 py-3.5 text-right text-xs text-slate-600">{inv.gstAmount != null && inv.gstAmount > 0 ? fmtINR(inv.gstAmount / 100) : '—'}</td>
                                                 <td className="px-5 py-3.5 text-right font-semibold text-slate-800">{fmtINR((inv.amount || 0) / 100)}</td>
                                                 <td className="px-5 py-3.5 text-center">
                                                     <InvoiceStatusBadge status={inv.status} />
@@ -1187,6 +1305,12 @@ const SubscriptionInner = () => {
                                             <span className="text-sm font-semibold text-slate-800">{inv.planName || '—'}</span>
                                             <span className="text-sm font-bold text-slate-800">{fmtINR((inv.amount || 0) / 100)}</span>
                                         </div>
+                                        {inv.baseAmount != null && (
+                                            <div className="text-[11px] text-slate-500 mb-1">
+                                                {cycleLabel(inv.billingCycle)} · Base {fmtINR(inv.baseAmount / 100)}
+                                                {inv.gstAmount > 0 && <> + GST {fmtINR(inv.gstAmount / 100)}</>}
+                                            </div>
+                                        )}
                                         <div className="text-xs text-slate-500 mb-3">
                                             {fmtDate(inv.paidAt || inv.createdAt)}
                                             {inv.periodStart && inv.periodEnd && (
@@ -1268,6 +1392,8 @@ const SubscriptionInner = () => {
                     onClose={() => setDetailsPlan(null)}
                     onUpgrade={handleUpgrade}
                     upgrading={upgrading}
+                    cycle={activeCycle}
+                    gstRate={gstRate}
                 />
             )}
 
@@ -1310,7 +1436,8 @@ function InvoiceStatusBadge({ status }) {
  * plan card. Opens via the "View full details" button. Closes on
  * backdrop click, ESC, or the X. Body scroll is locked while open.
  */
-function PlanDetailsModal({ plan, currentPlanSlug, onClose, onUpgrade, upgrading }) {
+function PlanDetailsModal({ plan, currentPlanSlug, onClose, onUpgrade, upgrading, cycle = 'monthly', gstRate = DEFAULT_GST_RATE }) {
+    const cycleRow = rowForCycle(plan, cycle, gstRate);
     useEffect(() => {
         const onKey = (e) => { if (e.key === 'Escape') onClose(); };
         document.addEventListener('keydown', onKey);
@@ -1381,8 +1508,12 @@ function PlanDetailsModal({ plan, currentPlanSlug, onClose, onUpgrade, upgrading
                             )}
                         </div>
                         <div className="text-right shrink-0">
-                            <div className="text-3xl font-extrabold text-slate-800">{isCustom ? 'Custom' : fmtINR(plan.price)}</div>
-                            <div className="text-xs text-slate-500 mt-0.5">{isCustom ? 'contact sales for a quote' : `per ${plan.billingCycle || 'month'}`}</div>
+                            <div className="text-3xl font-extrabold text-slate-800">{isCustom ? 'Custom' : cycleRow ? fmtINR(cycleRow.price) : '—'}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                                {isCustom ? 'contact sales for a quote'
+                                    : cycleRow ? `${cyclePer(cycle)} + ${gstRate}% GST`
+                                    : `not available with ${cycleLabel(cycle).toLowerCase()} billing`}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1472,7 +1603,7 @@ function PlanDetailsModal({ plan, currentPlanSlug, onClose, onUpgrade, upgrading
                         <button
                             type="button"
                             onClick={() => { onClose(); onUpgrade(plan); }}
-                            disabled={!!upgrading}
+                            disabled={!!upgrading || !cycleRow}
                             className="inline-flex items-center gap-2 px-5 py-2 bg-[#FE8301] hover:bg-[#e57500] text-white text-sm font-semibold rounded-xl transition disabled:opacity-50 shadow-sm"
                         >
                             <ArrowRight size={15} />
@@ -1499,6 +1630,7 @@ function PlanDetailsModal({ plan, currentPlanSlug, onClose, onUpgrade, upgrading
  *   - ESC / backdrop / Cancel all close without submitting
  */
 function DowngradeRequestModal({ plan, currentPlanName, onClose, onSubmit }) {
+    // Downgrades are compared on the monthly list price.
     const [reason, setReason] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const MIN = 10;
@@ -1569,7 +1701,7 @@ function DowngradeRequestModal({ plan, currentPlanName, onClose, onSubmit }) {
                         <div className="flex-1 min-w-0 text-right">
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Requested</div>
                             <div className="text-sm font-bold text-[#FE8301] truncate">{plan.name}</div>
-                            <div className="text-[11px] text-slate-500">{fmtINR(plan.price)} / {plan.billingCycle || 'month'}</div>
+                            <div className="text-[11px] text-slate-500">{fmtINR(plan.prices?.monthly ?? plan.price)} / month</div>
                         </div>
                     </div>
 

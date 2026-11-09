@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
+import { formatTenantPrice, formatCyclePrice } from '../../utils/billingCycles';
 import {
     ArrowLeft,
     Building2,
@@ -495,8 +496,13 @@ const RestaurantDetail = () => {
 
     // Current plan (matched against the loaded plan list) for the hero price line.
     const currentPlan = plans.find(p => p._id === data.subscription?.plan) || null;
+    // Agreed per-cycle price (subscription.price is the base amount for
+    // subscription.billingCycle); falls back to the plan's monthly list price.
     const planPriceLabel = currentPlan
-        ? (currentPlan.price > 0 ? `₹${currentPlan.price}/${currentPlan.billingCycle}` : 'Free')
+        ? formatTenantPrice(
+            typeof data.subscription?.price === 'number' ? data.subscription.price : (currentPlan.prices?.monthly ?? currentPlan.price),
+            typeof data.subscription?.price === 'number' ? data.subscription.billingCycle : 'monthly',
+        )
         : null;
 
     // Derived "attention" flags — surfaced as chips in the hero so an
@@ -1193,7 +1199,7 @@ const RestaurantDetail = () => {
                                     {planMode === 'request' && <option value="">Select a plan…</option>}
                                     {plans.map(p => (
                                         <option key={p._id} value={p._id}>
-                                            {p.name} — ₹{p.price}/{p.billingCycle}
+                                            {p.name} — {p.price > 0 ? formatCyclePrice(p.prices?.monthly ?? p.price, 'monthly') : 'Free'}
                                         </option>
                                     ))}
                                 </select>

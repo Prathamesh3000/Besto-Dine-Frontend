@@ -188,6 +188,10 @@ const Login = () => {
                 setFormError(result.restaurants?.length ? '' : (result.message || ''));
             } else if (result.code === 'SIGNUP_PENDING' || result.code === 'SIGNUP_REJECTED') {
                 setSignupStatus({ code: result.code, message: result.message, reason: result.reason });
+            } else if (result.code === 'TRIAL_EXPIRED') {
+                // Non-owner staff of a restaurant whose free trial ended.
+                if (chosen?.slug) clearActiveTenant();
+                setFormError("This restaurant's trial has ended. Please ask the owner to choose a plan.");
             } else {
                 if (chosen?.slug) clearActiveTenant();
                 setFormError(result.message || 'Login failed. Please check your credentials.');
