@@ -175,12 +175,8 @@ const PaymentsDashboard = () => {
     }, [location.key, location.state?.openOrderId, allPayments, loading])
 
     // ── Client-side filtering ─────────────────────────────────────────────────
-    const payments = allPayments.slice().sort((a, b) => {
-        const ta = new Date(a.createdAt || 0).getTime();
-        const tb = new Date(b.createdAt || 0).getTime();
-        return tb - ta;
-    }).filter(payment => {
-        const matchStatus = activeFilter === 'All' || payment.status.toLowerCase() === activeFilter.toLowerCase()
+    // Everything except the status pill: the pill counts follow these too.
+    const matchesNonStatus = (payment) => {
         const matchMethod = selectedMethod === 'Method' || payment.method === selectedMethod
         const matchSearch = !searchTerm ||
             payment.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -202,7 +198,15 @@ const PaymentsDashboard = () => {
             }
         }
 
-        return matchStatus && matchMethod && matchSearch && matchDate
+        return matchMethod && matchSearch && matchDate
+    }
+    const payments = allPayments.slice().sort((a, b) => {
+        const ta = new Date(a.createdAt || 0).getTime();
+        const tb = new Date(b.createdAt || 0).getTime();
+        return tb - ta;
+    }).filter(payment => {
+        const matchStatus = activeFilter === 'All' || payment.status.toLowerCase() === activeFilter.toLowerCase()
+        return matchStatus && matchesNonStatus(payment)
     })
 
     // Reset page when filters change
@@ -455,10 +459,15 @@ const PaymentsDashboard = () => {
                 when there's nothing to filter for. */}
             {(() => {
                 const padded = (n) => String(n).padStart(2, '0');
-                const visible = filters.filter(f => {
-                    if (f.name === 'All') return Number(f.count) > 0;
-                    return Number(f.count) > 0;
-                });
+                // Counts follow the Method / date / search filters (the server
+                // counts ignore them). The active pill and "All" stay visible.
+                const scoped = allPayments.filter(matchesNonStatus);
+                const countFor = (name) => name === 'All'
+                    ? scoped.length
+                    : scoped.filter(pm => pm.status.toLowerCase() === name.toLowerCase()).length;
+                const visible = filters
+                    .map(f => ({ ...f, count: countFor(f.name) }))
+                    .filter(f => Number(f.count) > 0 || f.name === activeFilter);
                 if (visible.length === 0) return null;
                 return (
                     <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar">
