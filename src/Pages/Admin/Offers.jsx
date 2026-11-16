@@ -90,8 +90,10 @@ const EditOfferModal = ({ coupon, onSave, onClose, saving }) => {
 
     const field = (label, key, placeholder, type = 'text') => (
         <div>
-            <label className="block text-[13px] font-medium text-[#1A181B] mb-1.5">{label}</label>
+            <label htmlFor={`edit-offer-${key}`} className="block text-[13px] font-medium text-[#1A181B] mb-1.5">{label}</label>
             <input
+                id={`edit-offer-${key}`}
+                name={key}
                 type={type}
                 value={form[key] || ''}
                 onChange={set(key)}
