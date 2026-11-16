@@ -1023,6 +1023,8 @@ const Bookings = () => {
                                                 setEditingEventType(event)
                                                 setIsAddEventTypeModalOpen(true)
                                             }}
+                                            aria-label={`Edit event type ${event.title}`}
+                                            title="Edit event type"
                                             className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors">
                                             <Edit2 size={20} />
                                         </button>
@@ -1032,6 +1034,8 @@ const Bookings = () => {
                                                 setTypeConfirmAction('delete')
                                                 setIsTypeConfirmModalOpen(true)
                                             }}
+                                            aria-label={`Delete event type ${event.title}`}
+                                            title="Delete event type"
                                             className="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
                                             <Trash2 size={20} />
                                         </button>
@@ -1043,6 +1047,10 @@ const Bookings = () => {
                                                 setTypeConfirmAction(event.status ? 'deactivate' : 'activate')
                                                 setIsTypeConfirmModalOpen(true)
                                             }}
+                                            role="switch"
+                                            aria-checked={!!event.status}
+                                            aria-label={`${event.title} is ${event.status ? 'active' : 'inactive'}`}
+                                            title={event.status ? 'Deactivate event type' : 'Activate event type'}
                                             className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-200 focus:outline-none ml-1 ${event.status ? 'bg-[#34C759]' : 'bg-gray-200'}`}
                                         >
                                             <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full transition-transform duration-200 shadow-sm ${event.status ? 'translate-x-[20px]' : ''}`} />
