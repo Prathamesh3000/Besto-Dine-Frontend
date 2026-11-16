@@ -897,7 +897,7 @@ const TakeawayBillPreview = ({ state }) => {
                   ? `Pay ₹${walletAmount.toFixed(0)} from Wallet`
                   : walletAmount > 0
                     ? `Pay ₹${razorpayAmount.toFixed(0)} (₹${walletAmount.toFixed(0)} wallet)`
-                    : `Pay Bill ₹${grandTotal.toFixed(0)}`}
+                    : `Pay Bill ₹${grandTotal.toFixed(2)}`}
               </span>
             </>
           )}
@@ -1433,7 +1433,7 @@ const DineInBillPreview = () => {
             className="w-full font-semibold h-[48px] bg-[#FE8301] text-white rounded-[16px] text-[14px] font-nunito leading-[16px] flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
           >
             <ShoppingCart size={18} />
-            <span>Pay Bill ₹{total.toFixed(0)}</span>
+            <span>Pay Bill ₹{total.toFixed(2)}</span>
           </button>
         )}
       </footer>
