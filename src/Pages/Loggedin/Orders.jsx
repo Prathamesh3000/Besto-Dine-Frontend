@@ -265,6 +265,10 @@ const OrderCard = React.memo(
                   {rating.toFixed(1)}
                 </span>
               </div>
+            ) : order.status !== "Delivered" ? (
+              // Nothing to rate until the food has reached the table. Keeps the
+              // row's left slot so "Repeat Order" stays right-aligned.
+              <span aria-hidden="true" />
             ) : (
               <button
                 onClick={(e) => {
