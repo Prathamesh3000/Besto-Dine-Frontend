@@ -310,6 +310,16 @@ describe('dine-in guest status tracking', () => {
     expect(toast.success).toHaveBeenCalledTimes(2)
   })
 
+  test('a new pending request (table has no waiter) tells the customer a captain was notified, once; old ones stay quiet', () => {
+    mount()
+    act(() => h.socket.serverEmit('request:updated', { _id: 'n1', type: 'water', status: 'pending', createdAt: new Date().toISOString() }))
+    expect(toast).toHaveBeenCalledWith('A captain has been notified.', expect.any(Object))
+    act(() => h.socket.serverEmit('request:updated', { _id: 'n1', type: 'water', status: 'pending' }))
+    expect(toast).toHaveBeenCalledTimes(1)
+    act(() => h.socket.serverEmit('request:updated', { _id: 'old', type: 'bill', status: 'pending', createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() }))
+    expect(toast).toHaveBeenCalledTimes(1)
+  })
+
   test('a scan token forces one socket re-handshake so the table join is authorised', () => {
     localStorage.setItem('scanToken', 'st')
     mount()
