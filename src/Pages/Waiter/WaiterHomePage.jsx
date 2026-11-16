@@ -18,6 +18,7 @@ import useSocketEvent from '../../hooks/useSocketEvent';
 import useOperations from '../../hooks/useOperations';
 import TokenBoard from '../Admin/components/TokenBoard';
 import toast from 'react-hot-toast';
+import { describeLoadError } from '../../utils/loadError';
 
 const WaiterHomePage = () => {
     const navigate = useNavigate();
@@ -40,6 +41,10 @@ const WaiterHomePage = () => {
     const [areas, setAreas] = useState([]);
     const [tablesData, setTablesData] = useState([]);
     const [loading, setLoading] = useState(true);
+    // Load failure (429 throttle, network, 5xx). Without this the page just
+    // rendered empty and the only trace was a console line.
+    const [loadError, setLoadError] = useState(null);
+    const [retryKey, setRetryKey] = useState(0);
 
     // Stats
     const [stats, setStats] = useState({ total: 0, occupied: 0, pending: 0, ready: 0, takeaway: 0 });
@@ -153,6 +158,7 @@ const WaiterHomePage = () => {
         const fetchInitialData = async () => {
             try {
                 setLoading(true);
+                setLoadError(null);
                 // Fetch settings
                 const settingsRes = await settingsAPI.getSettings();
                 if (settingsRes.data) {
@@ -205,6 +211,7 @@ const WaiterHomePage = () => {
                 await refreshOrderStats();
             } catch (err) {
                 console.error('Failed to load initial data', err);
+                setLoadError(describeLoadError(err));
             } finally {
                 setLoading(false);
             }
@@ -233,7 +240,7 @@ const WaiterHomePage = () => {
         };
         socket.on('settings:updated', onSettingsUpdated);
         return () => socket.off('settings:updated', onSettingsUpdated);
-    }, [refreshOrderStats, user?.branch?._id, assignedAreaIds, navArea, myUserId]);
+    }, [refreshOrderStats, user?.branch?._id, assignedAreaIds, navArea, myUserId, retryKey]);
 
     // Bump the area that received the latest dine-in order to the first
     // position in the area chips strip so the waiter's eye lands on it
@@ -275,6 +282,7 @@ const WaiterHomePage = () => {
         const fetchTables = async () => {
             try {
                 setLoading(true);
+                setLoadError(null);
                 const res = await waiterAPI.getTablesByArea(activeFloor);
                 if (res.data.success) {
                     // Same per-table assignment filter as refreshTables.
@@ -289,12 +297,13 @@ const WaiterHomePage = () => {
                 }
             } catch (err) {
                 console.error('Failed to fetch tables', err);
+                setLoadError(describeLoadError(err));
             } finally {
                 setLoading(false);
             }
         };
         fetchTables();
-    }, [activeFloor, scopeTables]);
+    }, [activeFloor, scopeTables, retryKey]);
 
     const isTableDisabled = (table) => {
         return table.status === 'reserved' || table.status === 'alert' || (table.mergedWith && table.mergedWith.length > 0);
@@ -518,6 +527,26 @@ const WaiterHomePage = () => {
                         )}
                     </div>
                 </header>
+
+                {loadError && (
+                    <div
+                        role="alert"
+                        data-testid="waiter-load-error"
+                        className="mx-4 sm:mx-6 mt-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                    >
+                        <div className="flex-1 min-w-0">
+                            <p className="font-bold">{loadError.title}</p>
+                            <p>{loadError.message}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setRetryKey(k => k + 1)}
+                            className="shrink-0 min-h-11 px-4 rounded-xl bg-red-600 text-white font-bold active:scale-95"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                )}
 
                 {tokenMode ? (
                     /* Token-number mode — no areas, no table grid, no merge.
