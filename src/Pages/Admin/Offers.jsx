@@ -8,6 +8,7 @@ import { toast } from 'react-hot-toast'
 import api from '../../utils/api'
 import CreateOfferModal from './components/CreateOfferModal'
 import ConfirmModal from './components/ConfirmModal'
+import { couponBadgeLabel } from '../../utils/couponStatus'
 import { SkeletonRows } from '../../Components/Common/Skeleton'
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -446,6 +447,9 @@ const Offers = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {filteredCoupons.map((coupon) => {
                         const status = deriveStatus(coupon)
+                        // A switched-off coupon keeps its date status (the tabs use it),
+                        // but its badge must not claim it is live.
+                        const badgeLabel = couponBadgeLabel(coupon, status)
 
                         const discountDisplay = coupon.discountType === 'percentage'
                             ? `${coupon.discountValue}% off`
@@ -472,8 +476,8 @@ const Offers = () => {
                                     <div className="flex-1 min-w-0 mr-3">
                                         <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
                                             <h3 className="text-[18px] font-bold text-[#1A181B]">{coupon.title}</h3>
-                                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${getStatusStyle(status)}`}>
-                                                {status}
+                                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${getStatusStyle(badgeLabel)}`}>
+                                                {badgeLabel}
                                             </span>
                                         </div>
                                         <p className="text-[13px] font-medium text-gray-400 line-clamp-1">{coupon.description}</p>
