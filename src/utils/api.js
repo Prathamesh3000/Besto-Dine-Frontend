@@ -1062,7 +1062,9 @@ export const productionAPI = {
 };
 
 export const razorpayAPI = {
-    createOrder:   (amount, cafeOrderId, idemKey) => api.post('/razorpay/create-order', { amount, cafeOrderId }, withIdempotencyKey(idemKey)),
+    // `opts` is merged into the axios config - the Pay screen passes { _silent: true }
+    // so it can show its own inline error instead of the generic global toast.
+    createOrder:   (amount, cafeOrderId, idemKey, opts) => api.post('/razorpay/create-order', { amount, cafeOrderId }, { ...withIdempotencyKey(idemKey), ...opts }),
     verifyPayment: (data, idemKey)       => api.post('/razorpay/verify-payment', data, withIdempotencyKey(idemKey)),
     refund:        (data, idemKey)       => api.post('/razorpay/refund', data, withIdempotencyKey(idemKey)),
     // Customer-facing safety net. Called from the payment handler's

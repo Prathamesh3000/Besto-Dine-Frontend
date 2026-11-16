@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ChevronLeft, Clock, MapPin, Phone, ShoppingCart, ShieldCheck, User, Utensils } from "lucide-react";
+import { AlertCircle, ChevronLeft, Clock, MapPin, Phone, ShoppingCart, ShieldCheck, User, Utensils } from "lucide-react";
+import { describePaymentInitError } from "../../utils/payInitError";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 import toast from "react-hot-toast";
@@ -84,6 +85,9 @@ const TakeawayBillPreview = ({ state }) => {
   const { menuItems } = useMenu();
   const { user, isGuest, isLoggedIn } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
+  // Set when the payment could not even be started (create-order failed); shown
+  // inline above the Pay button until the customer retries.
+  const [payError, setPayError] = useState(null);
   // Synchronous pay-button guard (state is async); released with releasePay.
   const payGuardRef = useRef(null);
   if (!payGuardRef.current) payGuardRef.current = createActionGuard();
@@ -325,6 +329,7 @@ const TakeawayBillPreview = ({ state }) => {
   const handlePayBill = async () => {
     if (isProcessing || !payGuardRef.current.enter()) return;
     setIsProcessing(true);
+    setPayError(null);
 
     // Wallet covers it entirely → skip Razorpay, pay from wallet.
     if (walletCoversFull) {
@@ -350,9 +355,11 @@ const TakeawayBillPreview = ({ state }) => {
       // razorpayAmount = grandTotal - walletAmount (split-rail). Wallet
       // is only debited AFTER Razorpay clears so a Razorpay failure
       // never silently drains the customer's wallet.
-      const { data } = await razorpayAPI.createOrder(razorpayAmount, null, paymentKeys.get("rzp-create", `${razorpayAmount}|`));
+      // _silent: this screen renders its own inline error (payError) instead of the
+      // generic global toast that echoes the server's raw message.
+      const { data } = await razorpayAPI.createOrder(razorpayAmount, null, paymentKeys.get("rzp-create", `${razorpayAmount}|`), { _silent: true });
       if (!data.success) {
-        toast.error("Failed to initiate payment. Please try again.", { id: "pay-init" });
+        setPayError(describePaymentInitError());
         releasePay();
         return;
       }
@@ -476,7 +483,7 @@ const TakeawayBillPreview = ({ state }) => {
       rzp.open();
     } catch (err) {
       console.error("Takeaway payment error:", err);
-      toast.error("Failed to initiate payment. Please try again.");
+      setPayError(describePaymentInitError(err));
       releasePay();
     }
   };
@@ -845,6 +852,19 @@ const TakeawayBillPreview = ({ state }) => {
                                               after Razorpay clears
              3. No wallet    → Razorpay full charge */}
       <footer className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full lg:max-w-3xl p-4 bg-white border-t border-[#F0F0F0] z-50">
+        {payError && (
+          <div
+            role="alert"
+            data-testid="pay-error"
+            className="mb-3 flex items-start gap-2.5 rounded-xl border border-[#FEC84B] bg-[#FFFAEB] px-3 py-2.5"
+          >
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[#B54708]" />
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold font-nunito text-[#93370D]">{payError.title}</p>
+              <p className="mt-0.5 text-[12px] font-varela leading-snug text-[#B54708]">{payError.message}</p>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-center gap-1.5 mb-2">
           <ShieldCheck size={14} className="text-[#027A48]" />
           <span className="text-[11px] font-varela text-[#645E66]">

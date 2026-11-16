@@ -37,6 +37,7 @@ vi.mock('@/utils/api', () => {
   }
 })
 
+import toast from 'react-hot-toast'
 import api, { razorpayAPI, walletAPI, settingsAPI } from '@/utils/api'
 import BillPreviews from '@/Pages/HealthMode/BillPreviews'
 
@@ -104,7 +105,7 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     await ready()
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(GRAND_TOTAL, null, expect.any(String))
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(GRAND_TOTAL, null, expect.any(String), { _silent: true })
 
     await act(() => rzp.options.handler(CHECKOUT))
     const body = ordersPost()
@@ -122,7 +123,7 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     await user.click(payBtn())
     await waitFor(() => expect(rzp.open).toHaveBeenCalled())
     // Razorpay charges only grandTotal − wallet.
-    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(750, null, expect.any(String))
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(750, null, expect.any(String), { _silent: true })
 
     await act(() => rzp.options.handler(CHECKOUT))
     const body = ordersPost()
@@ -150,5 +151,45 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
     expect(window.Razorpay).not.toHaveBeenCalled()
     expect(razorpayAPI.createOrder).not.toHaveBeenCalled()
     expect(await screen.findByText('order-confirmed')).toBeInTheDocument()
+  })
+})
+
+describe('BillPreviews (takeaway) — payment could not be started', () => {
+  test('create-order fails → friendly inline error (no raw server toast), nothing placed, retry works', async () => {
+    razorpayAPI.createOrder.mockRejectedValueOnce({ response: { status: 500, data: { message: 'Failed to create payment order' } } })
+    const user = renderPreview(baseState())
+    await ready()
+    await user.click(payBtn())
+
+    const alert = await screen.findByTestId('pay-error')
+    expect(alert).toHaveTextContent("We couldn't start the payment")
+    expect(alert).toHaveTextContent(/Nothing was charged and your order has not been placed/)
+    expect(alert).not.toHaveTextContent('Failed to create payment order')
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(ordersPost()).toBeUndefined()           // no cafe order was created
+    expect(rzp.open).not.toHaveBeenCalled()
+    expect(payBtn()).toBeEnabled()
+
+    // Retry: the banner clears and checkout opens.
+    await user.click(payBtn())
+    await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+    expect(screen.queryByTestId('pay-error')).toBeNull()
+  })
+
+  test('a 429 from create-order says payments are busy', async () => {
+    razorpayAPI.createOrder.mockRejectedValueOnce({ response: { status: 429 } })
+    const user = renderPreview(baseState())
+    await ready()
+    await user.click(payBtn())
+    expect(await screen.findByTestId('pay-error')).toHaveTextContent('Payments are busy right now')
+  })
+
+  test('create-order resolves with success:false → the same inline error', async () => {
+    razorpayAPI.createOrder.mockResolvedValueOnce({ data: { success: false } })
+    const user = renderPreview(baseState())
+    await ready()
+    await user.click(payBtn())
+    expect(await screen.findByTestId('pay-error')).toHaveTextContent("We couldn't start the payment")
+    expect(rzp.open).not.toHaveBeenCalled()
   })
 })
