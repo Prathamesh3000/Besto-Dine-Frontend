@@ -804,7 +804,7 @@ const Bookings = () => {
                                 <h2 className="text-[18px] font-[700] text-[#1A181B]">All Bookings</h2>
                                 <p className="text-[13px] text-gray-500 font-[500]">Manage and approve booking requests</p>
                             </div>
-                            <span className="text-[13px] text-gray-400 font-[500]">{bookingsTableData.filter(b => filter === 'All' || b.status === filter).length} orders</span>
+                            <span className="text-[13px] text-gray-400 font-[500]">{(() => { const n = bookingsTableData.filter(b => filter === 'All' || b.status === filter).length; return `${n} ${n === 1 ? 'booking' : 'bookings'}` })()}</span>
                         </div>
 
                         <div className="flex gap-2 mb-3 flex-shrink-0">
