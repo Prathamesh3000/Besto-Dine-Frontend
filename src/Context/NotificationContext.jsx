@@ -179,7 +179,8 @@ export const NotificationProvider = ({ children }) => {
             if (res.data.success) return res.data.notifications;
             return [];
         },
-        enabled: !!user && hasTenantSlug,
+        // Held on /force-change-password → the API 403s everything else.
+        enabled: !!user && hasTenantSlug && user.mustChangePassword !== true,
         refetchInterval: (query) => {
             // Pause polling once the session is invalid — no point hammering
             // /notifications with an expired token until the user logs in again.

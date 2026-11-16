@@ -21,6 +21,7 @@ vi.mock('@/utils/socket', async () => {
 })
 
 import { MenuProvider, useMenu } from '@/Context/MenuContext'
+import AuthContext from '@/Context/AuthContext'
 import { setActiveTenant, clearActiveTenant } from '@/utils/tenant'
 
 let client
@@ -98,6 +99,23 @@ describe('fetch gating', () => {
     const { result } = mount()
     await waitFor(() => expect(calledUrls()).toContain('/menu?limit=1000'), { timeout: 8000 })
     await waitFor(() => expect(result.current.menuItems).toHaveLength(1))
+  })
+
+  test('staff who must change their temporary password fetch nothing until they have (the API 403s everything else)', async () => {
+    staffLogin()
+    setActiveTenant({ slug: 'spice', _id: 'R1' })
+    let auth = { user: { _id: 'u1', role: 'waiter', mustChangePassword: true } }
+    const { result, rerender } = renderHook(() => useMenu(), {
+      wrapper: ({ children }) => (
+        <AuthContext.Provider value={auth}><QueryClientProvider client={client}><MenuProvider>{children}</MenuProvider></QueryClientProvider></AuthContext.Provider>
+      ),
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(api.get).not.toHaveBeenCalled()
+    auth = { user: { _id: 'u1', role: 'waiter', mustChangePassword: false } }
+    rerender()
+    await waitFor(() => expect(result.current.menuItems).toHaveLength(1))
+    expect(calledUrls()).toEqual(expect.arrayContaining(['/menu?limit=1000', '/combos', '/categories?status=active']))
   })
 
   test('unsuccessful envelopes yield empty lists', async () => {

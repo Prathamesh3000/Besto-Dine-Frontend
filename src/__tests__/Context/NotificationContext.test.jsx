@@ -78,6 +78,19 @@ describe('notification list + unread count', () => {
     expect(api.get).toHaveBeenCalledWith('/notifications?role=customer&userId=u1', { _isBackground: true })
   })
 
+  test('a user who must change their temporary password fetches nothing until they have (the API 403s everything else)', async () => {
+    as('waiter')
+    authState.current = { user: { _id: 'u1', role: 'waiter', mustChangePassword: true }, isGuest: false }
+    setActiveTenant({ slug: 'spice' })
+    const { result, rerender } = mount()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(api.get).not.toHaveBeenCalled()
+    authState.current = { user: { _id: 'u1', role: 'waiter', mustChangePassword: false }, isGuest: false }
+    rerender()
+    await waitFor(() => expect(result.current.unreadCount).toBe(2))
+    expect(api.get).toHaveBeenCalledWith('/notifications?role=waiter&userId=u1', { _isBackground: true })
+  })
+
   test('unsuccessful envelope → empty list', async () => {
     as('admin')
     setActiveTenant({ slug: 'spice' })
