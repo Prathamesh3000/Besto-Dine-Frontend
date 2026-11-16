@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, us
 import api from '../../utils/api'
 import { useAuth } from '../AuthContext'
 import { getToken } from '../../utils/authStorage'
+import { fetchMe } from '../../utils/fetchMe'
 
 const HealthContext = createContext(null)
 
@@ -85,7 +86,7 @@ export function HealthProvider({ children }) {
         // Try to load from backend profile (allergy field) for logged-in users
         const token = getToken()
         if (token && !isKioskRoute) {
-            api.get('/auth/me', { _isBackground: true }).then(res => {
+            fetchMe().then(res => {
                 if (!res?.data) return
                 if (res.data.allergy) {
                     const loaded = res.data.allergy.split(',').map(s => s.trim()).filter(Boolean)

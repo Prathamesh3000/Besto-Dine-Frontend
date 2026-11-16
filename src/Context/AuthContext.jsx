@@ -13,6 +13,7 @@ import {
 import { claimCustomerData, clearCustomerPersonalData } from '../utils/customerSession';
 import SessionChangedOverlay from '../Components/Common/SessionChangedOverlay';
 
+import { fetchMe } from '../utils/fetchMe';
 const userIdOf = (u) => (u && (u._id || u.id) ? String(u._id || u.id) : null);
 
 // CRIT-25 — cross-tab logout via BroadcastChannel. When any tab logs
@@ -118,7 +119,7 @@ export function AuthProvider({ children }) {
                 // tenant status) don't stay stale until the next login.
                 // Ignore failures — interceptor handles 401 / network loss
                 // and the cached copy is a safe fallback.
-                api.get('/auth/me', { _aud: aud })
+                fetchMe(aud)
                     .then(res => {
                         const fresh = res.data?.user || res.data;
                         if (fresh && fresh._id && userIdOf(fresh) === userIdOf(userRef.current)) {

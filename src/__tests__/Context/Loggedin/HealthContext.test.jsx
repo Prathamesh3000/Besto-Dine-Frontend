@@ -60,7 +60,7 @@ describe('backend profile hydration + sync', () => {
     api.get.mockResolvedValue({ data: { allergy: 'peanut, shellfish ,' } })
     const { result } = mount()
     await flush()
-    expect(api.get).toHaveBeenCalledWith('/auth/me', { _isBackground: true })
+    expect(api.get).toHaveBeenCalledWith('/auth/me', expect.objectContaining({ _aud: expect.any(String) }))
     expect(result.current.allergies).toEqual(['peanut', 'shellfish'])
   })
 
