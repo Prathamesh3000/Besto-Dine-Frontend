@@ -1323,7 +1323,7 @@ const Bookings = () => {
                                                 <p className="text-[14px] text-gray-500 font-[500] mb-2">{hall.description}</p>
                                                 <div className="flex items-center gap-4 text-[13px] text-gray-500">
                                                     <span className="font-semibold text-gray-600">{hall.price}</span>
-                                                    <span>Min: {hall.minPeople} people</span>
+                                                    {hall.minPeople ? <span>Min: {hall.minPeople} people</span> : null}
                                                     <span>Max: {hall.maxPeople} people</span>
                                                 </div>
                                             </div>
@@ -1570,7 +1570,7 @@ const Bookings = () => {
                                         {/* Tag */}
                                         <div className="mb-2">
                                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${deco.tagColor}`}>
-                                                {deco.tag}
+                                                {deco.category || deco.tag}
                                             </span>
                                         </div>
 
