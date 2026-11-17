@@ -15,6 +15,7 @@ import PaymentQrSettings from './components/PaymentQrSettings'
 import OperationsSummary from './components/OperationsSummary'
 import ParkingSettingsCard from './components/ParkingSettingsCard'
 import { IMAGE_ACCEPT } from '../../utils/imageFile'
+import { hasDeliveryNoRanges, DELIVERY_NO_RANGES_WARNING } from '../../utils/deliveryWarning'
 
 // First human-readable message from a failed settings save. The API
 // returns either { message, errors: { field: msg } } (mongoose validation)
@@ -577,9 +578,10 @@ const Settings = () => {
     }
 
     const saveDeliveryConfig = () => {
-        if (deliveryConfig.enabled && (deliveryConfig.slabs || []).length === 0) {
-            toast.error('Add at least one delivery range before enabling delivery')
-            return
+        // Warn only: the save still goes through (the customer cart hides
+        // Home Delivery until a range is added).
+        if (hasDeliveryNoRanges(deliveryConfig)) {
+            toast(DELIVERY_NO_RANGES_WARNING, { icon: '⚠️', duration: 8000, id: 'delivery-no-ranges' })
         }
         const origin = buildDeliveryOrigin()
         if (origin.lat !== null && (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)
@@ -1369,6 +1371,13 @@ const Settings = () => {
                             </div>
                         </div>
                     </div>
+
+                    {hasDeliveryNoRanges(deliveryConfig) && (
+                        <div role="alert" data-testid="delivery-no-ranges-warning" className="flex items-start gap-2 rounded-xl border border-[#FEDF89] bg-[#FFFAEB] px-4 py-3 text-[13px] font-[500] text-[#93370D]">
+                            <span aria-hidden="true">⚠</span>
+                            <span>{DELIVERY_NO_RANGES_WARNING}</span>
+                        </div>
+                    )}
 
                     {/* Distance ranges */}
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
