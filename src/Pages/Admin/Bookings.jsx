@@ -1154,6 +1154,8 @@ const Bookings = () => {
                                                     setEditingPackage(pkg)
                                                     setIsAddPackageModalOpen(true)
                                                 }}
+                                                aria-label={`Edit package ${pkg.name}`}
+                                                title="Edit package"
                                                 className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors">
                                                 <Edit2 size={18} />
                                             </button>
@@ -1163,6 +1165,8 @@ const Bookings = () => {
                                                     setPackageConfirmAction('delete')
                                                     setIsPackageConfirmModalOpen(true)
                                                 }}
+                                                aria-label={`Delete package ${pkg.name}`}
+                                                title="Delete package"
                                                 className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-500 transition-colors">
                                                 <Trash2 size={18} />
                                             </button>
@@ -1337,6 +1341,8 @@ const Bookings = () => {
                                                         setEditingHall(hall)
                                                         setIsAddHallModalOpen(true)
                                                     }}
+                                                    aria-label={`Edit hall ${hall.name}`}
+                                                    title="Edit hall"
                                                     className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors">
                                                     <Edit2 size={18} />
                                                 </button>
@@ -1346,6 +1352,8 @@ const Bookings = () => {
                                                         setHallConfirmAction('delete')
                                                         setIsHallConfirmModalOpen(true)
                                                     }}
+                                                    aria-label={`Delete hall ${hall.name}`}
+                                                    title="Delete hall"
                                                     className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-500 transition-colors">
                                                     <Trash2 size={18} />
                                                 </button>
@@ -1534,6 +1542,8 @@ const Bookings = () => {
                                                         setEditingDecoration(deco)
                                                         setIsAddDecorationModalOpen(true)
                                                     }}
+                                                    aria-label={`Edit decoration ${deco.name}`}
+                                                    title="Edit decoration"
                                                     className="text-gray-400 hover:text-gray-600 transition-colors">
                                                     <Edit2 size={16} />
                                                 </button>
@@ -1543,6 +1553,8 @@ const Bookings = () => {
                                                         setDecorationConfirmAction('delete')
                                                         setIsDecorationConfirmModalOpen(true)
                                                     }}
+                                                    aria-label={`Delete decoration ${deco.name}`}
+                                                    title="Delete decoration"
                                                     className="text-gray-400 hover:text-red-500 transition-colors">
                                                     <Trash2 size={16} />
                                                 </button>
