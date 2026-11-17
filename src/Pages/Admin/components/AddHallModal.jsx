@@ -18,7 +18,7 @@ const AddHallModal = ({ isOpen, onClose, onSave, hallData }) => {
     const [showLayoutTypeDropdown, setShowLayoutTypeDropdown] = useState(false)
     const [showAlcoholDropdown, setShowAlcoholDropdown] = useState(false)
     const [showSmokingDropdown, setShowSmokingDropdown] = useState(false)
-    const hallTypes = ['Banquet Hall', 'Auditorium', 'Conference Room']
+    const hallTypes = ['Banquet Hall', 'Auditorium', 'Conference Room', 'Outdoor Space']
     const layoutTypes = ['Standard', 'Custom']
     const alcoholOptions = ['Not Allowed', 'Allowed', 'With License']
     const smokingOptions = ['Not Allowed', 'Allowed', 'Designated Area']
@@ -152,21 +152,23 @@ const AddHallModal = ({ isOpen, onClose, onSave, hallData }) => {
                     isFeatured: hallData.badges?.includes('Featured') || false,
 
                     // Pricing & Capacity
-                    basePrice: hallData.price ? hallData.price.replace(/[^0-9]/g, '') : '',
-                    minCapacity: hallData.minPeople || '',
-                    maxCapacity: hallData.maxPeople || '',
+                    basePrice: hallData.basePrice ?? (hallData.price ? String(hallData.price).replace(/[^0-9.]/g, '') : ''),
+                    minCapacity: hallData.minCapacity ?? hallData.minPeople ?? '',
+                    maxCapacity: hallData.maxCapacity ?? hallData.maxPeople ?? '',
 
                     // Amenities
-                    soundSystem: hallData.audioVisual?.some(item => item.toLowerCase().includes('sound system')) || false,
-                    projector: hallData.audioVisual?.some(item => item.toLowerCase().includes('projector')) || false,
-                    wifi: hallData.audioVisual?.some(item => item.toLowerCase().includes('wifi')) || false,
-                    ledScreen: hallData.audioVisual?.some(item => item.toLowerCase().includes('led')) || false,
+                    soundSystem: [...(hallData.audioVisual || []), ...(hallData.infrastructure || [])].some(item => item.toLowerCase().includes('sound system')) || false,
+                    projector: [...(hallData.audioVisual || []), ...(hallData.infrastructure || [])].some(item => item.toLowerCase().includes('projector')) || false,
+                    wifi: [...(hallData.audioVisual || []), ...(hallData.infrastructure || [])].some(item => item.toLowerCase().includes('wifi')) || false,
+                    ledScreen: [...(hallData.audioVisual || []), ...(hallData.infrastructure || [])].some(item => item.toLowerCase().includes('led')) || false,
 
                     // Infrastructure
-                    airConditioning: hallData.infrastructure?.some(item => item.toLowerCase().includes('air conditioning') || item.toLowerCase().includes('ac')) || false,
-                    powerBackup: hallData.infrastructure?.some(item => item.toLowerCase().includes('power backup')) || false,
-                    elevator: hallData.infrastructure?.some(item => item.toLowerCase().includes('elevator')) || false,
-                    wheelchair: hallData.infrastructure?.some(item => item.toLowerCase().includes('wheelchair')) || false,
+                    airConditioning: [...(hallData.infrastructure || []), ...(hallData.audioVisual || [])].some(item => item.toLowerCase().includes('air conditioning') || item.toLowerCase() === 'ac') || false,
+                    powerBackup: [...(hallData.infrastructure || []), ...(hallData.audioVisual || [])].some(item => item.toLowerCase().includes('power backup')) || false,
+                    elevator: [...(hallData.infrastructure || []), ...(hallData.audioVisual || [])].some(item => item.toLowerCase().includes('elevator')) || false,
+                    wheelchair: [...(hallData.infrastructure || []), ...(hallData.audioVisual || [])].some(item => item.toLowerCase().includes('wheelchair')) || false,
+                    parkingHigh: (hallData.infrastructure || []).some(item => item.toLowerCase().includes('parking')),
+                    kitchenAvailable: (hallData.infrastructure || []).some(item => item.toLowerCase().includes('kitchen')),
 
                     // Media & Contact
                     images: hallData.images || [],
@@ -1452,20 +1454,40 @@ const AddHallModal = ({ isOpen, onClose, onSave, hallData }) => {
                                 return
                             }
                             if (onSave) {
+                                // Payload uses the Hall model's field names (basePrice,
+                                // min/max/optimalCapacity as Numbers). It used to send a
+                                // '₹x/event' string + minPeople/maxPeople, which the API
+                                // rejected with "Base price is required". Not spread from
+                                // hallData: that carried the populated `branch` object and
+                                // read-only list fields back into the PUT.
+                                const optNum = v => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? undefined : Number(v)
                                 const savedHall = {
-                                    ...hallData,
-                                    id: hallData ? hallData.id : Date.now(),
                                     name: formData.name,
                                     type: formData.type,
                                     description: formData.description,
                                     badges: hallData ? hallData.badges : [formData.type || 'New'].filter(Boolean),
-                                    price: `₹${formData.basePrice}/event`,
-                                    minPeople: formData.minCapacity,
-                                    maxPeople: formData.maxCapacity,
+                                    basePrice: Number(formData.basePrice),
+                                    hourlyRate: optNum(formData.hourlyRate),
+                                    cleaningCharges: optNum(formData.cleaningCharges),
+                                    securityDeposit: optNum(formData.securityDeposit),
+                                    minCapacity: optNum(formData.minCapacity),
+                                    maxCapacity: Number(formData.maxCapacity),
+                                    optimalCapacity: optNum(formData.optimalCapacity),
                                     floorLevel: formData.floorLevel,
                                     buildingWing: formData.buildingWing,
+                                    amenities: {
+                                        soundSystem: !!formData.soundSystem,
+                                        projector: !!formData.projector,
+                                        wifi: !!formData.wifi,
+                                        ledScreen: !!formData.ledScreen,
+                                        airConditioning: !!formData.airConditioning,
+                                        elevator: !!formData.elevator,
+                                        powerBackup: !!formData.powerBackup,
+                                        parking: !!formData.parkingHigh,
+                                        kitchen: !!formData.kitchenAvailable,
+                                    },
                                     status: hallData && hallData.status !== undefined ? hallData.status : true,
-                                    specialFeatures: formData.specialFeatures,
+                                    features: formData.specialFeatures,
                                     bestFor: formData.bestFor,
                                 }
                                 onSave(savedHall)
