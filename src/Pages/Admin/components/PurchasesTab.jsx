@@ -164,15 +164,18 @@ const PODetailDrawer = ({ poId, onClose, onChanged }) => {
     const canReceive = po.status !== 'received' && po.status !== 'cancelled'
     const canPay = po.paymentStatus !== 'paid' && po.status !== 'cancelled'
 
+    // Receive quantity defaults to the remaining qty and is capped at it (server rejects over-receipt).
+    const remainingOf = (l) => Math.max(0, Math.round((l.orderedQty - (l.receivedQty || 0)) * 1000) / 1000)
+    const recvQty = (l) => { const r = recv[l.inventoryItem]; return r && r.qty !== undefined ? Math.min(Number(r.qty) || 0, remainingOf(l)) : remainingOf(l) }
     const doReceive = async () => {
         const rl = po.lines.map(l => {
-            const r = recv[l.inventoryItem]; if (!r || !(Number(r.qty) > 0)) return null
-            return { inventoryItem: l.inventoryItem, qty: Number(r.qty), batchNumber: r.batchNumber || '', expiryDate: r.expiryDate || undefined }
+            const r = recv[l.inventoryItem] || {}; const q = recvQty(l); if (!(q > 0)) return null
+            return { inventoryItem: l.inventoryItem, qty: q, batchNumber: r.batchNumber || '', expiryDate: r.expiryDate || undefined }
         }).filter(Boolean)
         if (rl.length === 0) { toast.error('Enter received quantity for at least one item'); return }
         setBusy(true)
         try { const res = await purchaseAPI.receive(po._id, { lines: rl }); if (res.data.success) { toast.success(`Received — ${res.data.grnNumber}`); setMode('view'); setRecv({}); load(); onChanged?.() } }
-        catch (err) { toast.error(err.response?.data?.message || 'Failed to receive') } finally { setBusy(false) }
+        catch (err) { toast.error(err.response?.data?.message || 'Failed to receive'); load() } finally { setBusy(false) }
     }
     const doPay = async () => {
         if (!(Number(pay.amount) > 0)) { toast.error('Enter a valid amount'); return }
@@ -238,12 +241,12 @@ const PODetailDrawer = ({ poId, onClose, onChanged }) => {
                         <div className="border border-orange-200 bg-orange-50/40 rounded-xl p-3 space-y-2">
                             <p className="text-[13px] font-semibold text-gray-700">Goods Receipt (GRN)</p>
                             {po.lines.map(l => {
-                                const rem = Math.max(0, l.orderedQty - l.receivedQty)
+                                const rem = remainingOf(l)
                                 const r = recv[l.inventoryItem] || {}
                                 return (
                                     <div key={l.inventoryItem} className="grid grid-cols-[1fr_70px_80px_110px] gap-2 items-center">
                                         <span className="text-[12px] text-gray-600 truncate">{l.name} <span className="text-gray-400">(rem {rem})</span></span>
-                                        <input type="number" min="0" step="any" placeholder="Qty" value={r.qty || ''} onChange={e => setRecv(p => ({ ...p, [l.inventoryItem]: { ...p[l.inventoryItem], qty: e.target.value } }))} className="px-2 py-1.5 border border-gray-200 rounded text-sm text-center" />
+                                        <input type="number" min="0" max={rem} step="any" placeholder="Qty" aria-label={`Receive qty for ${l.name}`} value={r.qty !== undefined ? r.qty : rem} onChange={e => { const v = e.target.value; setRecv(p => ({ ...p, [l.inventoryItem]: { ...p[l.inventoryItem], qty: v !== '' && Number(v) > rem ? String(rem) : v } })) }} className="px-2 py-1.5 border border-gray-200 rounded text-sm text-center" />
                                         <input placeholder="Batch" value={r.batchNumber || ''} onChange={e => setRecv(p => ({ ...p, [l.inventoryItem]: { ...p[l.inventoryItem], batchNumber: e.target.value } }))} className="px-2 py-1.5 border border-gray-200 rounded text-sm" />
                                         <input type="date" value={r.expiryDate || ''} onChange={e => setRecv(p => ({ ...p, [l.inventoryItem]: { ...p[l.inventoryItem], expiryDate: e.target.value } }))} className="px-1 py-1.5 border border-gray-200 rounded text-[12px]" />
                                     </div>
