@@ -4,7 +4,7 @@ import { Clock } from 'lucide-react';
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent';
 import { useAuth } from '../../Context/AuthContext';
 import api from '../../utils/api';
-import { activeRestaurantPath } from '../../utils/tenant';
+import { activeRestaurantPath, getActiveTenantSlug } from '../../utils/tenant';
 import {
     SCAN_TABLE_PATH,
     SCAN_REQUIRED_EVENT,
@@ -196,6 +196,10 @@ const CustomerLayout = () => {
     const checkTableStillAvailable = useCallback(() => {
         const myTableId = currentTableId();
         if (!myTableId) return;
+        // The scan page clears the tenant on mount, so a check fired from
+        // here with the previous scan's table id goes out with no
+        // X-Restaurant-Slug and the API answers 400 TENANT_REQUIRED.
+        if (window.location.pathname.startsWith('/scan') || !getActiveTenantSlug()) return;
         api.get(`/tables/${myTableId}/availability`, { _silent: true, _isBackground: true })
             .then((res) => { if (res?.data?.available === false) tableGone(); })
             .catch(() => { /* offline / transient — the next check or Place Order catches it */ });
