@@ -278,7 +278,7 @@ const AddHallModal = ({ isOpen, onClose, onSave, hallData }) => {
                 {/* Header */}
                 <div className="px-8 py-4 bg-[#FFF7ED] border-b border-[#FED7AA] flex justify-between items-center shrink-0">
                     <h2 className="text-[20px] font-[700] text-[#1A181B]">
-                        Add New Hall
+                        {hallData ? 'Edit Hall' : 'Add New Hall'}
                     </h2>
                     <button
                         onClick={onClose}
