@@ -377,6 +377,7 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
 
     useEffect(() => {
         if (isOpen) {
+            setActiveTab('basic')
             if (packageData) {
                 setFormData({
                     ...packageData,
@@ -386,7 +387,6 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
                     seasonalAvailability: packageData.seasonalAvailability || { spring: false, summer: false, fall: false, winter: false }
                 })
             } else {
-                setActiveTab('basic')
                 setFormData({
                     name: '', category: '', description: '', themeStyle: '',
                     primaryColor: '#FF6B6B', secondaryColor: '#4ECDC4', accentColor: '#FFD93D',
@@ -441,7 +441,7 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
                 {/* Header */}
                 <div className="px-8 py-4 bg-[#FFF7ED] border-b border-[#FED7AA] flex justify-between items-center shrink-0">
                     <h2 className="text-[20px] font-[700] text-[#1A181B]">
-                        Add Decoration Package
+                        {packageData ? 'Edit Decoration Package' : 'Add Decoration Package'}
                     </h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
                         <X size={24} />
