@@ -67,6 +67,21 @@ describe('Bill list', () => {
     api.get.mockResolvedValue({ data: { success: true, invoices: [{ _id: 'inv1', total: 1249.5, paymentStatus: 'paid', items: [{}], createdAt: '2026-10-03T12:00:00Z' }] } })
     renderBill()
     expect(await screen.findByText('₹1249.50')).toBeInTheDocument()
-    expect(api.get).toHaveBeenCalledWith('/invoices/my-invoices')
+    expect(api.get).toHaveBeenCalledWith('/invoices/my-invoices', expect.anything())
+  })
+  test('BUG-49: logged-in with network down and no device orders shows the load-failed state, not No bills yet', async () => {
+    const { readRecoveryOrderIds } = await import('@/utils/customerOrderIds')
+    readRecoveryOrderIds.mockReturnValueOnce([])
+    Object.assign(auth, { user: { _id: 'u' }, isLoggedIn: true, isGuest: false })
+    api.get.mockRejectedValue(new Error('Network Error'))
+    renderBill()
+    expect(await screen.findByText("Couldn't load your bills")).toBeInTheDocument()
+    expect(screen.queryByText('No bills yet')).not.toBeInTheDocument()
+  })
+
+  test('BUG-49: guest with remembered orders and network down shows the load-failed state', async () => {
+    api.get.mockRejectedValue(new Error('Network Error'))
+    renderBill()
+    expect(await screen.findByText("Couldn't load your bills")).toBeInTheDocument()
   })
 })

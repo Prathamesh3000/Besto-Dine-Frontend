@@ -9,7 +9,7 @@ import VoiceSearchButton from '../../Components/Loggedin/VoiceSearchButton';
 import useSocketEvent from '../../hooks/useSocketEvent';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import useCustomerSession from '../../hooks/useCustomerSession';
-import { mergeBills } from '../../utils/billMerge';
+import { mergeBills, allRequestsFailed } from '../../utils/billMerge';
 import { getCustomerOrderSession, readRecoveryOrderIds, forgetOrderIds } from '../../utils/customerOrderIds';
 
 function getTableName() {
@@ -150,8 +150,9 @@ function Bill() {
   // Orders remembered on this device (guests, and a logged-in customer's
   // just-placed orders). Every order is re-fetched through
   // /orders/:id/detail, which enforces ownership (scan session / owner), so
-  // a stale or foreign ID just 404s and is forgotten. Throws only if the
-  // device list itself cannot be read.
+  // a stale or foreign ID just 404s and is forgotten. Throws when there were
+  // IDs to fetch and every request failed without a server response (offline),
+  // so the page can show "Couldn't load" instead of "No bills yet".
   const fetchLocalOrders = async () => {
     const session = getCustomerOrderSession(user, isLoggedIn);
     const ids = readRecoveryOrderIds(session);
@@ -159,6 +160,7 @@ function Bill() {
     const results = await Promise.allSettled(
       ids.map((id) => api.get(`/orders/${encodeURIComponent(id)}/detail`, { _silent: true, _isBackground: true })),
     );
+    if (allRequestsFailed(results)) throw new Error('Could not reach the server for device orders');
     const serverOrders = [];
     const dead = [];
     results.forEach((r, i) => {
@@ -207,7 +209,12 @@ function Bill() {
         isCancelled,
         sessionBillPaid,
       }));
-      setLoadFailed(sources.every((r) => r.status === 'rejected'));
+      // Failed = every source that actually tried failed. A device list with
+      // nothing to fetch resolves to [] (success, zero rows) and so does not
+      // mask a logged-in customer's invoices + orders both failing.
+      const serverFailed = isLoggedIn && invRes.status === 'rejected' && myOrdersRes.status === 'rejected';
+      const localFailed = localRes.status === 'rejected' || localOrders.length === 0;
+      setLoadFailed(isLoggedIn ? serverFailed && localFailed : localRes.status === 'rejected');
     } catch (err) {
       console.error('Failed to fetch bills:', err);
       setBills([]);

@@ -63,3 +63,16 @@ describe('mergeBills', () => {
     expect(r[0].status).toBe('Paid');
   });
 });
+
+import { allRequestsFailed } from './billMerge';
+describe('allRequestsFailed', () => {
+  const net = { status: 'rejected', reason: new Error('Network Error') };
+  const notFound = { status: 'rejected', reason: { response: { status: 404 } } };
+  const ok = { status: 'fulfilled', value: {} };
+  it('nothing to fetch is not a failure', () => expect(allRequestsFailed([])).toBe(false));
+  it('all network failures is a failure', () => expect(allRequestsFailed([net, net])).toBe(true));
+  it('a 404 or a success means the server was reachable', () => {
+    expect(allRequestsFailed([net, notFound])).toBe(false);
+    expect(allRequestsFailed([net, ok])).toBe(false);
+  });
+});

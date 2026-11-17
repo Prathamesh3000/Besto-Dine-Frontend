@@ -75,3 +75,11 @@ export function mergeBills({ invoices, orders, fmt, isCancelled = () => false, s
   const rows = [...invs.map((inv) => mapInvoiceBill(inv, fmt)), ...orderRows];
   return rows.sort((a, b) => b.ts - a.ts);
 }
+
+// True when a batch of settled requests had work to do and every one failed
+// without the server answering (network down / timeout). A response of any
+// status (e.g. a 404 for a stale order id) means the server was reachable.
+export function allRequestsFailed(results) {
+  const list = Array.isArray(results) ? results : [];
+  return list.length > 0 && list.every((r) => r.status === 'rejected' && !r.reason?.response);
+}
