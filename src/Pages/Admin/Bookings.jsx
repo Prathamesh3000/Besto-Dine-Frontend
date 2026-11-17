@@ -369,19 +369,18 @@ const Bookings = () => {
                 const res = await api.delete(`/booking-info/event-types/${typeToConfirm.id}`);
                 if (res.data.success) {
                     setEventTypesData(prev => prev.filter(t => t.id !== typeToConfirm.id))
-                    message.success('Event type deleted successfully');
+                    toast.success('Event type deleted successfully');
                 }
             } else {
                 const newStatus = typeConfirmAction === 'activate' ? true : false
                 const res = await api.put(`/booking-info/event-types/${typeToConfirm.id}`, { isActive: newStatus });
                 if (res.data.success) {
                     setEventTypesData(prev => prev.map(t => t.id === typeToConfirm.id ? { ...t, status: newStatus } : t))
-                    message.success(`Event type ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                    toast.success(`Event type ${newStatus ? 'activated' : 'deactivated'} successfully`);
                 }
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to update event type');
-            message.error('Action failed. Please try again.');
         } finally {
             setIsTypeConfirmModalOpen(false)
             setTypeToConfirm(null)
@@ -414,19 +413,18 @@ const Bookings = () => {
                 const res = await api.delete(`/booking-info/packages/${packageToConfirm._id || packageToConfirm.id}`);
                 if (res.data.success) {
                     setAllPackages(prev => prev.filter(p => (p._id || p.id) !== (packageToConfirm._id || packageToConfirm.id)))
-                    message.success('Package deleted successfully');
+                    toast.success('Package deleted successfully');
                 }
             } else {
                 const newStatus = packageConfirmAction === 'activate' ? true : false
                 const res = await api.put(`/booking-info/packages/${packageToConfirm._id || packageToConfirm.id}`, { isActive: newStatus });
                 if (res.data.success) {
                     setAllPackages(prev => prev.map(p => (p._id || p.id) === (packageToConfirm._id || packageToConfirm.id) ? { ...p, status: newStatus } : p))
-                    message.success(`Package ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                    toast.success(`Package ${newStatus ? 'activated' : 'deactivated'} successfully`);
                 }
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to update package');
-            message.error('Action failed. Please try again.');
         } finally {
             setIsPackageConfirmModalOpen(false)
             setPackageToConfirm(null)
@@ -459,19 +457,18 @@ const Bookings = () => {
                 const res = await api.delete(`/halls/${hallToConfirm._id || hallToConfirm.id}`);
                 if (res.data.success) {
                     setHallsData(prev => prev.filter(h => (h._id || h.id) !== (hallToConfirm._id || hallToConfirm.id)))
-                    message.success('Hall deleted successfully');
+                    toast.success('Hall deleted successfully');
                 }
             } else {
                 const newStatus = hallConfirmAction === 'activate' ? true : false
                 const res = await api.put(`/halls/${hallToConfirm._id || hallToConfirm.id}`, { status: newStatus });
                 if (res.data.success) {
                     setHallsData(prev => prev.map(h => (h._id || h.id) === (hallToConfirm._id || hallToConfirm.id) ? { ...h, status: newStatus } : h))
-                    message.success(`Hall ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                    toast.success(`Hall ${newStatus ? 'activated' : 'deactivated'} successfully`);
                 }
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to update hall');
-            message.error('Action failed. Please try again.');
         } finally {
             setIsHallConfirmModalOpen(false)
             setHallToConfirm(null)
