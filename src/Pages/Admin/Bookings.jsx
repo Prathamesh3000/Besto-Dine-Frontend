@@ -1134,7 +1134,7 @@ const Bookings = () => {
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-4 text-[13px] text-gray-500">
-                                                    <span className="font-semibold text-gray-600">{pkg.price}</span>
+                                                    <span className="font-semibold text-gray-600">{typeof pkg.price === 'number' ? `₹${pkg.price}/person` : pkg.price}</span>
                                                     <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                                     <span>Min: {pkg.minPeople} people</span>
                                                     <span className="w-1 h-1 bg-gray-300 rounded-full"></span>

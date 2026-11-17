@@ -163,7 +163,7 @@ const AddPackageModal = ({ isOpen, onClose, onSave, packageData }) => {
                 setFormData({
                     name: packageData.name || '',
                     type: packageData.type || '',
-                    pricePerPerson: packageData.price ? String(packageData.price).replace(/[^0-9.]/g, '') : '',
+                    pricePerPerson: packageData.price !== undefined && packageData.price !== null ? String(packageData.price).replace(/[^0-9.]/g, '') : '',
                     minPeople: packageData.minPeople || '',
                     maxPeople: packageData.maxPeople || '',
                     description: packageData.description || '',
@@ -707,9 +707,10 @@ const AddPackageModal = ({ isOpen, onClose, onSave, packageData }) => {
                                         isPureVeg: formData.isPureVeg,
                                         badge: packageData ? packageData.badge : 'Silver', // Defaulting badge logically
                                         badgeColor: packageData ? packageData.badgeColor : 'bg-gray-100 text-gray-500',
-                                        price: `₹${formData.pricePerPerson}/person`,
-                                        minPeople: formData.minPeople,
-                                        maxPeople: formData.maxPeople,
+                                        // Backend model/validator require a Number (was a '₹x/person' string -> 400).
+                                        price: Number(formData.pricePerPerson),
+                                        minPeople: Number(formData.minPeople) || 0,
+                                        maxPeople: Number(formData.maxPeople) || 0,
                                         description: formData.description,
                                         status: packageData && packageData.status !== undefined ? packageData.status : true,
                                         features: features,
