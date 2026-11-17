@@ -432,6 +432,12 @@ function SearchScreen() {
   };
 
   const handleIncrease = (item) => {
+    // Sized item with no line yet: a quick-add would charge the flat base
+    // price with no size. Open the item so the customer picks a size.
+    if (item.fromPrice != null && getItemQuantity(item.id) === 0) {
+      handleResultOpen(item);
+      return;
+    }
     updateQuantity(item.id, 1, {
       ...item,
       // No fabricated size. A made-up "Regular" at the menu price made the

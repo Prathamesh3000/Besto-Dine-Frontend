@@ -1681,7 +1681,13 @@ function Home() {
                 // price-sync validates them against /combos (not /menu,
                 // which 404s for a combo id). Without the flag the quick-
                 // Add path produced a wasted 404 + a benign console error.
-                onAddToCart: (i) => updateQuantity(item._id, 1, item.isCombo ? { ...i, isCombo: true } : i),
+                // Sized items must not quick-add at the flat base price (no
+                // size → server re-prices / total drifts): open the detail
+                // modal so the customer picks Half/Full. The +/- stepper
+                // (shown once a line exists) still increments that line.
+                onAddToCart: resolveFromPrice(item) != null
+                  ? () => handleOpenProductDetails(item)
+                  : (i) => updateQuantity(item._id, 1, item.isCombo ? { ...i, isCombo: true } : i),
                 onIncrease: () => updateQuantity(item._id, 1),
                 onDecrease: () => updateQuantity(item._id, -1),
                 // Lock state — disables Add / +/- visually when the
