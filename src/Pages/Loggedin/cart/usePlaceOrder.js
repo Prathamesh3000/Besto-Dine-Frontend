@@ -162,7 +162,10 @@ export default function usePlaceOrder({
         setDeliveryError('');
       }
 
-      if (finalTakeawayTotal <= 0) {
+      // finalTakeawayTotal is net of wallet points; a wallet that covers the
+      // whole bill is valid (bill-preview takes the full-wallet path), so the
+      // guard looks at the total before wallet points.
+      if (finalTakeawayTotal + (Number(appliedPoints) || 0) <= 0) {
         toast.error("Order total must be greater than zero.");
         return;
       }
