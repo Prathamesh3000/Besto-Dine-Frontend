@@ -8,7 +8,7 @@ const toastFn = vi.hoisted(() => vi.fn())
 vi.mock('react-hot-toast', () => ({ default: toastFn, toast: toastFn }))
 
 import { CartProvider, useCart, migrateLineKeys } from '@/Context/CartContext'
-import { customerLineKey, cartSubtotal } from '@/utils/cart'
+import { customerLineKey, quickAddLine, cartSubtotal } from '@/utils/cart'
 
 const wrapper = ({ children }) => <CartProvider>{children}</CartProvider>
 const mount = () => renderHook(() => useCart(), { wrapper })
@@ -89,7 +89,19 @@ describe('BUG-37: customer cart lines are keyed by item + size', () => {
   })
 })
 
-describe('totals', () => {
+describe('quickAddLine (Complete your meal)', () => {
+  test('sized item is added with its cheapest size, size and price agree', () => {
+    const item = { basePrice: 260, finalPrice: 260, sizes: [{ name: 'Full', price: 260 }, { name: 'Half', price: 160 }] }
+    const q = quickAddLine(item)
+    expect(q.selectedSizes[0]).toMatchObject({ name: 'Half', price: 160 })
+    expect(q.unitPrice).toBe(160)
+    expect(q.price).toBe(160)
+  })
+  test('unsized item is a plain line at its price', () => {
+    const q = quickAddLine({ basePrice: 99, finalPrice: 99 })
+    expect(q.selectedSizes).toEqual([])
+    expect(q.unitPrice).toBe(99)
+  })
   test('cartSubtotal over the two lines is 420', () => {
     expect(cartSubtotal([{ unitPrice: 160, quantity: 1 }, { unitPrice: 260, quantity: 1 }])).toBe(420)
   })

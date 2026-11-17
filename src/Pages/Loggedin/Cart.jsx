@@ -11,6 +11,7 @@ import { getActiveBranch } from "../../utils/tenant";
 import { geocodeAddress, reverseGeocode, getCurrentPosition } from "../../utils/geo";
 import { useDineInLock } from "../../utils/dineInSession";
 import { resolveUnitPrice } from "../../utils/pricing";
+import { quickAddLine } from "../../utils/cart";
 import { computeBill, computeSubtotal, toTaxConfig } from "../../utils/billing";
 import { toast } from "react-hot-toast";
 import { getCustomerOperations } from "../../utils/operations";
@@ -589,14 +590,11 @@ function Cart() {
       name: item.name,
       desc: item.description || item.desc || '',
       image: (item.images && item.images[0]) || item.image,
-      price: resolveUnitPrice(item),
-      unitPrice: resolveUnitPrice(item),
+      ...quickAddLine(item),
       isVeg: item.vegType === 'veg' || item.isVeg === true,
       quantity: 1,
       prepStation: item.prepStation,
       category: item.category,
-      selectedSizes: [],
-      selectedToppings: [],
     };
     updateQtyContext(id, 1, cartItem);
     toast.success(`${cartItem.title} added to cart`, { id: `complement-${id}`, duration: 2000 });
