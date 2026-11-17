@@ -280,8 +280,8 @@ export default function BillPage() {
                                         Original order · {originalItems.length}
                                     </div>
                                 )}
-                                {originalItems.map((item) => (
-                                    <div key={item.id} className="flex gap-3">
+                                {originalItems.map((item, idx) => (
+                                    <div key={`${item.id}-${idx}`} className="flex gap-3">
                                         {item.image ? (
                                             <img
                                                 src={item.image}
@@ -312,8 +312,8 @@ export default function BillPage() {
                                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#FE8301]" />
                                     Added later · {appendedItems.length}
                                 </div>
-                                {appendedItems.map((item) => (
-                                    <div key={item.id} className="flex gap-3 bg-[#FFF4E8] rounded-xl p-2 -mx-1 ring-1 ring-[#FE8301]/20">
+                                {appendedItems.map((item, idx) => (
+                                    <div key={`${item.id}-${idx}`} className="flex gap-3 bg-[#FFF4E8] rounded-xl p-2 -mx-1 ring-1 ring-[#FE8301]/20">
                                         {item.image ? (
                                             <img
                                                 src={item.image}
