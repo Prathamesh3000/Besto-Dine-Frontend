@@ -154,6 +154,43 @@ describe('BillPreviews (takeaway) — pay-first order creation', () => {
   })
 })
 
+describe('BillPreviews (takeaway) — wallet split is paise-exact (BUG-46)', () => {
+  // ₹1000 subtotal + 5% GST, ₹5 coupon → bill 997.5 + ... use a fractional bill: subtotal 216 → 226.80
+  const fracState = (over = {}) => baseState({ subtotal: 216, items: [{ name: 'Thali', price: 216, quantity: 1 }], ...over })
+
+  test('remainder under Rs 1 is absorbed into the wallet when the balance covers it: label, breakdown and debit agree', async () => {
+    const user = renderPreview(fracState({ appliedPoints: 226, walletBalance: 300 }))
+    await ready()
+    expect(payBtn()).toHaveTextContent('Pay ₹226.80 from Wallet')
+    await user.click(payBtn())
+    await waitFor(() => expect(walletAPI.payWithWallet).toHaveBeenCalledWith(226.8, 'oid1', expect.any(String)))
+    expect(razorpayAPI.createOrder).not.toHaveBeenCalled()
+    expect(ordersPost()).toMatchObject({ total: 226.8, paymentMethod: 'wallet' })
+  })
+
+  test('balance exactly Rs 226: Razorpay is asked for exactly Rs 1 and the wallet for 225.80, label shows both', async () => {
+    const user = renderPreview(fracState({ appliedPoints: 226, walletBalance: 226 }))
+    await ready()
+    expect(payBtn()).toHaveTextContent('Pay ₹1.00 (₹225.80 wallet)')
+    expect(screen.getByTestId('wallet-split-note')).toBeInTheDocument()
+    await user.click(payBtn())
+    await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(1, null, expect.any(String), { _silent: true })
+    await act(() => rzp.options.handler(CHECKOUT))
+    expect(ordersPost()).toMatchObject({ total: 226.8, walletAmountPaid: 225.8 })
+    expect(walletAPI.payWithWallet).toHaveBeenCalledWith(225.8, 'oid1', expect.any(String))
+  })
+
+  test('a normal fractional remainder is charged to the paisa (Rs 0.80 never becomes Rs 1)', async () => {
+    const user = renderPreview(fracState({ appliedPoints: 200, walletBalance: 200 }))
+    await ready()
+    expect(payBtn()).toHaveTextContent('Pay ₹26.80 (₹200.00 wallet)')
+    await user.click(payBtn())
+    await waitFor(() => expect(rzp.open).toHaveBeenCalled())
+    expect(razorpayAPI.createOrder).toHaveBeenCalledWith(26.8, null, expect.any(String), { _silent: true })
+  })
+})
+
 describe('BillPreviews (takeaway) — payment could not be started', () => {
   test('create-order fails → friendly inline error (no raw server toast), nothing placed, retry works', async () => {
     razorpayAPI.createOrder.mockRejectedValueOnce({ response: { status: 500, data: { message: 'Failed to create payment order' } } })

@@ -680,7 +680,7 @@ function Cart() {
     deliveryActive, quoteState, quoteMessage, deliveryAddress, measuredDelivery,
     selectedSlabIndex, selectedSlab, setDeliveryError, setBranchError, deliveryConfig,
     deliveryCoords, deliveryFee, subtotal, finalTakeawayTotal, cartItems, couponDiscount,
-    appliedCoupon, appliedPoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
+    appliedCoupon, appliedPoints, availablePoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
     taxConfig, syncCartPrices, settingsLoaded, reloadSettings: loadSettings,
   });
 

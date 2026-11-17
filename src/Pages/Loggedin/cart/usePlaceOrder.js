@@ -21,7 +21,7 @@ export default function usePlaceOrder({
   deliveryActive, quoteState, quoteMessage, deliveryAddress, measuredDelivery,
   selectedSlabIndex, selectedSlab, setDeliveryError, setBranchError, deliveryConfig,
   deliveryCoords, deliveryFee, subtotal, finalTakeawayTotal, cartItems, couponDiscount,
-  appliedCoupon, appliedPoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
+  appliedCoupon, appliedPoints, availablePoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
   taxConfig, syncCartPrices, settingsLoaded = true, reloadSettings,
 }) {
   // Handle Place Order. `payChoice` ('payFirst' | 'payAfter') is the
@@ -192,6 +192,7 @@ export default function usePlaceOrder({
           couponDiscount,
           appliedCoupon,
           appliedPoints,
+          walletBalance: availablePoints,
           tipAmount: tipAmount || 0,
           selectedTime,
           selectedDay,

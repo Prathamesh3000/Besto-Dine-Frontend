@@ -16,6 +16,7 @@ import { getActiveTenant } from "../../utils/tenant";
 import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
 import { computeBill, toTaxConfig } from "../../utils/billing";
+import { splitWalletPayment } from "../../utils/walletSplit";
 
 // Load the Razorpay checkout script on demand. Same pattern as
 // Payment.jsx — kept local instead of in utils/ because it's the only
@@ -99,6 +100,7 @@ const TakeawayBillPreview = ({ state }) => {
     couponDiscount = 0,
     appliedCoupon,
     appliedPoints = 0,
+    walletBalance,
     tipAmount = 0,
     selectedTime,
     selectedDay,
@@ -188,10 +190,15 @@ const TakeawayBillPreview = ({ state }) => {
   //   razorpayAmount — paid via Razorpay (skipped if wallet covers all)
   // Both rails together cover grandTotal. The order's walletAmountPaid
   // field records the wallet portion so verify-payment doesn't lose it.
-  const walletAvailable = Math.max(0, Number(appliedPoints) || 0);
-  const walletAmount = Math.min(walletAvailable, grandTotal);
-  const razorpayAmount = parseFloat((grandTotal - walletAmount).toFixed(2));
-  const walletCoversFull = razorpayAmount <= 0.5 && walletAmount > 0;
+  // Paise-exact split (utils/walletSplit): the two rails always add up to
+  // the bill, a sub-Rs-1 remainder is absorbed into the wallet (or the
+  // wallet shrinks so Razorpay gets Rs 1.00), and the preview, the button
+  // and the charged amounts all use these same numbers.
+  const { walletAmount, razorpayAmount, walletCoversFull, adjusted: splitAdjusted } = splitWalletPayment({
+    grandTotal,
+    applied: appliedPoints,
+    walletBalance,
+  });
 
   const branch = (() => {
     try {
@@ -315,7 +322,7 @@ const TakeawayBillPreview = ({ state }) => {
         return;
       }
 
-      toast.success(`Paid ₹${walletAmount.toFixed(0)} from wallet.`, { id: "pay-wallet-success", duration: 4000 });
+      toast.success(`Paid ₹${walletAmount.toFixed(2)} from wallet.`, { id: "pay-wallet-success", duration: 4000 });
       finishOrder(createdOrder.orderId, "wallet");
     } catch (err) {
       console.error("Wallet payment error:", err);
@@ -746,6 +753,13 @@ const TakeawayBillPreview = ({ state }) => {
                     -₹{walletAmount.toFixed(2)}
                   </span>
                 </div>
+                {splitAdjusted && (
+                  <p className="text-[11px] text-[#645E66] font-varela" data-testid="wallet-split-note">
+                    {splitAdjusted === "absorbed"
+                      ? "The small balance under ₹1 is taken from your wallet (online payments need at least ₹1)."
+                      : "Wallet use was lowered so the online part meets the ₹1 minimum."}
+                  </p>
+                )}
                 {razorpayAmount > 0 && (
                   <div className="flex justify-between items-center">
                     <span className="text-[13px] text-[#1A181B] font-varela">
@@ -894,9 +908,9 @@ const TakeawayBillPreview = ({ state }) => {
               <ShoppingCart size={18} />
               <span>
                 {walletCoversFull
-                  ? `Pay ₹${walletAmount.toFixed(0)} from Wallet`
+                  ? `Pay ₹${walletAmount.toFixed(2)} from Wallet`
                   : walletAmount > 0
-                    ? `Pay ₹${razorpayAmount.toFixed(0)} (₹${walletAmount.toFixed(0)} wallet)`
+                    ? `Pay ₹${razorpayAmount.toFixed(2)} (₹${walletAmount.toFixed(2)} wallet)`
                     : `Pay Bill ₹${grandTotal.toFixed(2)}`}
               </span>
             </>
