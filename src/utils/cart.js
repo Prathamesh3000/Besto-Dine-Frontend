@@ -54,6 +54,22 @@ export function cartLineKey(productId, { size = null, toppings = [] } = {}) {
     return `${productId}-${sizeLabel || 'default'}-${toppingSignature(toppings)}`;
 }
 
+/**
+ * Line identity in the customer cart store (CartContext). A plain item
+ * (no size, no toppings) keeps the bare product id, which is the shape
+ * every stored cart and the Home / Search steppers already use. A line
+ * with a size and/or toppings gets the shared cartLineKey so Half and
+ * Full of the same dish are separate lines, while the same size and
+ * toppings merge. `details` is a cart line: { selectedSizes, selectedToppings }.
+ */
+export function customerLineKey(productId, details = {}) {
+    const size = Array.isArray(details?.selectedSizes) ? details.selectedSizes[0] : null;
+    const toppings = Array.isArray(details?.selectedToppings) ? details.selectedToppings : [];
+    const sizeName = size && typeof size === 'object' ? (size.name ?? size.id) : size;
+    if (!sizeName && toppingSignature(toppings) === '') return String(productId);
+    return cartLineKey(productId, { size: sizeName || null, toppings });
+}
+
 /** Line identity of a kiosk cart line ({ menuItemId, size, addons }). */
 export function kioskLineKey(line) {
     return cartLineKey(line?.menuItemId, { size: line?.size, toppings: line?.addons });

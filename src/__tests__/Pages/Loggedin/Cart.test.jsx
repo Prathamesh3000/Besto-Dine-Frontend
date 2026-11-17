@@ -187,7 +187,7 @@ describe('Cart — bill summary equals computeBill', () => {
     let node = screen.getByText(`₹${formatPrice(35.25)} × 3`)
     while (node && !node.querySelector('svg.lucide-plus')) node = node.parentElement
     await user.click(node.querySelector('svg.lucide-plus').closest('button'))
-    expect(cartStore.updateQuantity).toHaveBeenCalledWith('m2', 1, expect.objectContaining({ id: 'm2' }))
+    expect(cartStore.updateQuantity).toHaveBeenCalledWith('m2', 1, expect.objectContaining({ id: 'm2' }), { exactKey: true })
     const expected = computeBill({ subtotal: computeSubtotal([PANEER, { ...CHAI, quantity: 4 }]), taxConfig: TAX_CONFIG, orderType: 'dine-in' })
     await waitFor(() => expect(row('Total')).toBe(money(expected.total)))
   })

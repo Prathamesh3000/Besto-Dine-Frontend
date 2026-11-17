@@ -51,6 +51,9 @@ function Cart() {
   // (drinks / breads / sides / desserts that pair with what's in cart).
   const { menuItems: catalogueItems } = useMenu();
   const cartItems = useMemo(() => Object.values(cartContextItems), [cartContextItems]);
+  // A cart line's store key: sized / topped lines carry `lineKey`, plain
+  // and pre-upgrade lines are keyed by the item id.
+  const lineKeyOf = (it) => it.lineKey || it.id;
 
   // ── Active table orders count ──────────────────────────────────────
   // Independent-orders model — each Place Order tap creates a fresh
@@ -538,13 +541,13 @@ function Cart() {
     const item = cartItems[index];
     if (!item) return;
     const delta = quantity - item.quantity;
-    updateQtyContext(item.id, delta, item);
+    updateQtyContext(lineKeyOf(item), delta, item, { exactKey: true });
   };
 
   const removeItem = (index) => {
     const item = cartItems[index];
     if (!item) return;
-    updateQtyContext(item.id, -item.quantity, item);
+    updateQtyContext(lineKeyOf(item), -item.quantity, item, { exactKey: true });
   };
 
 
@@ -601,7 +604,7 @@ function Cart() {
 
   // Increase Quantity
   const handleIncrease = (itemId) => {
-    const itemIndex = cartItems.findIndex((item) => item.id === itemId);
+    const itemIndex = cartItems.findIndex((item) => lineKeyOf(item) === itemId);
     if (itemIndex >= 0) {
       updateQuantity(itemIndex, cartItems[itemIndex].quantity + 1);
     }
@@ -609,7 +612,7 @@ function Cart() {
 
   // Decrease Quantity
   const handleDecrease = (itemId) => {
-    const itemIndex = cartItems.findIndex((item) => item.id === itemId);
+    const itemIndex = cartItems.findIndex((item) => lineKeyOf(item) === itemId);
     if (itemIndex >= 0) {
       const newQuantity = cartItems[itemIndex].quantity - 1;
       if (newQuantity <= 0) {
@@ -639,7 +642,7 @@ function Cart() {
     updateCartItem(itemId, { instructions });
 
     // Find index for auto-collapse
-    const idx = cartItems.findIndex(it => it.id === itemId);
+    const idx = cartItems.findIndex(it => lineKeyOf(it) === itemId);
     if (idx >= 0) {
       setExpandedInstructions((prev) => ({
         ...prev,
@@ -650,8 +653,8 @@ function Cart() {
 
   // Clear a line's special instructions (the Remove control on the card).
   const handleRemoveInstructions = (item) => {
-    updateCartItem(item.id, { instructions: '' });
-    const idx = cartItems.findIndex(it => it.id === item.id);
+    updateCartItem(lineKeyOf(item), { instructions: '' });
+    const idx = cartItems.findIndex(it => lineKeyOf(it) === lineKeyOf(item));
     if (idx >= 0) {
       setExpandedInstructions((prev) => ({ ...prev, [idx]: false }));
     }
@@ -770,11 +773,11 @@ function Cart() {
         <section>
           {cartItems.map((item, index) => (
             <HealthCartItem
-              key={`${item.id}-${index}`}
+              key={`${lineKeyOf(item)}-${index}`}
               item={item}
               quantity={item.quantity}
-              onIncrease={() => handleIncrease(item.id)}
-              onDecrease={() => handleDecrease(item.id)}
+              onIncrease={() => handleIncrease(lineKeyOf(item))}
+              onDecrease={() => handleDecrease(lineKeyOf(item))}
               onRemove={() => {
                 // CUS-021: full-line remove via the X button. Toast
                 // confirms — keeps the cart predictable while leaving
@@ -836,7 +839,7 @@ function Cart() {
       <SpecialInstructionsPopup
         isOpen={isInstructionsOpen}
         onClose={() => setIsInstructionsOpen(false)}
-        onSave={handleSaveInstructions}
+        onSave={(_id, text) => handleSaveInstructions(selectedItemForInstructions ? lineKeyOf(selectedItemForInstructions) : _id, text)}
         item={selectedItemForInstructions}
       />
 

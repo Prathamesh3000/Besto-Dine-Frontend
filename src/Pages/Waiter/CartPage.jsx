@@ -52,7 +52,7 @@ const CartPage = () => {
     }, []);
 
     const handleQuantityChange = (item, delta) => {
-        updateQuantity(item.id, delta, item);
+        updateQuantity(item.id, delta, item, { exactKey: true });
     };
 
     const handleOpenInstructions = (item) => {
@@ -118,9 +118,9 @@ const CartPage = () => {
                                     </button>
 
                                     <div className="flex flex-wrap gap-2 mt-3">
-                                        {item.selectedSize && (
+                                        {(item.selectedSize || item.selectedSizes?.[0]?.name) && (
                                             <span className="text-[11px] font-bold text-[#645E66] bg-[#F9F1FB] px-3 py-1.5 rounded-full">
-                                                {item.selectedSize}
+                                                {item.selectedSize || item.selectedSizes[0].name}
                                             </span>
                                         )}
                                         {item.selectedToppings?.map((topping) => (

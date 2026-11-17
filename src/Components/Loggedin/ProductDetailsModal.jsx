@@ -342,7 +342,7 @@ function ProductDetailsModal({ product, onClose, isUpdateMode = false }) {
     };
 
     if (isUpdateMode) {
-      updateCartItem(product.id, cartItem);
+      updateCartItem(product.lineKey || product.id, cartItem);
     } else {
       updateQuantity(product.id, quantity, cartItem);
     }

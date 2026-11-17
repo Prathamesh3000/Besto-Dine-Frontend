@@ -25,6 +25,8 @@ export default function useCartPriceSync({ cartContextItems, updateCartItem, upd
     let removed = 0;
     await Promise.all(items.map(async (cartItem) => {
       const menuId = cartItem._id || cartItem.id;
+      // Store key of this line (size / topping lines are keyed apart).
+      const lineKey = cartItem.lineKey || cartItem.id || menuId;
       if (!menuId) return;
 
       // Compare the LINE price (size + toppings) the cart actually shows
@@ -51,7 +53,7 @@ export default function useCartPriceSync({ cartContextItems, updateCartItem, upd
       const applyPrice = (doc) => {
         const canonicalUnit = canonicalLine(doc);
         if (canonicalUnit > 0 && Math.abs(canonicalUnit - cartUnit) > 0.01) {
-          updateCartItem(menuId, {
+          updateCartItem(lineKey, {
             price: canonicalUnit,
             unitPrice: canonicalUnit,
             finalPrice: doc.finalPrice ?? doc.price ?? canonicalUnit,
@@ -98,7 +100,7 @@ export default function useCartPriceSync({ cartContextItems, updateCartItem, upd
           const combo = await fetchCombo();
           if (combo && combo._id) { applyPrice(combo); return; }
         } catch { /* genuinely gone — fall through to removal */ }
-        updateQtyContext(menuId, -9999);
+        updateQtyContext(lineKey, -9999, {}, { exactKey: true });
         removed += 1;
       }
     }));

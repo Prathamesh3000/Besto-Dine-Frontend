@@ -66,11 +66,16 @@ const ProductDetails = ({ product, isOpen, onClose }) => {
             displayName: selectedSize ? `${product.name} (${selectedSize})` : product.name,
             price: currentBasePrice + toppingsPrice,
             selectedSize,
+            // The order payload reads selectedSizes[]; without it the server
+            // prices a sized waiter line at the item's base price.
+            selectedSizes: selectedSize
+                ? [{ name: selectedSize, price: sizes.find(s => s.name === selectedSize)?.price }]
+                : [],
             selectedToppings,
             quantity: quantity
         };
 
-        updateQuantity(comboId, quantity, cartItem);
+        updateQuantity(comboId, quantity, cartItem, { exactKey: true });
         onClose();
     };
 
