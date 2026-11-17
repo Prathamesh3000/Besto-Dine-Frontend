@@ -39,7 +39,7 @@ import toast from "react-hot-toast";
 import { useMenu } from "../../Context/MenuContext";
 import { useDineInLock as useDineInLockState, markTablelessDineIn } from "../../utils/dineInSession";
 import { sizedImage, realImage, hideBrokenImage } from "../../utils/image";
-import { resolveUnitPrice, formatPrice } from "../../utils/pricing";
+import { resolveUnitPrice, resolveFromPrice, formatPrice } from "../../utils/pricing";
 import BestoDineMark from "../../assets/BestoDineMark";
 import { useFavorites } from "../../utils/favorites";
 import useCustomerSession from "../../hooks/useCustomerSession";
@@ -226,7 +226,7 @@ const FeaturedCarousel = ({ featuredItems = [], onAddToCart }) => {
                   </p>
                 )}
                 <div className="flex items-end justify-between mt-2">
-                  <span className="text-[16px] md:text-[17px] font-bold leading-none">₹{formatPrice(item.price)}</span>
+                  <span className="text-[16px] md:text-[17px] font-bold leading-none">{item.fromPrice != null ? `from ₹${formatPrice(item.fromPrice)}` : `₹${formatPrice(item.price)}`}</span>
                   {/* Plus button visible on ALL cards (including side
                       peeks) so the reference's "every card has its own
                       add button" feel is preserved. */}
@@ -255,6 +255,7 @@ const MenuItem = ({
   title,
   desc,
   price,
+  fromPrice = null,
   image = "",
   time = "--",
   serves = "--",
@@ -351,7 +352,9 @@ const MenuItem = ({
 
         <div className="flex items-center justify-between mt-2">
           <span className="font-bold nunito text-base sm:text-[20px] md:text-xl text-gray-800">
-            ₹{typeof displayPrice === "number" ? formatPrice(displayPrice) : displayPrice}
+            {fromPrice != null
+              ? `from ₹${formatPrice(fromPrice)}`
+              : <>₹{typeof displayPrice === "number" ? formatPrice(displayPrice) : displayPrice}</>}
           </span>
           {/* Settled dine-in visit: no ordering controls at all. */}
           {disabled ? null : quantity > 0 ? (
@@ -427,6 +430,7 @@ const HealthMenuItem = ({
   title,
   desc,
   price,
+  fromPrice = null,
   image,
   calories,
   protein,
@@ -620,7 +624,9 @@ const HealthMenuItem = ({
 
         <div className="flex items-center justify-between gap-2 mt-0.5">
           <span className="font-semibold font-nunito text-[20px] text-[#1A181B]">
-            ₹{typeof price === "number" ? formatPrice(price) : price}
+            {fromPrice != null
+              ? `from ₹${formatPrice(fromPrice)}`
+              : <>₹{typeof price === "number" ? formatPrice(price) : price}</>}
           </span>
           {disabled ? null : quantity > 0 ? (
             <div className={`flex items-center justify-between px-1 rounded-[10px] py-2 text-[14px] font-medium min-w-[80px] border ${
@@ -836,6 +842,7 @@ function Home() {
         title: item.name,
         desc: item.description || item.shortDescription || '',
         price: resolveUnitPrice(item),
+        fromPrice: resolveFromPrice(item),
         image: item.images?.[0] || '',
         menuItem: item,
       }));
@@ -1650,6 +1657,7 @@ function Home() {
                 title: item.name,
                 desc: item.description,
                 price: resolveUnitPrice(item),
+                fromPrice: resolveFromPrice(item),
                 image: (item.images && item.images[0]) || item.image,
                 isVeg: item.vegType === 'veg',
                 // Backend menuItem schema uses `cookingTime` and `serveUpto`

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import VegBadge from '../../../Components/Common/VegBadge';
 import { realImage, sizedImage, hideBrokenImage } from '../../../utils/image';
 import { formatPrice } from './landingUtils';
+import { resolveFromPrice } from '../../../utils/pricing';
 
 /** Horizontally scrolling featured-dish cards; tapping one opens it in the menu. */
 const FeaturedDishes = ({ items = [], onSelect }) => {
@@ -15,6 +16,7 @@ const FeaturedDishes = ({ items = [], onSelect }) => {
                 const base = Number(item.basePrice);
                 const final = Number(item.finalPrice ?? item.basePrice);
                 const hasOffer = Number.isFinite(base) && Number.isFinite(final) && final < base;
+                const fromPrice = resolveFromPrice(item);
                 const img = realImage(item.image);
                 return (
                     <button
@@ -51,8 +53,8 @@ const FeaturedDishes = ({ items = [], onSelect }) => {
                                 <p className="mt-0.5 text-[12px] leading-[16px] text-[#667085] font-varela line-clamp-2 min-h-[32px]">{item.description}</p>
                             )}
                             <div className="mt-2 flex items-baseline gap-1.5">
-                                <span className="text-[14px] font-bold text-[#101828] font-nunito">{formatPrice(final)}</span>
-                                {hasOffer && (
+                                <span className="text-[14px] font-bold text-[#101828] font-nunito">{fromPrice != null ? `from ${formatPrice(fromPrice)}` : formatPrice(final)}</span>
+                                {hasOffer && fromPrice == null && (
                                     <span className="text-[12px] text-[#98A2B3] line-through font-varela">{formatPrice(base)}</span>
                                 )}
                             </div>

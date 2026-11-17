@@ -16,7 +16,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useCart } from "../../Context/CartContext";
 import { menuSearchAPI } from "../../utils/api";
 import { useDineInLock } from "../../utils/dineInSession";
-import { resolveUnitPrice } from '../../utils/pricing';
+import { resolveUnitPrice, resolveFromPrice, formatPrice } from '../../utils/pricing';
 
 const SECTION_PADDING = "px-4 sm:px-5 md:px-8";
 
@@ -152,7 +152,7 @@ const SearchResultItem = ({
       </div>
       <div className="flex items-center justify-between">
         <span className="font-bold text-base sm:text-lg text-gray-900 ">
-          ₹{item.price}
+          {item.fromPrice != null ? `from ₹${formatPrice(item.fromPrice)}` : `₹${item.price}`}
         </span>
         {quantity > 0 ? (
           <div
@@ -240,7 +240,7 @@ const PairingItem = ({ item, onClick }) => (
     <p className="text-xs sm:text-sm font-medium text-gray-800 line-clamp-1">
       {item.title}
     </p>
-    <p className="text-xs sm:text-sm font-bold text-gray-900 ">₹{item.price}</p>
+    <p className="text-xs sm:text-sm font-bold text-gray-900 ">{item.fromPrice != null ? `from ₹${formatPrice(item.fromPrice)}` : `₹${item.price}`}</p>
   </div>
 );
 
@@ -298,6 +298,7 @@ function SearchScreen() {
           title: item.name,
           desc: item.description,
           price: resolveUnitPrice(item),
+          fromPrice: resolveFromPrice(item),
           image: item.images?.[0] || '',
           isVeg: item.vegType === 'veg',
           categoryId: item.category?._id,
@@ -328,6 +329,7 @@ function SearchScreen() {
             id: item._id,
             title: item.name,
             price: resolveUnitPrice(item),
+          fromPrice: resolveFromPrice(item),
             image: item.images?.[0] || '',
             categoryId: item.category?._id || item.category,
           }))
@@ -342,6 +344,7 @@ function SearchScreen() {
               title: item.name,
               desc: item.description,
               price: resolveUnitPrice(item),
+          fromPrice: resolveFromPrice(item),
               image: item.images?.[0] || '',
               isVeg: item.vegType === 'veg',
               categoryId: item.category?._id || item.category,
