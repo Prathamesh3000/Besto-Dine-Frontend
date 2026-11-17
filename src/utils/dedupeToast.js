@@ -11,8 +11,11 @@ export function installErrorToastDedupe() {
   if (installed) return;
   installed = true;
   const original = toast.error.bind(toast);
-  toast.error = (message, opts) => original(
-    message,
-    typeof message === 'string' && message ? { id: message, ...opts } : opts,
-  );
+  toast.error = (message, opts) => {
+    if (typeof message !== 'string' || !message) return original(message, opts);
+    // A caller with its own id (e.g. replacing a loading toast) would not
+    // replace the interceptor's toast that uses the message as id, so drop that one.
+    if (opts && opts.id && opts.id !== message) toast.dismiss(message);
+    return original(message, { id: message, ...opts });
+  };
 }
