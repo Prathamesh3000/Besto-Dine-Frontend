@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 
 const original = vi.hoisted(() => vi.fn())
-vi.mock('react-hot-toast', () => ({ default: { error: original } }))
+const dismiss = vi.hoisted(() => vi.fn())
+vi.mock('react-hot-toast', () => ({ default: { error: original, dismiss } }))
 
 import toast from 'react-hot-toast'
 import { installErrorToastDedupe } from '@/utils/dedupeToast'
@@ -16,6 +17,7 @@ describe('installErrorToastDedupe', () => {
     expect(original).toHaveBeenLastCalledWith('Same', { id: 'Same', duration: 4000 })
     toast.error('Own id', { id: 'x' })
     expect(original).toHaveBeenLastCalledWith('Own id', { id: 'x' })
+    expect(dismiss).toHaveBeenCalledWith('Own id')
     toast.error('Twice'); toast.error('Twice')
     expect(original.mock.calls.slice(-2).every(c => c[1].id === 'Twice')).toBe(true)
     expect(original).toHaveBeenCalledTimes(5)
