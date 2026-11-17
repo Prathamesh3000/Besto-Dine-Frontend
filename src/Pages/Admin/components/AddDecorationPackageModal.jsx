@@ -1938,7 +1938,10 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
                                 }
                                 return
                             }
-                            onSave?.(formData)
+                            // Never send branch: '' (validator 400s) or a populated object.
+                            const { branch: rawBranch, ...rest } = formData
+                            const branchId = rawBranch && typeof rawBranch === 'object' ? (rawBranch._id || rawBranch.id) : rawBranch
+                            onSave?.(branchId ? { ...rest, branch: String(branchId) } : rest)
                         }}
                         className="px-8 py-2.5 rounded-[10px] bg-[#F97316] text-white text-[14px] font-semibold border border-[#F97316] hover:bg-[#EA580C] transition-colors flex items-center justify-center gap-2"
                     >

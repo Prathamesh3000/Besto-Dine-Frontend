@@ -721,6 +721,11 @@ const AddPackageModal = ({ isOpen, onClose, onSave, packageData }) => {
                                         desserts: packageData?.desserts || [],
                                         drinks: packageData?.drinks || []
                                     }
+                                    // Never send branch: '' or a populated object.
+                                    const rawBranch = savedPackage.branch
+                                    delete savedPackage.branch
+                                    const branchId = rawBranch && typeof rawBranch === 'object' ? (rawBranch._id || rawBranch.id) : rawBranch
+                                    if (branchId) savedPackage.branch = String(branchId)
                                     onSave(savedPackage)
                                 } else {
                                     onClose()
