@@ -139,6 +139,7 @@ const AddHallModal = ({ isOpen, onClose, onSave, hallData }) => {
 
     useEffect(() => {
         if (isOpen) {
+            setActiveTab('basic')
             if (hallData) {
                 // Populate form fields based on hallData mapping
                 setFormData(prev => ({
