@@ -378,29 +378,32 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
     useEffect(() => {
         if (isOpen) {
             setActiveTab('basic')
+            const defaults = {
+                name: '', category: '', description: '', themeStyle: '',
+                primaryColor: '#FF6B6B', secondaryColor: '#4ECDC4', accentColor: '#FFD93D',
+                suitableFor: { Indoor: false, Outdoor: false, Hall: false, Banquet: false, Garden: false, Terrace: false, Beach: false, Restaurant: false },
+                minArea: '', maxArea: '', ceilingHeight: '', searchTags: [], isFeatured: false, isPopular: false,
+                categories: [], materialsUsed: [], setupTime: '', advanceBookingDays: '',
+                waterRequired: false, technicalSupport: false, onSiteSupervision: false, numberOfCaretakers: '',
+                basePrice: '', dismantlingCharges: '', setupCharges: '', transportCharges: '', isCustomizable: false,
+                addons: [], allowCustomization: false, additionalChargesPercent: '',
+                restrictions: { indoorOnly: false, outdoorOnly: false, weatherDependent: false, fireHazard: false, specialPermission: false, notSuitableForKids: false },
+                bestFor: [], notRecommendedFor: [], simultaneousBookings: '',
+                seasonalAvailability: { spring: false, summer: false, fall: false, winter: false },
+                clientNotes: '', isActive: true, images: [], vendorName: '', vendorEmail: '', vendorPhone: '', vendorRating: ''
+            }
+
             if (packageData) {
                 setFormData({
-                    ...packageData,
+                    ...defaults,
+                    ...Object.fromEntries(Object.entries(packageData).map(([k, v]) => [k, v === null || v === undefined ? defaults[k] ?? '' : v])),
                     // Ensure nested objects exist to avoid crashes
                     suitableFor: packageData.suitableFor || { Indoor: false, Outdoor: false, Hall: false, Banquet: false, Garden: false, Terrace: false, Beach: false, Restaurant: false },
                     restrictions: packageData.restrictions || { indoorOnly: false, outdoorOnly: false, weatherDependent: false, fireHazard: false, specialPermission: false, notSuitableForKids: false },
                     seasonalAvailability: packageData.seasonalAvailability || { spring: false, summer: false, fall: false, winter: false }
                 })
             } else {
-                setFormData({
-                    name: '', category: '', description: '', themeStyle: '',
-                    primaryColor: '#FF6B6B', secondaryColor: '#4ECDC4', accentColor: '#FFD93D',
-                    suitableFor: { Indoor: false, Outdoor: false, Hall: false, Banquet: false, Garden: false, Terrace: false, Beach: false, Restaurant: false },
-                    minArea: '', maxArea: '', ceilingHeight: '', searchTags: [], isFeatured: false, isPopular: false,
-                    categories: [], materialsUsed: [], setupTime: '', advanceBookingDays: '',
-                    waterRequired: false, technicalSupport: false, onSiteSupervision: false, numberOfCaretakers: '',
-                    basePrice: '', dismantlingCharges: '', setupCharges: '', transportCharges: '', isCustomizable: false,
-                    addons: [], allowCustomization: false, additionalChargesPercent: '',
-                    restrictions: { indoorOnly: false, outdoorOnly: false, weatherDependent: false, fireHazard: false, specialPermission: false, notSuitableForKids: false },
-                    bestFor: [], notRecommendedFor: [], simultaneousBookings: '',
-                    seasonalAvailability: { spring: false, summer: false, fall: false, winter: false },
-                    clientNotes: '', isActive: true, images: [], vendorName: '', vendorEmail: '', vendorPhone: '', vendorRating: ''
-                })
+                setFormData(defaults)
             }
         }
     }, [isOpen, packageData])
