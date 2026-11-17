@@ -13,6 +13,16 @@ import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
 import toast from 'react-hot-toast';
 import { useLocation } from 'react-router-dom';
 
+// Size chip beside an item name (BUG-42): Half and Full of one dish
+// must not look identical on the live order cards.
+const SizeChips = ({ item }) => {
+    const names = (Array.isArray(item?.selectedSizes) ? item.selectedSizes : []).map((x) => x?.name).filter(Boolean);
+    if (!names.length) return null;
+    return names.map((n) => (
+        <span key={n} className="ml-2 align-middle text-[11px] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-100">{n}</span>
+    ));
+};
+
 
 // Split items into the original round vs anything appended later.
 // Baseline = earliest item.addedAt among the order's items (NOT
@@ -145,7 +155,7 @@ const ReadyOrderCard = ({
                     <div className="rounded-[10px] ring-1 ring-[#FE8301]/30 bg-[#FFF4E8] px-2 divide-y divide-[#FE8301]/15">
                         {appendedItems.map((item, index) => (
                             <div key={`appended-${index}`} className="flex justify-between items-center py-2">
-                                <span className="text-[#1A181B] font-bold text-[16px]">{item.name}</span>
+                                <span className="text-[#1A181B] font-bold text-[16px]">{item.name}<SizeChips item={item} /></span>
                                 <span className="text-[#FE8301] font-bold text-[14px]">x{item.quantity}</span>
                             </div>
                         ))}
@@ -161,7 +171,7 @@ const ReadyOrderCard = ({
                 <div className={appendedItems.length > 0 ? 'opacity-70' : ''}>
                     {originalItems.map((item, index) => (
                         <div key={`original-${index}`} className="flex justify-between items-center p-2 border-b border-[#CCCAC8] last:border-0">
-                            <span className="text-[#1A181B] font-bold text-[16px]">{item.name}</span>
+                            <span className="text-[#1A181B] font-bold text-[16px]">{item.name}<SizeChips item={item} /></span>
                             <span className="text-[#645E66] font-bold text-[14px]">x{item.quantity}</span>
                         </div>
                     ))}
