@@ -319,8 +319,11 @@ function Cart() {
       setPointsError(`You only have ₹${availablePoints.toFixed(2)} wallet balance available`);
       return;
     }
-    if (pts > subtotal) {
-      setPointsError(`Amount cannot exceed order subtotal of ₹${subtotal}`);
+    // Cap at what the customer actually owes (GST, delivery fee and tip
+    // included, coupon taken off); the server refuses a wallet amount
+    // above the order total (WALLET_EXCEEDS_TOTAL).
+    if (pts > billBeforeWallet.total) {
+      setPointsError(`Amount cannot exceed the order total of ₹${billBeforeWallet.total.toFixed(2)}`);
       return;
     }
     setPointsError('');
@@ -469,6 +472,15 @@ function Cart() {
   // on the Payment screen (which offers the wallet there), so the cart
   // neither deducts it nor offers it — the server rejects a dine-in
   // total that is below its own bill (TOTAL_MISMATCH).
+  const billBeforeWallet = computeBill({
+    subtotal,
+    taxConfig,
+    orderType: deliveryActive ? 'delivery' : orderType,
+    couponDiscount,
+    pointsRedeemed: 0,
+    tipAmount: tipAmount || 0,
+    deliveryFee,
+  });
   const walletAppliedToBill = isTakeaway ? appliedPoints : 0;
   const bill = computeBill({
     subtotal,
