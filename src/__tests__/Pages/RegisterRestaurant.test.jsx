@@ -17,12 +17,12 @@ const publicAPI = vi.hoisted(() => ({ registerRestaurant: vi.fn(), checkSlugAvai
 vi.mock('@/utils/api', () => ({ publicAPI, default: {} }))
 const setActiveTenant = vi.hoisted(() => vi.fn())
 vi.mock('@/utils/tenant', () => ({ setActiveTenant, getActiveTenantSlug: () => null }))
-vi.mock('@/Pages/Platform/platformShared', () => ({
-  usePageMeta: () => {},
-  usePublicPlans: () => ({ data: [] }),
-  formatPlanPrice: () => '',
-  readUtm: () => null,
-}))
+// Keep the real price helpers (the page imports formatPlanCyclePrice /
+// publicCycleOptions); only the hooks are stubbed.
+vi.mock('@/Pages/Platform/platformShared', async (orig) => {
+  const actual = await orig()
+  return { ...actual, usePageMeta: () => {}, usePublicPlans: () => ({ data: [] }), readUtm: () => null }
+})
 vi.mock('@/Pages/Platform/components/PlatformChrome', () => ({
   PlatformBrand: () => null,
   PlatformHeader: () => null,
@@ -30,6 +30,11 @@ vi.mock('@/Pages/Platform/components/PlatformChrome', () => ({
 }))
 
 import RegisterRestaurant from '@/Pages/Platform/RegisterRestaurant'
+
+// Each case types a whole multi-field form through userEvent (plus the
+// 450ms slug debounce on the register page); that exceeds the 5s default
+// when the suite runs in parallel on a slow machine.
+vi.setConfig({ testTimeout: 30000 })
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -87,7 +92,9 @@ describe('RegisterRestaurant - instant trial', () => {
     })
     const user = renderPage()
     await fillAndSubmit(user)
-    expect(await screen.findByText('ADMIN DASHBOARD')).toBeInTheDocument()
+    // A short ProvisioningProgress screen precedes the redirect.
+    expect(await screen.findByTestId('provisioning-progress')).toBeInTheDocument()
+    expect(await screen.findByText('ADMIN DASHBOARD', {}, { timeout: 3000 })).toBeInTheDocument()
     // login body is handed over without the response envelope fields
     const body = startSession.mock.calls[0][0]
     expect(body).toMatchObject({ token: 'tok', refreshToken: 'ref', role: 'admin' })

@@ -127,7 +127,7 @@ const PaymentsDashboard = () => {
             const refundBody = {
                 orderId: refundPayment._orderId || refundPayment.id,
                 amount: refundData.amount,
-                reason: refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason,
+                reason: (refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason)?.trim() || 'Admin refund',
             }
             // One key per refund action (order+amount+reason); a retry of the same
             // refund reuses it so it can never be issued twice.

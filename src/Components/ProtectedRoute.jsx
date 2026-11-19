@@ -94,8 +94,10 @@ const ProtectedRoute = ({
         return <Navigate to="/force-change-password" replace state={{ audience }} />;
     }
 
-    // Free trial ended unpaid: the owner may only reach billing (and the
-    // lock screen). Everything else on a staff route goes to /trial-expired.
+    // Free trial ended unpaid and the read-only grace window is over
+    // (trialState 'locked'): billing and the lock screen stay reachable,
+    // everything else on a staff route goes to /trial-expired. Read-only
+    // users keep navigating; the UpgradeModal explains refused writes.
     if (isStaffRoute && isTrialLocked(user) && !isTrialAllowedPath(location.pathname)) {
         return <Navigate to="/trial-expired" replace />;
     }

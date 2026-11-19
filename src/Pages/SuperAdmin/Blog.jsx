@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import api from '../../utils/api';
 import { IMAGE_ACCEPT, isImageFile } from '../../utils/imageFile';
+import { useAuth } from '../../Context/AuthContext';
 import {
     PageHeader,
     StatCard,
@@ -84,6 +85,8 @@ function CoverImg({ src, alt }) {
 }
 
 function Blog() {
+    const { canManageModule } = useAuth();
+    const canWrite = canManageModule('blog');
     const [posts, setPosts] = useState([]);
     const [summary, setSummary] = useState({ total: 0, published: 0, draft: 0 });
     const [loading, setLoading] = useState(true);
@@ -236,7 +239,7 @@ function Blog() {
                 eyebrow="Marketing"
                 title="Blog"
                 description="Write and publish articles for the marketing site. Publishing or deleting a post triggers a site rebuild so SEO stays prerendered."
-                actions={<Button icon={Plus} onClick={openNew}>New post</Button>}
+                actions={canWrite ? <Button icon={Plus} onClick={openNew}>New post</Button> : null}
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
@@ -297,7 +300,7 @@ function Blog() {
                     description={q || status
                         ? 'Try a different search term or status filter.'
                         : "Create your first article. It won't appear on the live site until you publish it."}
-                    action={!q && !status ? <Button icon={Plus} onClick={openNew}>New post</Button> : undefined}
+                    action={canWrite && !q && !status ? <Button icon={Plus} onClick={openNew}>New post</Button> : undefined}
                 />
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -356,20 +359,20 @@ function Blog() {
                                                 <ExternalLink size={15} />
                                             </a>
                                         )}
-                                        <button
+                                        {canWrite && <button
                                             onClick={() => openEdit(p.id)}
                                             className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-[#FE8301] hover:bg-orange-50 transition"
                                             title="Edit"
                                         >
                                             <Pencil size={15} />
-                                        </button>
-                                        <button
+                                        </button>}
+                                        {canWrite && <button
                                             onClick={() => setDeleteTarget(p)}
                                             className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition"
                                             title="Delete"
                                         >
                                             <Trash2 size={15} />
-                                        </button>
+                                        </button>}
                                     </div>
                                 </div>
                             </div>

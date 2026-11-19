@@ -1,3 +1,5 @@
+import { portalHomePath } from '../Pages/SuperAdmin/portalAccess';
+
 // Default landing path for non-customer roles. Used by entry-point pages
 // (PlatformHome at `/`, customer Login, staff Login) to bounce a still-authenticated
 // staff / chef / admin / superadmin away from customer-facing UI to their
@@ -15,6 +17,8 @@ export function staffHomePath(user) {
             return '/admin/dashboard';
         case 'superadmin':
             return '/superadmin/dashboard';
+        case 'platformstaff':
+            return portalHomePath(user);
         default:
             return null;
     }

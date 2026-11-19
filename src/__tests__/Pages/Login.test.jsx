@@ -11,7 +11,7 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 const auth = { login: vi.fn(), isLoggedIn: false, user: null }
 vi.mock('@/Context/AuthContext', () => ({
   useAuth: () => auth,
-  USER_ROLES: { WAITER: 'waiter', CAPTAIN: 'captain', CUSTOMER: 'customer', ADMIN: 'admin', MANAGER: 'manager', CHEF: 'chef', SUPERADMIN: 'superadmin' },
+  USER_ROLES: { WAITER: 'waiter', CAPTAIN: 'captain', CUSTOMER: 'customer', ADMIN: 'admin', MANAGER: 'manager', CHEF: 'chef', SUPERADMIN: 'superadmin', PLATFORMSTAFF: 'platformstaff' },
 }))
 vi.mock('@/utils/tenant', () => ({ setActiveTenant: vi.fn(), clearActiveTenant: vi.fn() }))
 vi.mock('@/assets/BestoDineMark', () => ({ default: () => null }))
@@ -22,7 +22,7 @@ import Login from '@/Pages/Login'
 
 let landed = null
 function Probe({ name }) { landed = { name, state: useLocation().state }; return <div>{name}</div> }
-const DESTS = ['/superadmin/dashboard', '/waiter/home', '/chef/dashboard', '/admin/dashboard', '/force-change-password', '/']
+const DESTS = ['/superadmin/dashboard', '/waiter/home', '/chef/dashboard', '/admin/dashboard', '/force-change-password', '/', '/superadmin/leads', '/superadmin/marketing']
 
 function renderLogin(path = '/staff-login') {
   render(
@@ -78,6 +78,16 @@ describe('Staff Login — results', () => {
     expect(await screen.findByText(dest, {}, { timeout: 4000 })).toBeInTheDocument()
     expect(auth.login).toHaveBeenCalledWith('owner@cafe.in', 'Secret#123', 'staff')
     expect(clearActiveTenant).toHaveBeenCalled()
+  })
+
+  test.each([
+    [{ signupLeads: 'manage' }, '/superadmin/leads'],
+    [{ blog: 'view', marketing: 'manage' }, '/superadmin/marketing'],
+  ])('platformstaff with %o lands on their first allowed page', async (platformAccess, dest) => {
+    auth.login.mockResolvedValue({ success: true, role: 'platformstaff', user: { role: 'platformstaff', platformAccess } })
+    const user = renderLogin()
+    await submit(user)
+    expect(await screen.findByText(dest, {}, { timeout: 4000 })).toBeInTheDocument()
   })
 
   test('mustChangePassword detours to /force-change-password with the session audience', async () => {

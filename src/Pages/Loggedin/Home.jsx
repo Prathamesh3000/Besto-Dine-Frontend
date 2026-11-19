@@ -1439,7 +1439,8 @@ function Home() {
                       // routeCategoryId mode entirely.
                       navigate('/customer/home');
                     } else if (routeCategoryId) {
-                      navigate(`/customer/item/${category._id}`);
+                      // Staff stay in the waiter app: /customer/* makes the API layer read the tab as a customer (no staff token, 401, sign-out).
+                      navigate(location.pathname.startsWith('/waiter') ? `/waiter/category/${category._id}` : `/customer/item/${category._id}`);
                     } else {
                       setActiveCategoryId(category._id);
                     }

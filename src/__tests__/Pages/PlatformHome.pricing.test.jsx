@@ -68,9 +68,15 @@ describe('public pricing', () => {
 
   test('trial CTA, GST note, and no competitor names', () => {
     renderHome(PLANS)
+    // Plan cards with a trial go to the one-form trial funnel (no plan in the URL — the server picks it).
     const links = screen.getAllByRole('link', { name: /start free trial/i })
     expect(links.length).toBeGreaterThanOrEqual(2)
-    expect(links[0].getAttribute('href')).toContain('/register-restaurant?plan=')
+    for (const l of links) expect(l.getAttribute('href')).toBe('/start-trial')
+    expect(screen.getByTestId('pricing-cta-gold')).toHaveAttribute('data-cta-kind', 'trial')
+    // Hero + final "Start 14-day free trial" buttons also go to /start-trial; demo stays.
+    for (const l of screen.getAllByRole('link', { name: /start 14-day free trial/i })) expect(l.getAttribute('href')).toBe('/start-trial')
+    for (const l of screen.getAllByRole('link', { name: /request a demo/i })) expect(l.getAttribute('href')).toBe('/request-demo')
+    expect(screen.queryAllByRole('link').some(l => l.getAttribute('href')?.startsWith('/register-restaurant'))).toBe(false)
     expect(screen.getByText(/14-day free trial on every plan/i)).toBeInTheDocument()
     expect(screen.getByText(/Prices exclude 18% GST/)).toBeInTheDocument()
     expect(screen.getByText(/Cancel monthly plans any time/)).toBeInTheDocument()
@@ -83,6 +89,52 @@ describe('public pricing', () => {
     expect(screen.queryByTestId('pricing-cycle-annual')).toBeNull()
     expect(screen.getByText('₹999')).toBeInTheDocument()
     expect(screen.getByText('/ month')).toBeInTheDocument()
+    // No trial on this plan: paid "Get started" → register with the plan slug; no "every plan" trial line.
+    expect(screen.getByTestId('pricing-cta-legacy')).toHaveAttribute('href', '/register-restaurant?plan=legacy')
+    expect(screen.getByTestId('pricing-cta-legacy')).toHaveTextContent(/get started/i)
+    expect(screen.queryByText(/free trial on every plan/i)).toBeNull()
+  })
+
+  test('CTA per tier: enterprise → Contact Sales (/contact), trial → /start-trial, free → register; badge + highlights render', () => {
+    const free = { ...plan('Free', 'free', 0, null, null), tier: 0, trial: { enabled: false, durationDays: 0 }, trialDays: 0, badge: '', highlights: ['1 branch', 'Up to 20 menu items'] }
+    const gold = { ...plan('Gold', 'gold', 1799, 17999, 28799), tier: 20, trial: { enabled: true, durationDays: 30 }, trialDays: 30, highlight: true, badge: 'Best value' }
+    const ent = { ...plan('Enterprise', 'enterprise', 0, null, null), tier: 30, trial: { enabled: false, durationDays: 0 }, trialDays: 0, highlights: ['Dedicated support'] }
+    renderHome([free, gold, ent])
+    expect(screen.getByTestId('pricing-cta-free')).toHaveAttribute('href', '/register-restaurant?plan=free')
+    expect(screen.getByTestId('pricing-cta-free')).toHaveAttribute('data-cta-kind', 'free')
+    expect(screen.getByTestId('pricing-cta-gold')).toHaveAttribute('href', '/start-trial')
+    expect(screen.getByTestId('pricing-cta-gold')).toHaveTextContent(/start free trial/i)
+    expect(screen.getByTestId('pricing-cta-enterprise')).toHaveAttribute('href', '/contact')
+    expect(screen.getByTestId('pricing-cta-enterprise')).toHaveTextContent(/contact sales/i)
+    // Badge text wins over the "Most popular" ribbon; highlight-only plans still get the ribbon.
+    expect(screen.getByTestId('pricing-badge-gold')).toHaveTextContent('Best value')
+    expect(screen.queryByTestId('pricing-badge-free')).toBeNull()
+    // Super Admin-authored highlights replace the derived ones; trial pill from trial.durationDays.
+    expect(screen.getByTestId('pricing-highlights-free')).toHaveTextContent('Up to 20 menu items')
+    expect(screen.getByText('30-day free trial')).toBeInTheDocument()
+    // Mixed line-up: not "every plan".
+    expect(screen.queryByText(/free trial on every plan/i)).toBeNull()
+    expect(screen.getByText(/free trial available on selected plans/i)).toBeInTheDocument()
+  })
+
+  test('a price-0 Enterprise plan reads "Custom" (never "Free"); a price-0 free plan still reads "Free"', () => {
+    // Named "Starter" so the plan title doesn't also match the text "Free".
+    const free = { ...plan('Starter', 'free', 0, null, null), tier: 0, trial: { enabled: false, durationDays: 0 }, trialDays: 0 }
+    const ent = { ...plan('Enterprise', 'enterprise', 0, null, null), tier: 30, trial: { enabled: false, durationDays: 0 }, trialDays: 0 }
+    renderHome([free, ent])
+    const entCard = screen.getByTestId('pricing-cta-enterprise').closest('[data-reveal]')
+    expect(within(entCard).getByText('Custom')).toBeInTheDocument()
+    expect(within(entCard).queryByText('Free')).toBeNull()
+    // No "+ GST" note under a price that isn't a price.
+    expect(screen.queryByTestId('pricing-note-enterprise')).toBeNull()
+    const freeCard = screen.getByTestId('pricing-cta-free').closest('[data-reveal]')
+    expect(within(freeCard).getByText('Free')).toBeInTheDocument()
+    expect(within(freeCard).queryByText('Custom')).toBeNull()
+  })
+
+  test('"Most popular" ribbon still shows when a plan has highlight but no badge', () => {
+    renderHome([{ ...plan('Gold', 'gold', 1799, 17999, 28799), highlight: true }])
+    expect(screen.getByTestId('pricing-badge-gold')).toHaveTextContent('Most popular')
   })
 })
 

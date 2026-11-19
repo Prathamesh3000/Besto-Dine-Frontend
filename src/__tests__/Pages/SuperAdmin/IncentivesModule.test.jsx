@@ -30,7 +30,8 @@ describe('incentives feature key', () => {
 describe('PlanFormModal incentives toggle', () => {
   test('renders the toggle and sends features.incentives in the payload', async () => {
     api.put.mockResolvedValue({ data: { success: true, data: { _id: 'p1' } } })
-    const plan = { _id: 'p1', name: 'Silver', slug: 'silver', price: 0, features: { incentives: false } }
+    // tier is required on the form since 2026-11-11 (plan tiers)
+    const plan = { _id: 'p1', name: 'Silver', slug: 'silver', price: 0, tier: 10, features: { incentives: false } }
     render(<PlanFormModal plan={plan} onClose={() => {}} onSaved={() => {}} />)
     const toggle = screen.getByRole('button', { name: /Staff Incentives/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')

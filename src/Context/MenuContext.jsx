@@ -184,7 +184,11 @@ export function MenuProvider({ children }) {
     // context directly (not useAuth) so the provider still mounts without one.
     const authCtx = useContext(AuthContext);
     const mustChangePassword = authCtx?.user?.mustChangePassword === true;
-    const perSectionEnabled = hasTenantContext && !mustChangePassword && (!isAnonymousCustomer || bootstrapFailed);
+    // Platform-portal users (super admin, delegated platform staff) never show a menu and may
+    // belong to no restaurant: a menu fetch for them is a TENANT_REQUIRED 400.
+    const role = authCtx?.user?.role;
+    const isPlatformUser = role === 'superadmin' || role === 'platformstaff';
+    const perSectionEnabled = hasTenantContext && !mustChangePassword && !isPlatformUser && (!isAnonymousCustomer || bootstrapFailed);
 
     // ══════════════════════════════════════════════════════════════════════════
     //  MENU ITEMS — default fetch via TanStack Query

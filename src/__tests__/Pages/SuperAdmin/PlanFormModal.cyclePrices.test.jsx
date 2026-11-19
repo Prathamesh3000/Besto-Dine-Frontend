@@ -17,7 +17,7 @@ import PlanFormModal from '@/Pages/SuperAdmin/components/PlanFormModal'
 
 const goldPlan = {
   _id: 'p1', name: 'Gold', slug: 'gold', price: 1799, prices: { monthly: 1799, annual: 17999, biennial: 28799 },
-  billingCycle: 'monthly', trialDays: 14, sortOrder: 2, isPublic: true, limits: {}, features: {},
+  billingCycle: 'monthly', tier: 20, trialDays: 14, sortOrder: 2, isPublic: true, limits: {}, features: {},
 }
 
 const submit = () => userEvent.click(screen.getByRole('button', { name: /save changes|create plan/i }))
@@ -79,6 +79,7 @@ describe('PlanFormModal cycle prices', () => {
     render(<PlanFormModal onClose={() => {}} onSaved={() => {}} />)
     type('plan-name', 'Starter')
     type('plan-price', '499')
+    type('plan-tier', '10') // tier rank is required on create
     await submit()
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1].prices).toEqual({ monthly: 499, annual: null, biennial: null })

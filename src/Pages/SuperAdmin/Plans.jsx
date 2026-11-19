@@ -19,6 +19,7 @@ import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import PlanFormModal from './components/PlanFormModal';
 import { formatINR } from '../../utils/billingCycles';
+import { trialDaysOf, isEnterprisePlan } from '../../utils/planCta';
 import {
     PageHeader,
     Card,
@@ -254,6 +255,10 @@ const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPus
         .filter(([k, v]) => v === true && FEATURE_LABELS[k]);
     const visibleFeatures = enabledFeatures.slice(0, 5);
     const hiddenCount = Math.max(0, enabledFeatures.length - visibleFeatures.length);
+    // Trial from the structured `trial` object (falls back to legacy trialDays).
+    const trialDays = trialDaysOf(p);
+    const hasTier = p.tier !== null && p.tier !== undefined && p.tier !== '' && Number.isFinite(Number(p.tier));
+    const badgeText = typeof p.badge === 'string' ? p.badge.trim() : '';
 
     return (
         <article
@@ -272,9 +277,15 @@ const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPus
                 <div className="flex items-center gap-2 flex-wrap pr-20">
                     <h3 className="text-lg font-bold text-gray-900">{p.name}</h3>
                     {p.isPublic === false && <Badge tone="indigo" dot>Private</Badge>}
+                    {badgeText && <Badge tone="brand">{badgeText}</Badge>}
                 </div>
-                <div className="text-xs text-gray-500 capitalize mt-0.5">
+                <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-gray-600">{p.slug}</span>
+                    {hasTier && (
+                        <span className="tabular-nums" data-testid={`plan-tier-${p.slug}`}>
+                            · Tier {Number(p.tier)}{isEnterprisePlan(p) ? ' (Contact Sales)' : ''}
+                        </span>
+                    )}
                 </div>
             </div>
 
@@ -299,10 +310,10 @@ const PlanCard = ({ plan: p, isFullSuperAdmin, onEdit, onToggle, onDelete, onPus
                     <span className="text-gray-400">excl. GST</span>
                 </div>
             )}
-            {p.trialDays > 0 ? (
-                <div className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-semibold mb-4">
+            {trialDays > 0 ? (
+                <div className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-semibold mb-4" data-testid={`plan-trial-${p.slug}`}>
                     <Sparkles size={11} />
-                    {p.trialDays}-day free trial
+                    {trialDays}-day free trial
                 </div>
             ) : (
                 <div className="text-[11px] text-gray-400 font-semibold mb-4">No trial</div>

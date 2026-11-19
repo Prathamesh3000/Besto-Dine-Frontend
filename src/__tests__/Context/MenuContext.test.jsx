@@ -118,6 +118,19 @@ describe('fetch gating', () => {
     expect(calledUrls()).toEqual(expect.arrayContaining(['/menu?limit=1000', '/combos', '/categories?status=active']))
   })
 
+  test.each(['platformstaff', 'superadmin'])('platform-portal users (%s) never fetch menus (no restaurant, the API 400s)', async (role) => {
+    staffLogin()
+    setActiveTenant({ slug: 'spice', _id: 'R1' })       // even with a stale tenant in the browser
+    const auth = { user: { _id: 'u1', role, mustChangePassword: false } }
+    renderHook(() => useMenu(), {
+      wrapper: ({ children }) => (
+        <AuthContext.Provider value={auth}><QueryClientProvider client={client}><MenuProvider>{children}</MenuProvider></QueryClientProvider></AuthContext.Provider>
+      ),
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(api.get).not.toHaveBeenCalled()
+  })
+
   test('unsuccessful envelopes yield empty lists', async () => {
     staffLogin()
     setActiveTenant({ slug: 's' })

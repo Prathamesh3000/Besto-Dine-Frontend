@@ -138,10 +138,17 @@ function tokenExpiresAtMs(token) {
 // login — keeping any guest QR scan session / cart — shows "Your session
 // expired, please log in again" and routes to the restaurant page.
 export const CUSTOMER_SESSION_EXPIRED_EVENT = 'bd:customer-session-expired';
-// Fired when any call answers 403 TRIAL_EXPIRED (the owner's free trial ended
-// unpaid). AuthContext marks the session locked; ProtectedRoute then shows the
-// full-page lock screen instead of a stream of error toasts.
-export const TRIAL_EXPIRED_EVENT = 'bd:trial-expired';
+// Free-trial lifecycle (see Backend/utils/trialLock.js). Fired when any call
+// answers 403 with one of the subscription codes; detail = { code, lockAt,
+// trialEndDate, message }. AuthContext updates the cached tenant; the
+// UpgradeModal (read-only) / ProtectedRoute lock screen (blocked) explain it
+// instead of a stream of error toasts.
+//   SUBSCRIPTION_READ_ONLY  trial ended, writes refused until lockAt
+//   SUBSCRIPTION_BLOCKED    past lockAt, everything but billing/export refused
+export const SUBSCRIPTION_READ_ONLY_EVENT = 'bd:subscription-read-only';
+export const SUBSCRIPTION_BLOCKED_EVENT = 'bd:subscription-blocked';
+// Legacy alias (the server code TRIAL_EXPIRED no longer exists).
+export const TRIAL_EXPIRED_EVENT = SUBSCRIPTION_BLOCKED_EVENT;
 let _customerExpiryAnnounced = false;
 function announceCustomerSessionExpired(code) {
     if (_customerExpiryAnnounced) return;
@@ -312,7 +319,9 @@ function isPlatformSessionInvalid(cfg) {
     const url = String(cfg?.url || '').replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '');
     if (!url.startsWith('/superadmin')) return false;
     const u = getStoredUserObject('platform');
-    return u?.role !== 'superadmin';
+    // platformstaff shares the 'platform' audience; their own module-level
+    // 403s (PLATFORM_ACCESS_DENIED) are ordinary answers, not a bad session.
+    return u?.role !== 'superadmin' && u?.role !== 'platformstaff';
 }
 
 // ─── Toast deduplication ──────────────────────────────────────────────────────
@@ -547,7 +556,10 @@ api.interceptors.response.use(
         // (that page calls publicAPI.listRestaurants, which is exempt
         // from tenant gating — so a 400 there is a different bug).
         if (status === 400 && error.response?.data?.code === 'TENANT_REQUIRED') {
-            if (!onTenantRecoveryPage()) {
+            // The platform portal has no restaurant by design (super admin, platform staff):
+            // there is nothing to recover, and bouncing to the branch picker would sign a
+            // valid portal session out of view.
+            if (!onTenantRecoveryPage() && !window.location.pathname.startsWith('/superadmin')) {
                 // Dine-in sessions recover by re-scanning the table (branch
                 // comes from the QR); only takeaway/no-table sessions get
                 // bounced to the branch picker. See tenantRecoveryHref.
@@ -636,20 +648,24 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
-        // Free trial ended unpaid: lock the owner into the billing screen.
+        // Free trial ended unpaid: read-only grace window or full lock.
         // /auth/* (login) reports it inline on the login page instead.
-        if (status === 403 && error.response?.data?.code === 'TRIAL_EXPIRED') {
+        const subCode = status === 403 ? error.response?.data?.code : null;
+        if (subCode === 'SUBSCRIPTION_READ_ONLY' || subCode === 'SUBSCRIPTION_BLOCKED') {
             if (!/\/auth\//.test(String(error.config?.url || ''))) {
+                const evt = subCode === 'SUBSCRIPTION_BLOCKED' ? SUBSCRIPTION_BLOCKED_EVENT : SUBSCRIPTION_READ_ONLY_EVENT;
                 try {
-                    window.dispatchEvent(new CustomEvent(TRIAL_EXPIRED_EVENT, {
+                    window.dispatchEvent(new CustomEvent(evt, {
                         detail: {
+                            code: subCode,
+                            lockAt: error.response.data.lockAt || null,
                             trialEndDate: error.response.data.trialEndDate || null,
                             message: error.response.data.message || '',
                         },
                     }));
                 } catch { /* ignore */ }
             }
-            // No toast — the lock screen explains it.
+            // No toast — the upgrade modal / lock screen explains it.
             return Promise.reject(error);
         }
 
@@ -736,7 +752,7 @@ api.interceptors.response.use(
         // platform session isn't a Super Admin (or is gone). Repeating
         // "Access denied. Super Admin only." toasts helps nobody — send
         // them to sign in as Super Admin, once.
-        if (status === 403 && isPlatformSessionInvalid(error.config)) {
+        if (status === 403 && error.response?.data?.code !== 'PLATFORM_ACCESS_DENIED' && isPlatformSessionInvalid(error.config)) {
             if (!_platformBounceScheduled) {
                 _platformBounceScheduled = true;
                 const notice = 'Please sign in as Super Admin';
@@ -1160,6 +1176,15 @@ export const publicAPI = {
     // Errors (400 field/TERMS_REQUIRED/SLUG_*, 409 SLUG_TAKEN/EMAIL_IN_USE,
     // 429) are rendered inline by the form, hence _silent.
     registerRestaurant: (data) => api.post('/public/register-restaurant', data, { _silent: true, _skipBranchHeader: true }),
+    // Free-trial signup (/start-trial) -> 201 login body + data.trialStarted, or
+    // 202 in approval mode. Client sends NO plan/price/length: the server
+    // decides. Errors 400 field, 409 EMAIL_IN_USE/PHONE_IN_USE, 503
+    // TRIAL_UNAVAILABLE, 429 are rendered inline, hence _silent.
+    startTrial: (data) => api.post('/public/start-trial', data, { _silent: true, _skipBranchHeader: true }),
+    // Paid-plan signup, step 1: Razorpay order for { planId, billingCycle } ->
+    // { orderId, amount (paise, GST-inclusive), currency, keyId, plan, billingCycle,
+    //   baseAmount, gstAmount, gstRate }. 503 BILLING_NOT_CONFIGURED.
+    registerOrder: (data) => api.post('/public/register-order', data, { _silent: true, _skipBranchHeader: true }),
     // Request-a-demo lead (Super Admin → Leads).
     submitLead: (data) => api.post('/public/lead', data, { _silent: true }),
 };

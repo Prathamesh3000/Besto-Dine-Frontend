@@ -1,0 +1,99 @@
+/*
+ * "One evening" landing page (route "/") — light, editorial.
+ * Headings: Fraunces (loaded here). Body/UI: Manrope (the app's --font-sans).
+ * Also carries the base rules Lenis needs while smooth scroll is active.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap');
+
+.font-display {
+    font-family: 'Fraunces', Georgia, serif;
+}
+
+/* Clock numerals: Fraunces, fixed-width digits so the flip never shifts the colon. */
+.bd-clock {
+    font-family: 'Fraunces', Georgia, serif;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+
+/* Lenis (only present while <html> carries .lenis, i.e. on the landing page). */
+html.lenis,
+html.lenis body {
+    height: auto;
+}
+.lenis.lenis-smooth {
+    scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+    overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+    overflow: clip;
+}
+.lenis.lenis-smooth iframe {
+    pointer-events: none;
+}
+
+/* "What you stopped doing": an orange strike drawn left→right.
+   --strike defaults to 1 (struck) so jsdom / reduced motion / no-ScrollTrigger
+   all show the finished state; GSAP drives it 0→1 on scroll. */
+.bd-strike {
+    position: relative;
+    display: inline-block;
+    --strike: 1;
+}
+.bd-strike::after {
+    content: '';
+    position: absolute;
+    left: -0.1em;
+    right: -0.1em;
+    top: 55%;
+    height: 0.09em;
+    border-radius: 999px;
+    background: #FE8301;
+    transform: scaleX(var(--strike));
+    transform-origin: left center;
+    pointer-events: none;
+}
+
+/* Header clock (home only): the digits fade in over 200 ms whenever the time
+   changes (the span is re-keyed). No animation under reduced motion. */
+@keyframes bd-clock-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+}
+.bd-header-clock-digits {
+    display: inline-block;
+    animation: bd-clock-in 200ms ease-out;
+}
+
+/* Pricing receipt: warm paper, dashed rows, torn bottom edge. Flat; it sits
+   sticky in the left column of the pricing section with a drop shadow. */
+.bd-receipt {
+    background: #FFF8F0;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), 97.5% 100%, 95% calc(100% - 10px), 92.5% 100%, 90% calc(100% - 10px), 87.5% 100%, 85% calc(100% - 10px), 82.5% 100%, 80% calc(100% - 10px), 77.5% 100%, 75% calc(100% - 10px), 72.5% 100%, 70% calc(100% - 10px), 67.5% 100%, 65% calc(100% - 10px), 62.5% 100%, 60% calc(100% - 10px), 57.5% 100%, 55% calc(100% - 10px), 52.5% 100%, 50% calc(100% - 10px), 47.5% 100%, 45% calc(100% - 10px), 42.5% 100%, 40% calc(100% - 10px), 37.5% 100%, 35% calc(100% - 10px), 32.5% 100%, 30% calc(100% - 10px), 27.5% 100%, 25% calc(100% - 10px), 22.5% 100%, 20% calc(100% - 10px), 17.5% 100%, 15% calc(100% - 10px), 12.5% 100%, 10% calc(100% - 10px), 7.5% 100%, 5% calc(100% - 10px), 2.5% 100%, 0 calc(100% - 10px));
+    transform: none;
+}
+
+/* The hour ruler's line (lg+): drawn by ScrollTrigger scrub; full by default. */
+.bd-timeline-line {
+    transform: scaleY(1);
+    transform-origin: top center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bd-strike {
+        --strike: 1;
+    }
+    .bd-timeline-line {
+        transform: scaleY(1) !important;
+    }
+    .bd-receipt {
+        transform: none;
+    }
+    .bd-header-clock-digits {
+        animation: none;
+    }
+}

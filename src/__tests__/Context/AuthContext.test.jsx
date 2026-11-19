@@ -3,7 +3,7 @@ import React from 'react'
 import { render, screen, act, waitFor, renderHook } from '@testing-library/react'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
-vi.mock('@/utils/api', () => ({ default: api, CUSTOMER_SESSION_EXPIRED_EVENT: 'bd:customer-session-expired', TRIAL_EXPIRED_EVENT: 'bd:trial-expired' }))
+vi.mock('@/utils/api', () => ({ default: api, CUSTOMER_SESSION_EXPIRED_EVENT: 'bd:customer-session-expired', SUBSCRIPTION_READ_ONLY_EVENT: 'bd:subscription-read-only', SUBSCRIPTION_BLOCKED_EVENT: 'bd:subscription-blocked', TRIAL_EXPIRED_EVENT: 'bd:subscription-blocked' }))
 const sock = vi.hoisted(() => ({ disconnectSocket: vi.fn(), reconnectWithAuth: vi.fn() }))
 vi.mock('@/utils/socket', () => sock)
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
@@ -129,6 +129,7 @@ describe('login / register / google', () => {
     ['admin on /staff-login', '/staff-login', { _id: 'a1', role: 'admin' }, 'staff', 'staff_token', 'staff_user'],
     ['chef on /staff-login', '/staff-login', { _id: 'k1', role: 'chef' }, 'staff', 'staff_token', 'staff_user'],
     ['superadmin on /staff-login', '/staff-login', { _id: 's1', role: 'superadmin' }, 'platform', 'platform_token', 'platform_user'],
+    ['platformstaff on /staff-login', '/staff-login', { _id: 'p1', role: 'platformstaff', platformAccess: { leads: 'view' } }, 'platform', 'platform_token', 'platform_user'],
   ])('%s stores under its audience keys', async (_l, path, user, aud, tokenKey, userKey) => {
     go(path)
     await mount()
@@ -500,6 +501,48 @@ describe('role / permission / feature helpers', () => {
     await mount()
     expect(auth.hasFeature('kds')).toBe(true)
     expect(auth).toMatchObject({ isSuperAdmin: true, isFullSuperAdmin: true, superadminLevel: 'full' })
+  })
+
+  describe('platform module access helpers', () => {
+    const asPortal = async (user) => {
+      go('/superadmin/x')
+      localStorage.setItem('platform_token', 'P')
+      localStorage.setItem('platform_user', JSON.stringify({ _id: 'u', ...user }))
+      await mount()
+    }
+
+    test('full super admin: view + manage everything', async () => {
+      await asPortal({ role: 'superadmin', superadminLevel: 'full' })
+      expect(auth.canViewModule('plans')).toBe(true)
+      expect(auth.canManageModule('plans')).toBe(true)
+      expect(auth).toMatchObject({ isPlatformStaff: false, platformAccess: {} })
+    })
+
+    test('support super admin: view everything, manage nothing', async () => {
+      await asPortal({ role: 'superadmin', superadminLevel: 'support' })
+      expect(auth.canViewModule('blog')).toBe(true)
+      expect(auth.canManageModule('blog')).toBe(false)
+    })
+
+    test('platformstaff: from the map; not a super admin', async () => {
+      await asPortal({ role: 'platformstaff', superadminLevel: '', platformAccess: { leads: 'view', signupLeads: 'manage' } })
+      expect(auth).toMatchObject({ isPlatformStaff: true, isSuperAdmin: false, isFullSuperAdmin: false, platformAccess: { leads: 'view', signupLeads: 'manage' } })
+      expect(auth.canViewModule('leads')).toBe(true)
+      expect(auth.canManageModule('leads')).toBe(false)
+      expect(auth.canManageModule('signupLeads')).toBe(true)
+      expect(auth.canViewModule('signupLeads')).toBe(true)
+      expect(auth.canViewModule('plans')).toBe(false)
+      expect(auth.hasFeature('kds')).toBe(true) // above the tenant boundary like a super admin
+    })
+
+    test('customer: nothing', async () => {
+      go('/customer/home')
+      localStorage.setItem('token', 't')
+      localStorage.setItem('user', JSON.stringify({ _id: 'c1', role: 'customer' }))
+      await mount()
+      expect(auth.canViewModule('leads')).toBe(false)
+      expect(auth.canManageModule('leads')).toBe(false)
+    })
   })
 
   test('getLimit returns numeric plan limits or 0', async () => {
