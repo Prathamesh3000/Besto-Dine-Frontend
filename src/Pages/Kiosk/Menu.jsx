@@ -7,7 +7,7 @@ import { useMenu } from '../../Context/MenuContext';
 import { KIOSK_KEYS, readCart, writeCart, addKioskLine, kioskItemCount } from './kioskState';
 import { imageForCategory, imageForItem, KIOSK_GENERIC_ITEM_IMG } from './kioskImages';
 import { useKioskIdleReset } from './useKioskIdleReset';
-import { resolveUnitPrice } from '../../utils/pricing';
+import { resolveUnitPrice, resolveFromPrice } from '../../utils/pricing';
 
 // Active menu items for the picked tenant's active category. The backend
 // already excludes archived items for guests, but we defend here too.
@@ -268,7 +268,8 @@ export default function Menu() {
                                 const qty       = getProductTypeQty(item._id);
                                 const price     = resolveUnitPrice(item);
                                 const basePrice = item.basePrice ?? price;
-                                const showStrike = basePrice > price;
+                                const fromPrice = resolveFromPrice(item);
+                                const showStrike = fromPrice == null && basePrice > price;
                                 const img = imageForItem(item);
                                 const isVeg = item.vegType === 'veg';
                                 return (
@@ -314,7 +315,7 @@ export default function Menu() {
                                                     <span className='text-[#645E66]'>/</span>
                                                 </>
                                             )}
-                                            <span className="text-[#FE8301]">₹{price}</span>
+                                            <span className="text-[#FE8301]">{fromPrice != null ? `from ₹${fromPrice}` : `₹${price}`}</span>
                                         </div>
                                         <div className="w-full mt-auto">
                                             <button

@@ -16,7 +16,7 @@ vi.mock('@/utils/customerOrderIds', () => ({
   getCustomerOrderSession: () => ({}),
   readRecoveryOrderIds: () => [],
 }))
-vi.mock('@/utils/tenant', () => ({ activeRestaurantPath: () => '/r/home' }))
+vi.mock('@/utils/tenant', () => ({ activeRestaurantPath: () => '/r/home', getActiveTenantSlug: () => 'staging-cafe' }))
 
 import CustomerLayout from '@/Components/Loggedin/CustomerLayout'
 
@@ -96,5 +96,18 @@ describe('CustomerLayout — staff freed the table', () => {
     expect(localStorage.getItem('scanToken')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Leave now' }))
     expect(auth.logout).toHaveBeenCalled()
+  })
+})
+
+describe('CustomerLayout — availability poll (QR scan 400)', () => {
+  test('does not call /tables/:id/availability while on the /scan page (tenant is being re-established)', () => {
+    seat()
+    window.history.pushState({}, '', '/scan/tb-abcdef123456')
+    renderIt()
+    expect(api.get.mock.calls.filter((c) => String(c[0]).includes('/availability'))).toEqual([])
+    window.history.pushState({}, '', '/')
+    api.get.mockClear()
+    renderIt()
+    expect(api.get.mock.calls.filter((c) => String(c[0]).includes('/availability')).length).toBeGreaterThan(0)
   })
 })

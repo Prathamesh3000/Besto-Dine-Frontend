@@ -1,25 +1,33 @@
-// Full-page lock screen for an owner whose free trial ended unpaid. All data
-// is kept; the only routes still open are billing (/admin/subscription) and
-// the data export. Reached via ProtectedRoute (trial-locked owner) or by
-// visiting /trial-expired directly. See utils/trialLock.js.
+// Full-page lock screen for a tenant whose free trial ended unpaid and whose
+// read-only grace window is over (trialState 'locked'). All data is kept; the
+// only routes still open to the owner are billing (/admin/subscription) and
+// the data export. Other staff can only ask the owner to upgrade, or log out.
+// Reached via ProtectedRoute (locked user) or by visiting /trial-expired
+// directly. See utils/trialLock.js.
 import React, { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { toast } from 'react-hot-toast'
 import { ShieldCheck, Download, LogOut, Loader2 } from 'lucide-react'
 import api from '../../utils/api'
 import { useAuth } from '../../Context/AuthContext'
-import { isTrialLocked } from '../../utils/trialLock'
+import { isTrialLocked, isTrialOwner, lockAtOf } from '../../utils/trialLock'
+
+const fmt = (d) => {
+  if (!d) return ''
+  const date = d instanceof Date ? d : new Date(d)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString()
+}
 
 export default function TrialExpired() {
   const { user, logout } = useAuth()
   const [exporting, setExporting] = useState(false)
 
-  // Not locked (e.g. just paid, or bookmarked URL) - nothing to show here.
+  // Not locked (e.g. just paid, trial extended, or bookmarked URL).
   if (user && !isTrialLocked(user)) return <Navigate to="/admin/dashboard" replace />
 
-  const endDate = user?.tenant?.trialEndDate
-    ? new Date(user.tenant.trialEndDate).toLocaleDateString()
-    : ''
+  const owner = isTrialOwner(user)
+  const endDate = fmt(user?.tenant?.trialEndDate)
+  const lockDate = fmt(lockAtOf(user?.tenant))
 
   const handleExport = async () => {
     if (exporting) return
@@ -48,34 +56,45 @@ export default function TrialExpired() {
       <div
         role="alert"
         data-testid="trial-expired-screen"
+        data-variant={owner ? 'owner' : 'staff'}
         className="w-full max-w-md rounded-3xl bg-white border border-[#EAECF0] shadow-[0_12px_40px_rgba(16,24,40,0.08)] p-6 sm:p-8 text-center"
       >
         <div className="mx-auto w-14 h-14 rounded-2xl bg-[#FFF3E6] text-[#FE8301] flex items-center justify-center">
           <ShieldCheck size={28} aria-hidden="true" />
         </div>
         <h1 className="mt-5 text-[24px] font-extrabold tracking-tight text-[#101828]">
-          Your free trial has ended
+          Upgrade to continue
         </h1>
         <p className="mt-2 text-[15px] text-[#475467] leading-relaxed">
-          All your data is safe and kept{endDate ? ` (trial ended ${endDate})` : ''}. Choose a plan to pick up
-          exactly where you left off - your menu, tables, orders and staff are waiting.
+          The free trial{endDate ? ` ended on ${endDate}` : ' has ended'}
+          {lockDate ? ` and the account was locked on ${lockDate}` : ''}. All your data is safe and kept —
+          your menu, tables, orders and staff are waiting.
         </p>
+        {!owner && (
+          <p className="mt-4 rounded-xl bg-[#FFF4E8] px-4 py-3 text-[14px] font-semibold text-[#7A3E00]">
+            Ask your restaurant owner to upgrade
+          </p>
+        )}
         <div className="mt-7 flex flex-col gap-3">
-          <Link
-            to="/admin/subscription"
-            className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] transition-colors"
-          >
-            Choose a plan
-          </Link>
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={exporting}
-            className="inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[15px] font-bold text-[#1A181B] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors disabled:opacity-60"
-          >
-            {exporting ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}
-            Download my data
-          </button>
+          {owner && (
+            <>
+              <Link
+                to="/admin/subscription"
+                className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] transition-colors"
+              >
+                Choose a plan
+              </Link>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exporting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[15px] font-bold text-[#1A181B] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors disabled:opacity-60"
+              >
+                {exporting ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}
+                Download my data
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={logout}

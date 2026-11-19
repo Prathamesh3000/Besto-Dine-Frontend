@@ -179,7 +179,8 @@ export const NotificationProvider = ({ children }) => {
             if (res.data.success) return res.data.notifications;
             return [];
         },
-        enabled: !!user && hasTenantSlug,
+        // Held on /force-change-password → the API 403s everything else.
+        enabled: !!user && hasTenantSlug && user.mustChangePassword !== true,
         refetchInterval: (query) => {
             // Pause polling once the session is invalid — no point hammering
             // /notifications with an expired token until the user logs in again.
@@ -608,6 +609,16 @@ export const NotificationProvider = ({ children }) => {
         const id = String(r._id);
         const prevStatus = guestRequestStatusRef.current.get(id);
         guestRequestStatusRef.current.set(id, r.status);
+        // A new request that is still 'pending' means the table has no waiter
+        // assigned (the server marks it 'accepted' right away when one is), so a
+        // captain picks it up. Tell the customer instead of leaving them waiting
+        // in silence. Only for a fresh request, not an old one seen on page load.
+        if (!prevStatus && r.status === 'pending') {
+            const age = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
+            if (!(age > 120000)) {
+                toast('A captain has been notified.', { duration: 4500, icon: '🛎️' });
+            }
+        }
         if (!prevStatus || prevStatus === r.status) return;   // first-seen or no change
         const label = REQUEST_TYPE_LABEL[r.type] || 'request';
         if (prevStatus === 'pending' && r.status === 'accepted') {

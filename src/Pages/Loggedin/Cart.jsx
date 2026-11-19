@@ -11,6 +11,7 @@ import { getActiveBranch } from "../../utils/tenant";
 import { geocodeAddress, reverseGeocode, getCurrentPosition } from "../../utils/geo";
 import { useDineInLock } from "../../utils/dineInSession";
 import { resolveUnitPrice } from "../../utils/pricing";
+import { quickAddLine } from "../../utils/cart";
 import { computeBill, computeSubtotal, toTaxConfig } from "../../utils/billing";
 import { toast } from "react-hot-toast";
 import { getCustomerOperations } from "../../utils/operations";
@@ -51,6 +52,9 @@ function Cart() {
   // (drinks / breads / sides / desserts that pair with what's in cart).
   const { menuItems: catalogueItems } = useMenu();
   const cartItems = useMemo(() => Object.values(cartContextItems), [cartContextItems]);
+  // A cart line's store key: sized / topped lines carry `lineKey`, plain
+  // and pre-upgrade lines are keyed by the item id.
+  const lineKeyOf = (it) => it.lineKey || it.id;
 
   // ── Active table orders count ──────────────────────────────────────
   // Independent-orders model — each Place Order tap creates a fresh
@@ -315,8 +319,11 @@ function Cart() {
       setPointsError(`You only have ₹${availablePoints.toFixed(2)} wallet balance available`);
       return;
     }
-    if (pts > subtotal) {
-      setPointsError(`Amount cannot exceed order subtotal of ₹${subtotal}`);
+    // Cap at what the customer actually owes (GST, delivery fee and tip
+    // included, coupon taken off); the server refuses a wallet amount
+    // above the order total (WALLET_EXCEEDS_TOTAL).
+    if (pts > billBeforeWallet.total) {
+      setPointsError(`Amount cannot exceed the order total of ₹${billBeforeWallet.total.toFixed(2)}`);
       return;
     }
     setPointsError('');
@@ -465,6 +472,15 @@ function Cart() {
   // on the Payment screen (which offers the wallet there), so the cart
   // neither deducts it nor offers it — the server rejects a dine-in
   // total that is below its own bill (TOTAL_MISMATCH).
+  const billBeforeWallet = computeBill({
+    subtotal,
+    taxConfig,
+    orderType: deliveryActive ? 'delivery' : orderType,
+    couponDiscount,
+    pointsRedeemed: 0,
+    tipAmount: tipAmount || 0,
+    deliveryFee,
+  });
   const walletAppliedToBill = isTakeaway ? appliedPoints : 0;
   const bill = computeBill({
     subtotal,
@@ -538,13 +554,13 @@ function Cart() {
     const item = cartItems[index];
     if (!item) return;
     const delta = quantity - item.quantity;
-    updateQtyContext(item.id, delta, item);
+    updateQtyContext(lineKeyOf(item), delta, item, { exactKey: true });
   };
 
   const removeItem = (index) => {
     const item = cartItems[index];
     if (!item) return;
-    updateQtyContext(item.id, -item.quantity, item);
+    updateQtyContext(lineKeyOf(item), -item.quantity, item, { exactKey: true });
   };
 
 
@@ -586,14 +602,11 @@ function Cart() {
       name: item.name,
       desc: item.description || item.desc || '',
       image: (item.images && item.images[0]) || item.image,
-      price: resolveUnitPrice(item),
-      unitPrice: resolveUnitPrice(item),
+      ...quickAddLine(item),
       isVeg: item.vegType === 'veg' || item.isVeg === true,
       quantity: 1,
       prepStation: item.prepStation,
       category: item.category,
-      selectedSizes: [],
-      selectedToppings: [],
     };
     updateQtyContext(id, 1, cartItem);
     toast.success(`${cartItem.title} added to cart`, { id: `complement-${id}`, duration: 2000 });
@@ -601,7 +614,7 @@ function Cart() {
 
   // Increase Quantity
   const handleIncrease = (itemId) => {
-    const itemIndex = cartItems.findIndex((item) => item.id === itemId);
+    const itemIndex = cartItems.findIndex((item) => lineKeyOf(item) === itemId);
     if (itemIndex >= 0) {
       updateQuantity(itemIndex, cartItems[itemIndex].quantity + 1);
     }
@@ -609,7 +622,7 @@ function Cart() {
 
   // Decrease Quantity
   const handleDecrease = (itemId) => {
-    const itemIndex = cartItems.findIndex((item) => item.id === itemId);
+    const itemIndex = cartItems.findIndex((item) => lineKeyOf(item) === itemId);
     if (itemIndex >= 0) {
       const newQuantity = cartItems[itemIndex].quantity - 1;
       if (newQuantity <= 0) {
@@ -639,7 +652,7 @@ function Cart() {
     updateCartItem(itemId, { instructions });
 
     // Find index for auto-collapse
-    const idx = cartItems.findIndex(it => it.id === itemId);
+    const idx = cartItems.findIndex(it => lineKeyOf(it) === itemId);
     if (idx >= 0) {
       setExpandedInstructions((prev) => ({
         ...prev,
@@ -650,8 +663,8 @@ function Cart() {
 
   // Clear a line's special instructions (the Remove control on the card).
   const handleRemoveInstructions = (item) => {
-    updateCartItem(item.id, { instructions: '' });
-    const idx = cartItems.findIndex(it => it.id === item.id);
+    updateCartItem(lineKeyOf(item), { instructions: '' });
+    const idx = cartItems.findIndex(it => lineKeyOf(it) === lineKeyOf(item));
     if (idx >= 0) {
       setExpandedInstructions((prev) => ({ ...prev, [idx]: false }));
     }
@@ -679,7 +692,7 @@ function Cart() {
     deliveryActive, quoteState, quoteMessage, deliveryAddress, measuredDelivery,
     selectedSlabIndex, selectedSlab, setDeliveryError, setBranchError, deliveryConfig,
     deliveryCoords, deliveryFee, subtotal, finalTakeawayTotal, cartItems, couponDiscount,
-    appliedCoupon, appliedPoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
+    appliedCoupon, appliedPoints, availablePoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
     taxConfig, syncCartPrices, settingsLoaded, reloadSettings: loadSettings,
   });
 
@@ -770,11 +783,11 @@ function Cart() {
         <section>
           {cartItems.map((item, index) => (
             <HealthCartItem
-              key={`${item.id}-${index}`}
+              key={`${lineKeyOf(item)}-${index}`}
               item={item}
               quantity={item.quantity}
-              onIncrease={() => handleIncrease(item.id)}
-              onDecrease={() => handleDecrease(item.id)}
+              onIncrease={() => handleIncrease(lineKeyOf(item))}
+              onDecrease={() => handleDecrease(lineKeyOf(item))}
               onRemove={() => {
                 // CUS-021: full-line remove via the X button. Toast
                 // confirms — keeps the cart predictable while leaving
@@ -836,7 +849,7 @@ function Cart() {
       <SpecialInstructionsPopup
         isOpen={isInstructionsOpen}
         onClose={() => setIsInstructionsOpen(false)}
-        onSave={handleSaveInstructions}
+        onSave={(_id, text) => handleSaveInstructions(selectedItemForInstructions ? lineKeyOf(selectedItemForInstructions) : _id, text)}
         item={selectedItemForInstructions}
       />
 

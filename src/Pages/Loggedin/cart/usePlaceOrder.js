@@ -21,7 +21,7 @@ export default function usePlaceOrder({
   deliveryActive, quoteState, quoteMessage, deliveryAddress, measuredDelivery,
   selectedSlabIndex, selectedSlab, setDeliveryError, setBranchError, deliveryConfig,
   deliveryCoords, deliveryFee, subtotal, finalTakeawayTotal, cartItems, couponDiscount,
-  appliedCoupon, appliedPoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
+  appliedCoupon, appliedPoints, availablePoints, tipAmount, setIsSubmitting, isSubmitting, tokenOrderMode,
   taxConfig, syncCartPrices, settingsLoaded = true, reloadSettings,
 }) {
   // Handle Place Order. `payChoice` ('payFirst' | 'payAfter') is the
@@ -162,7 +162,10 @@ export default function usePlaceOrder({
         setDeliveryError('');
       }
 
-      if (finalTakeawayTotal <= 0) {
+      // finalTakeawayTotal is net of wallet points; a wallet that covers the
+      // whole bill is valid (bill-preview takes the full-wallet path), so the
+      // guard looks at the total before wallet points.
+      if (finalTakeawayTotal + (Number(appliedPoints) || 0) <= 0) {
         toast.error("Order total must be greater than zero.");
         return;
       }
@@ -189,6 +192,7 @@ export default function usePlaceOrder({
           couponDiscount,
           appliedCoupon,
           appliedPoints,
+          walletBalance: availablePoints,
           tipAmount: tipAmount || 0,
           selectedTime,
           selectedDay,

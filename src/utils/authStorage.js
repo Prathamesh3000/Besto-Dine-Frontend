@@ -77,7 +77,7 @@ export function audienceForPath(pathname) {
 export function audienceForUser(user) {
     const role = user?.role;
     if (!role) return null;
-    if (role === 'superadmin') return 'platform';
+    if (role === 'superadmin' || role === 'platformstaff') return 'platform';
     if (role === 'customer') return 'customer';
     return 'staff';
 }
@@ -327,6 +327,7 @@ export function migrateLegacyPlatformSession(storage) {
     }
     try {
         const staffUser = parseUser(s.getItem(KEYS.staff.user));
+        // Only a legacy Super Admin session lived under staff_* (platformstaff is newer).
         if (staffUser?.role !== 'superadmin') return false;
         // A platform session written by the new code wins; otherwise adopt
         // the legacy one.

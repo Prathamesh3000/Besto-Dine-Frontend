@@ -78,6 +78,19 @@ describe('notification list + unread count', () => {
     expect(api.get).toHaveBeenCalledWith('/notifications?role=customer&userId=u1', { _isBackground: true })
   })
 
+  test('a user who must change their temporary password fetches nothing until they have (the API 403s everything else)', async () => {
+    as('waiter')
+    authState.current = { user: { _id: 'u1', role: 'waiter', mustChangePassword: true }, isGuest: false }
+    setActiveTenant({ slug: 'spice' })
+    const { result, rerender } = mount()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(api.get).not.toHaveBeenCalled()
+    authState.current = { user: { _id: 'u1', role: 'waiter', mustChangePassword: false }, isGuest: false }
+    rerender()
+    await waitFor(() => expect(result.current.unreadCount).toBe(2))
+    expect(api.get).toHaveBeenCalledWith('/notifications?role=waiter&userId=u1', { _isBackground: true })
+  })
+
   test('unsuccessful envelope → empty list', async () => {
     as('admin')
     setActiveTenant({ slug: 'spice' })
@@ -295,6 +308,16 @@ describe('dine-in guest status tracking', () => {
     expect(toast.success).toHaveBeenLastCalledWith('Your water request has been completed.', expect.any(Object))
     act(() => h.socket.serverEmit('request:updated', { status: 'x' })) // malformed ignored
     expect(toast.success).toHaveBeenCalledTimes(2)
+  })
+
+  test('a new pending request (table has no waiter) tells the customer a captain was notified, once; old ones stay quiet', () => {
+    mount()
+    act(() => h.socket.serverEmit('request:updated', { _id: 'n1', type: 'water', status: 'pending', createdAt: new Date().toISOString() }))
+    expect(toast).toHaveBeenCalledWith('A captain has been notified.', expect.any(Object))
+    act(() => h.socket.serverEmit('request:updated', { _id: 'n1', type: 'water', status: 'pending' }))
+    expect(toast).toHaveBeenCalledTimes(1)
+    act(() => h.socket.serverEmit('request:updated', { _id: 'old', type: 'bill', status: 'pending', createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() }))
+    expect(toast).toHaveBeenCalledTimes(1)
   })
 
   test('a scan token forces one socket re-handshake so the table join is authorised', () => {

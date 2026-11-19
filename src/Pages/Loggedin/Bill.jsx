@@ -9,6 +9,7 @@ import VoiceSearchButton from '../../Components/Loggedin/VoiceSearchButton';
 import useSocketEvent from '../../hooks/useSocketEvent';
 import { markDineInBillSettled } from '../../utils/dineInSession';
 import useCustomerSession from '../../hooks/useCustomerSession';
+import { mergeBills, allRequestsFailed } from '../../utils/billMerge';
 import { getCustomerOrderSession, readRecoveryOrderIds, forgetOrderIds } from '../../utils/customerOrderIds';
 
 function getTableName() {
@@ -87,6 +88,7 @@ function Bill() {
   const [searchQuery, setSearchQuery] = useState('');
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Guest auto-exit: check if bill was paid and start countdown
   const guestBillPaidAt = isGuest ? localStorage.getItem('guest_bill_paid_at') : null;
@@ -145,94 +147,80 @@ function Bill() {
     return new Date(dateStr).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
+  // Orders remembered on this device (guests, and a logged-in customer's
+  // just-placed orders). Every order is re-fetched through
+  // /orders/:id/detail, which enforces ownership (scan session / owner), so
+  // a stale or foreign ID just 404s and is forgotten. Throws when there were
+  // IDs to fetch and every request failed without a server response (offline),
+  // so the page can show "Couldn't load" instead of "No bills yet".
+  const fetchLocalOrders = async () => {
+    const session = getCustomerOrderSession(user, isLoggedIn);
+    const ids = readRecoveryOrderIds(session);
+    if (!ids.length) return [];
+    const results = await Promise.allSettled(
+      ids.map((id) => api.get(`/orders/${encodeURIComponent(id)}/detail`, { _silent: true, _isBackground: true })),
+    );
+    if (allRequestsFailed(results)) throw new Error('Could not reach the server for device orders');
+    const serverOrders = [];
+    const dead = [];
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value?.data?.success && r.value.data.order) {
+        serverOrders.push(r.value.data.order);
+      } else if (r.status === 'rejected' && r.reason?.response?.status === 404) {
+        dead.push(ids[i]);
+      }
+    });
+    forgetOrderIds(session, dead);
+    return serverOrders;
+  };
+
   const fetchBills = async () => {
     setLoading(true);
     try {
-      if (isLoggedIn) {
-        const res = await api.get('/invoices/my-invoices');
-        if (res.data?.success && res.data.invoices) {
-          const mapped = res.data.invoices.map((inv) => ({
-            id: inv._id,
-            itemCount: inv.items?.length || 0,
-            paymentMethod: inv.paymentMethod || 'Cash',
-            status: inv.paymentStatus === 'paid' ? 'Paid' : 'Unpaid',
-            amount: inv.total,
-            date: formatDate(inv.createdAt || inv.date),
-            time: formatTime(inv.createdAt || inv.date),
-            items: inv.items || [],
-          }));
-          setBills(mapped);
-          setLoading(false);
-          return;
-        }
-      }
-      // Guests (or invoice fetch failed): bills from the server via the
-      // remembered order IDs.
-      await loadLocalBills();
-    } catch (err) {
-      console.error('Failed to fetch bills:', err);
-      await loadLocalBills();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Guest bills (#22): the device keeps only order IDs; every order is
-  // re-fetched through /orders/:id/detail, which enforces ownership
-  // (scan session / owner), so a stale or foreign ID just 404s.
-  const loadLocalBills = async () => {
-    try {
-      const session = getCustomerOrderSession(user, isLoggedIn);
-      const ids = readRecoveryOrderIds(session);
-      if (!ids.length) {
-        setBills([]);
-        return;
-      }
-      const results = await Promise.allSettled(
-        ids.map((id) => api.get(`/orders/${encodeURIComponent(id)}/detail`, { _silent: true, _isBackground: true })),
-      );
-      const serverOrders = [];
-      const dead = [];
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled' && r.value?.data?.success && r.value.data.order) {
-          serverOrders.push(r.value.data.order);
-        } else if (r.status === 'rejected' && r.reason?.response?.status === 404) {
-          dead.push(ids[i]);
-        }
-      });
-      forgetOrderIds(session, dead);
-      const cancelledMap = JSON.parse(localStorage.getItem('cancelled_orders_v1') || '{}');
+      let cancelledMap = {};
+      try { cancelledMap = JSON.parse(localStorage.getItem('cancelled_orders_v1') || '{}') || {}; } catch { /* ignore */ }
       const isCancelled = (o) => {
         const st = (o.status || '').toString().toLowerCase();
         if (st === 'cancelled' || st === 'canceled') return true;
-        const key = o._id || o.orderId;
-        return !!(key && (cancelledMap[key] || cancelledMap[o.orderId]));
+        const key = o._id || o.orderId || o.id;
+        return !!(key && (cancelledMap[key] || cancelledMap[o.orderId] || cancelledMap[o.id]));
       };
-      // When the table bill has been settled (by staff at the counter or
-      // the customer online), `guest_bill_paid_at` is stamped for the
-      // session — treat the whole settled session as Paid so the Recent
-      // rows don't lag behind a counter settle.
-      const sessionBillPaid = !!localStorage.getItem('guest_bill_paid_at');
-      const mapped = serverOrders
-        .filter((order) => !isCancelled(order))
-        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-        .map((order) => {
-          const when = order.createdAt || new Date().toISOString();
-          const st = (order.status || '').toString().toLowerCase();
-          return {
-            id: order._id || order.orderId,
-            itemCount: order.items?.length || 0,
-            paymentMethod: order.paymentMethod || 'Cash',
-            status: (order.paymentStatus === 'Paid' || sessionBillPaid) ? 'Paid' : (st === 'served' || st === 'delivered' ? 'Unpaid' : 'Pending'),
-            amount: order.total || 0,
-            date: formatDate(when),
-            time: formatTime(when),
-            items: order.items || [],
-          };
-        });
-      setBills(mapped);
-    } catch {
+      // When a guest's table bill has been settled, `guest_bill_paid_at` is
+      // stamped for the session — treat the whole settled session as Paid so
+      // the Recent rows don't lag behind a counter settle.
+      const sessionBillPaid = isGuest && !!localStorage.getItem('guest_bill_paid_at');
+
+      // Logged in: invoices + the customer's server-side orders + this
+      // device's remembered orders. Guests: device-remembered orders only.
+      const sources = await Promise.allSettled([
+        isLoggedIn ? api.get('/invoices/my-invoices', { _silent: true }) : Promise.resolve(null),
+        isLoggedIn ? api.get('/orders/my-orders', { params: { limit: 100 }, _silent: true }) : Promise.resolve(null),
+        fetchLocalOrders(),
+      ]);
+      const [invRes, myOrdersRes, localRes] = sources;
+      const invoices = invRes.status === 'fulfilled' && Array.isArray(invRes.value?.data?.invoices) ? invRes.value.data.invoices : [];
+      const myOrders = myOrdersRes.status === 'fulfilled' && Array.isArray(myOrdersRes.value?.data?.orders) ? myOrdersRes.value.data.orders : [];
+      const localOrders = localRes.status === 'fulfilled' ? localRes.value : [];
+      // Server copies first so they win over a stale device copy.
+      setBills(mergeBills({
+        invoices,
+        orders: [...myOrders, ...localOrders],
+        fmt: { date: formatDate, time: formatTime },
+        isCancelled,
+        sessionBillPaid,
+      }));
+      // Failed = every source that actually tried failed. A device list with
+      // nothing to fetch resolves to [] (success, zero rows) and so does not
+      // mask a logged-in customer's invoices + orders both failing.
+      const serverFailed = isLoggedIn && invRes.status === 'rejected' && myOrdersRes.status === 'rejected';
+      const localFailed = localRes.status === 'rejected' || localOrders.length === 0;
+      setLoadFailed(isLoggedIn ? serverFailed && localFailed : localRes.status === 'rejected');
+    } catch (err) {
+      console.error('Failed to fetch bills:', err);
       setBills([]);
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -399,9 +387,9 @@ function Bill() {
             <div className="w-24 h-24 sm:w-32 sm:h-32 bg-gray-100 rounded-full flex items-center justify-center mb-4">
               <Search size={36} className="sm:size-48 text-gray-300" />
             </div>
-            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">{query && bills.length > 0 ? 'No matching bills' : 'No bills yet'}</h2>
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">{query && bills.length > 0 ? 'No matching bills' : loadFailed ? "Couldn't load your bills" : 'No bills yet'}</h2>
             <p className="text-gray-500 text-sm sm:text-base">
-              {query && bills.length > 0 ? `Nothing matches "${searchQuery.trim()}".` : 'Your bill will appear here after you place an order'}
+              {query && bills.length > 0 ? `Nothing matches "${searchQuery.trim()}".` : loadFailed ? 'Check your connection and try again.' : 'Your bill will appear here after you place an order'}
             </p>
           </div>
         )}

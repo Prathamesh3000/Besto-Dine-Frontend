@@ -39,6 +39,7 @@ const APP_ROUTE_SEGMENTS = [
     'search',
     'splash',
     'staff-login',
+    'start-trial',
     'superadmin',
     'switch-restaurant',
     'terms',

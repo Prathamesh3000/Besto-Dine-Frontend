@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import {
     Inbox,
+    UserPlus,
     MessageCircle,
     Phone,
     Mail,
@@ -16,6 +17,7 @@ import {
 import api from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import CreateRestaurantModal from './components/CreateRestaurantModal';
+import SignupLeads from './components/SignupLeads';
 import {
     PageHeader,
     SectionCard,
@@ -29,13 +31,89 @@ import {
 } from './components/ui';
 
 /**
- * Leads — prospects captured by the standalone marketing site
- * (BestoDine-Marketing) via POST /api/v1/public/lead. This is the Super
- * Admin end of the single wire between the marketing site and the product:
- * a prospect fills the demo / contact form, it lands here, and the operator
- * follows up (WhatsApp / call), records progress, and finally converts the
- * lead into a real Restaurant via the existing create-restaurant flow.
+ * Leads — two pipelines under one page:
+ *
+ *   Signups (default, `?tab=signups`) — self-service restaurants that
+ *   signed up on the product itself (free plan or 14-day trial). The
+ *   tenant record is the lead; see components/SignupLeads.jsx.
+ *
+ *   Demo requests (`?tab=demo`) — prospects captured by the standalone
+ *   marketing site (BestoDine-Marketing) via POST /api/v1/public/lead.
+ *   A prospect fills the demo / contact form, it lands here, and the
+ *   operator follows up (WhatsApp / call), records progress, and finally
+ *   converts the lead into a real Restaurant via the create-restaurant
+ *   flow. That body lives in `DemoLeads` below, unchanged.
  */
+
+// `module` = the platform-access key needed to see the tab.
+const TABS = [
+    { key: 'signups', label: 'Signups', icon: UserPlus, module: 'signupLeads' },
+    { key: 'demo',    label: 'Demo requests', icon: Inbox, module: 'leads' },
+];
+
+const TAB_COPY = {
+    signups: 'Restaurants that signed up on their own — on a free plan or a 14-day trial. Follow up before the trial ends, keep notes, and watch who converts.',
+    demo: "Prospects captured by the marketing site's demo / contact forms. Follow up over WhatsApp or call, move them through the pipeline, and convert the winners into tenants.",
+};
+
+const Leads = () => {
+    const { canViewModule } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const visibleTabs = TABS.filter(t => canViewModule(t.module));
+    const tabParam = searchParams.get('tab');
+    // `?tab` absent → Signups. The one legacy deep link into this page
+    // (signup review → "check leads" with `?search=`) predates the tabs and
+    // means the demo-request list, so a bare `?search=` still lands there.
+    const wanted = tabParam === 'demo' || (!tabParam && searchParams.has('search')) ? 'demo' : 'signups';
+    // Only tabs the user can view; fall back to the first available one.
+    const tab = visibleTabs.some(t => t.key === wanted) ? wanted : (visibleTabs[0]?.key || wanted);
+    const setTab = (key) => {
+        const next = new URLSearchParams(searchParams);
+        next.delete('search');
+        if (key === 'signups') next.delete('tab'); else next.set('tab', key);
+        setSearchParams(next, { replace: true });
+    };
+
+    return (
+        <div className="px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-360 mx-auto">
+            <PageHeader
+                eyebrow="Growth pipeline"
+                title="Leads"
+                description={TAB_COPY[tab]}
+                actions={
+                    visibleTabs.length > 1 && (
+                    <div role="tablist" aria-label="Lead source" className="flex items-center gap-1 bg-[#FAF5F0] border border-orange-100/70 rounded-xl p-1">
+                        {visibleTabs.map(t => {
+                            const active = tab === t.key;
+                            const Icon = t.icon;
+                            return (
+                                <button
+                                    key={t.key}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={active}
+                                    onClick={() => setTab(t.key)}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                                        active
+                                            ? 'bg-white text-[#FE8301] shadow-sm border border-orange-200'
+                                            : 'text-gray-600 hover:text-[#FE8301]'
+                                    }`}
+                                >
+                                    <Icon size={14} strokeWidth={2.25} />
+                                    {t.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    )
+                }
+            />
+            {tab === 'demo' ? <DemoLeads /> : <SignupLeads />}
+        </div>
+    );
+};
+
+// ─── Demo requests (marketing-site leads) ────────────────────────────
 
 // The lead pipeline, in order. Each stage doubles as a filter card and
 // explains in one line what it means — so any operator gets the funnel
@@ -95,9 +173,11 @@ const waNumber = (phone) => {
     return d.length === 10 ? `91${d}` : d;
 };
 
-const Leads = () => {
-    const { superadminLevel } = useAuth();
-    const isFull = superadminLevel === 'full';
+const DemoLeads = () => {
+    const { canManageModule, isFullSuperAdmin } = useAuth();
+    const canManage = canManageModule('leads');
+    // Delete and Convert (creates a restaurant) stay full-super-admin only.
+    const isFull = !!isFullSuperAdmin;
 
     const [leads, setLeads] = useState([]);
     const [counts, setCounts] = useState({ all: 0, new: 0, contacted: 0, demoed: 0, converted: 0, lost: 0 });
@@ -178,19 +258,14 @@ const Leads = () => {
     const convRate = totalLeads ? Math.round(((counts.converted || 0) / totalLeads) * 100) : 0;
 
     return (
-        <div className="px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-360 mx-auto">
-            <PageHeader
-                eyebrow="Growth pipeline"
-                title="Leads"
-                description="Prospects captured by the marketing site's demo / contact forms. Follow up over WhatsApp or call, move them through the pipeline, and convert the winners into tenants."
-                actions={
-                    !loading && (counts.all || 0) > 0 ? (
-                        <Badge tone={convRate >= 20 ? 'success' : convRate >= 10 ? 'warning' : 'slate'} dot>
-                            {convRate}% converted
-                        </Badge>
-                    ) : null
-                }
-            />
+        <>
+            {!loading && (counts.all || 0) > 0 && (
+                <div className="flex justify-end -mt-3 mb-4">
+                    <Badge tone={convRate >= 20 ? 'success' : convRate >= 10 ? 'warning' : 'slate'} dot>
+                        {convRate}% converted
+                    </Badge>
+                </div>
+            )}
 
             {/* ── Pipeline funnel — cards double as filters ────────────── */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
@@ -252,6 +327,7 @@ const Leads = () => {
                                 lead={lead}
                                 busy={busyId === lead._id}
                                 isFull={isFull}
+                                canManage={canManage}
                                 onStatus={(to) => patchLead(lead._id, { status: to }, `Marked ${to}`)}
                                 onNote={() => setNoteFor(lead._id)}
                                 onConvert={() => setConvertLead(lead)}
@@ -293,7 +369,7 @@ const Leads = () => {
                     onCreated={handleConverted}
                 />
             )}
-        </div>
+        </>
     );
 };
 
@@ -301,7 +377,7 @@ const Leads = () => {
 
 const initialsFor = (name) => (name || 'L').trim().slice(0, 2).toUpperCase();
 
-const LeadRow = ({ lead, busy, isFull, onStatus, onNote, onConvert, onDelete }) => {
+const LeadRow = ({ lead, busy, isFull, canManage, onStatus, onNote, onConvert, onDelete }) => {
     const wa = waNumber(lead.phone);
     const lastNote = lead.notes?.length ? lead.notes[lead.notes.length - 1] : null;
     return (
@@ -365,13 +441,13 @@ const LeadRow = ({ lead, busy, isFull, onStatus, onNote, onConvert, onDelete }) 
                         </a>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                        <Button variant="ghost" size="sm" icon={StickyNote} disabled={busy} onClick={onNote}>Note</Button>
-                        {(NEXT_ACTIONS[lead.status] || []).map(a => (
+                        {canManage && <Button variant="ghost" size="sm" icon={StickyNote} disabled={busy} onClick={onNote}>Note</Button>}
+                        {canManage && (NEXT_ACTIONS[lead.status] || []).map(a => (
                             <Button key={a.to} variant="ghost" size="sm" disabled={busy} onClick={() => onStatus(a.to)}>
                                 {a.label}
                             </Button>
                         ))}
-                        {lead.status !== 'converted' && (
+                        {isFull && lead.status !== 'converted' && (
                             <Button variant="success" size="sm" icon={CheckCircle2} disabled={busy} onClick={onConvert}>
                                 Convert
                             </Button>

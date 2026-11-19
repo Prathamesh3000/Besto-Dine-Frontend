@@ -158,3 +158,18 @@ describe('expired offers (server parity)', () => {
     expect(resolveUnitPrice({ isCombo: true, price: 250, offerExpiryDate: new Date(Date.now() - DAY) })).toBe(250)
   })
 })
+
+import { resolveFromPrice } from '@/utils/pricing'
+describe('resolveFromPrice (menu card "from" label)', () => {
+  const sized = { basePrice: 260, finalPrice: 260, sizes: [{ name: 'Half', price: 160 }, { name: 'Full', price: 260 }] }
+  test('returns the lowest size price', () => expect(resolveFromPrice(sized)).toBe(160))
+  test('applies the item offer to the size price', () => {
+    expect(resolveFromPrice({ ...sized, offerPercentage: 10, finalPrice: 234 })).toBe(144)
+  })
+  test('is null without sizes, with one size, equal prices, or for combos', () => {
+    expect(resolveFromPrice({ basePrice: 100 })).toBeNull()
+    expect(resolveFromPrice({ basePrice: 100, sizes: [{ price: 90 }] })).toBeNull()
+    expect(resolveFromPrice({ basePrice: 100, sizes: [{ price: 90 }, { price: 90 }] })).toBeNull()
+    expect(resolveFromPrice({ ...sized, isCombo: true })).toBeNull()
+  })
+})

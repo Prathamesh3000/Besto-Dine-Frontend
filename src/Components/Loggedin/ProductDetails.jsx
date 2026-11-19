@@ -307,7 +307,7 @@ const ProductDetails = ({ product: propProduct, onClose: propOnClose, onAddToCar
     if (onAddToCart) {
       onAddToCart(item);
     } else if (product._isCartItem) {
-      updateCartItem(product.id, { ...item, quantity });
+      updateCartItem(product.lineKey || product._raw?.lineKey || product.id, { ...item, quantity });
     } else {
       updateQuantity(product.id, quantity, item);
     }

@@ -72,7 +72,7 @@ const fmtDate = (iso) =>
     iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 const Restaurants = () => {
-    const { isFullSuperAdmin } = useAuth();
+    const { isFullSuperAdmin, isSuperAdmin } = useAuth();
     const [items, setItems] = useState([]);
     const [summary, setSummary] = useState({ total: 0, active: 0, trial: 0, suspended: 0, cancelled: 0, mrr: 0 });
     const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
@@ -103,11 +103,13 @@ const Restaurants = () => {
     }, [status, q, plan, page, sort, order]);
 
     // Load the plan list once for the filter dropdown.
+    // Skipped for platform staff (the plans module is a separate grant).
     useEffect(() => {
+        if (!isSuperAdmin) return;
         api.get('/superadmin/plans')
             .then(res => setPlans(res.data?.data || []))
             .catch(() => { /* dropdown just stays empty */ });
-    }, []);
+    }, [isSuperAdmin]);
 
     // Reset to page 1 whenever a filter/sort changes.
     useEffect(() => { setPage(1); }, [status, q, plan, sort, order]);

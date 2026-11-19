@@ -66,6 +66,21 @@ const BILLING_CYCLES = [
     { value: 'yearly',    label: 'Yearly' },
 ];
 
+// Card / catalogue limits — mirror routes/superadminRoute.js planFieldChains.
+const BADGE_MAX = 40;
+const HIGHLIGHTS_MAX = 8;
+const HIGHLIGHT_MAX_LEN = 120;
+const TRIAL_DAYS_MAX = 3650;
+const DEFAULT_TRIAL_DAYS = 14;
+
+/** Textarea (one per line) → highlights array: trimmed, blanks dropped. */
+function parseHighlights(text = '') {
+    return String(text)
+        .split(/\r?\n/)
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
 const EMPTY_PLAN = {
     name: '',
     slug: '',
@@ -74,7 +89,13 @@ const EMPTY_PLAN = {
     annualPrice: '',
     biennialPrice: '',
     billingCycle: 'monthly',
-    trialDays: 0,
+    // Tier rank is REQUIRED on create and 0 is a valid value, so the blank
+    // string (not 0) is the "not filled in" state.
+    tier: '',
+    trialEnabled: false,
+    trialDurationDays: DEFAULT_TRIAL_DAYS,
+    badge: '',
+    highlightsText: '',
     sortOrder: 0,
     isPublic: true,
     limits: { maxBranches: 1, maxStaff: 5, maxMenuItems: 50, maxTables: 10, apiRateLimit: 100 },
@@ -113,7 +134,20 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                 annualPrice: plan.prices?.annual ?? '',
                 biennialPrice: plan.prices?.biennial ?? '',
                 billingCycle: plan.billingCycle || 'monthly',
-                trialDays: plan.trialDays ?? 0,
+                // `tier` 0 is real — only null/undefined means "unset".
+                tier: plan.tier === null || plan.tier === undefined ? '' : plan.tier,
+                // Trial: prefer the structured object; fall back to legacy trialDays.
+                ...(plan.trial && typeof plan.trial === 'object'
+                    ? {
+                        trialEnabled: plan.trial.enabled === true,
+                        trialDurationDays: plan.trial.durationDays ?? DEFAULT_TRIAL_DAYS,
+                    }
+                    : {
+                        trialEnabled: Number(plan.trialDays) > 0,
+                        trialDurationDays: Number(plan.trialDays) > 0 ? Number(plan.trialDays) : DEFAULT_TRIAL_DAYS,
+                    }),
+                badge: plan.badge || '',
+                highlightsText: Array.isArray(plan.highlights) ? plan.highlights.join('\n') : '',
                 sortOrder: plan.sortOrder ?? 0,
                 isPublic: plan.isPublic !== false,
                 limits: {
@@ -168,9 +202,22 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
         const cycleErrs = validateCyclePrices({ monthly: form.price, annual: form.annualPrice, biennial: form.biennialPrice });
         if (cycleErrs.annual) errs.annualPrice = cycleErrs.annual;
         if (cycleErrs.biennial) errs.biennialPrice = cycleErrs.biennial;
+        // Tier rank: required, integer >= 0. `form.tier === ''` is the only
+        // "missing" state — 0 is a legitimate rank (free plans).
+        const tierNum = form.tier === '' || form.tier === null || form.tier === undefined ? NaN : Number(form.tier);
+        if (Number.isNaN(tierNum))                                   errs.tier = 'Tier rank is required (0 for a free plan)';
+        else if (!Number.isInteger(tierNum) || tierNum < 0)          errs.tier = 'Tier rank must be a whole number, 0 or greater';
+        const trialDaysNum = form.trialDurationDays === '' ? NaN : Number(form.trialDurationDays);
+        if (form.trialEnabled && (!Number.isInteger(trialDaysNum) || trialDaysNum < 1 || trialDaysNum > TRIAL_DAYS_MAX)) {
+            errs.trialDays = `Trial length must be 1–${TRIAL_DAYS_MAX} days`;
+        }
+        if (form.badge.trim().length > BADGE_MAX)                    errs.badge = `Badge must be ${BADGE_MAX} characters or fewer`;
+        const highlights = parseHighlights(form.highlightsText);
+        if (highlights.length > HIGHLIGHTS_MAX)                      errs.highlights = `At most ${HIGHLIGHTS_MAX} highlights (one per line) — you have ${highlights.length}`;
+        else if (highlights.some(h => h.length > HIGHLIGHT_MAX_LEN)) errs.highlights = `Each highlight must be ${HIGHLIGHT_MAX_LEN} characters or fewer`;
         setErrors(errs);
         if (Object.keys(errs).length) {
-            const firstBad = ['name', 'slug', 'price', 'annualPrice', 'biennialPrice'].find(k => errs[k]);
+            const firstBad = ['name', 'slug', 'price', 'annualPrice', 'biennialPrice', 'tier', 'trialDays', 'badge', 'highlights'].find(k => errs[k]);
             if (firstBad) {
                 setTimeout(() => {
                     const el = document.getElementById(`plan-${firstBad}`);
@@ -186,8 +233,14 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
             // backend rejects any tampering at the call site, not just at
             // the validator layer.
             const blankToNull = (v) => (v === '' || v === null || v === undefined || !(Number(v) > 0) ? null : Number(v));
+            // Built key-by-key (no `...form`) so the payload matches the
+            // validator field-for-field — form-only helpers such as
+            // annualPrice / trialEnabled / highlightsText never leak through.
+            const trialEnabled = form.trialEnabled === true;
+            const trialDuration = trialEnabled ? trialDaysNum : (Number.isInteger(trialDaysNum) && trialDaysNum >= 0 ? trialDaysNum : 0);
             const payload = {
-                ...form,
+                name: form.name.trim(),
+                description: form.description,
                 price: +form.price,
                 // Per-cycle list prices, base rupees excl. GST; null = not sold.
                 prices: {
@@ -195,12 +248,22 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                     annual: blankToNull(form.annualPrice),
                     biennial: blankToNull(form.biennialPrice),
                 },
-                trialDays: +form.trialDays || 0,
+                billingCycle: form.billingCycle,
+                // Rank as a Number — 0 is valid and must survive as 0.
+                tier: tierNum,
+                trial: { enabled: trialEnabled, durationDays: trialDuration },
+                // Legacy mirror the backend also syncs: enabled ? days : 0.
+                trialDays: trialEnabled ? trialDuration : 0,
+                badge: form.badge.trim(),
+                highlights,
                 sortOrder: +form.sortOrder || 0,
+                isPublic: form.isPublic !== false,
+                limits: form.limits,
+                features: form.features,
             };
-            delete payload.annualPrice;
-            delete payload.biennialPrice;
-            if (isEdit) delete payload.slug;
+            // Slug is immutable on edit — only sent on create so the backend
+            // rejects any tampering at the call site, not just at the validator.
+            if (!isEdit) payload.slug = form.slug;
 
             // _silent so the global interceptor doesn't fire a duplicate
             // toast — we surface API errors as a banner above the form.
@@ -354,13 +417,44 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                                 {BILLING_CYCLES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                             </select>
                         </Field>
-                        <Field label="Trial days" hint="0 = no trial">
+                        <Field label="Tier rank" required error={errors.tier} hint="0 = free · 10 silver · 20 gold · 25 premium · 30+ enterprise (Contact Sales)">
                             <input
+                                id="plan-tier"
                                 type="number"
+                                inputMode="numeric"
                                 min="0"
-                                value={form.trialDays}
-                                onChange={e => setField('trialDays', e.target.value)}
-                                className={inputClass}
+                                step="1"
+                                value={form.tier}
+                                onChange={e => { setField('tier', e.target.value); if (errors.tier) setErrors(prev => ({ ...prev, tier: undefined })) }}
+                                placeholder="e.g. 20"
+                                aria-required="true"
+                                aria-invalid={errors.tier ? 'true' : 'false'}
+                                className={`${inputClass} ${errors.tier ? 'border-rose-400! focus:border-rose-500!' : ''}`}
+                            />
+                        </Field>
+                    </div>
+                    {/* Free trial — structured `trial { enabled, durationDays }`;
+                        the legacy `trialDays` is sent alongside, kept in sync. */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                        <FeatureToggle
+                            id="plan-trialEnabled"
+                            label="Free trial"
+                            enabled={form.trialEnabled}
+                            onChange={(v) => { setField('trialEnabled', v); if (errors.trialDays) setErrors(prev => ({ ...prev, trialDays: undefined })) }}
+                        />
+                        <Field label="Trial length (days)" error={errors.trialDays} hint={form.trialEnabled ? `1–${TRIAL_DAYS_MAX} days` : 'Turn on Free trial to set'}>
+                            <input
+                                id="plan-trialDays"
+                                type="number"
+                                inputMode="numeric"
+                                min="1"
+                                max={TRIAL_DAYS_MAX}
+                                step="1"
+                                value={form.trialDurationDays}
+                                disabled={!form.trialEnabled}
+                                onChange={e => { setField('trialDurationDays', e.target.value); if (errors.trialDays) setErrors(prev => ({ ...prev, trialDays: undefined })) }}
+                                aria-invalid={errors.trialDays ? 'true' : 'false'}
+                                className={`${inputClass} ${errors.trialDays ? 'border-rose-400! focus:border-rose-500!' : ''} disabled:opacity-50`}
                             />
                         </Field>
                     </div>
@@ -399,6 +493,37 @@ const PlanFormModal = ({ plan, onClose, onSaved }) => {
                             value={form.sortOrder}
                             onChange={e => setField('sortOrder', e.target.value)}
                             className={inputClass}
+                        />
+                    </Field>
+                </FormSection>
+
+                {/* ── Pricing card ──────────────────────────────────── */}
+                <FormSection title="Pricing card">
+                    <Field label="Badge" error={errors.badge} hint={`Ribbon on the card, e.g. "Most popular" · ${form.badge.trim().length}/${BADGE_MAX}`}>
+                        <input
+                            id="plan-badge"
+                            type="text"
+                            value={form.badge}
+                            maxLength={BADGE_MAX}
+                            onChange={e => { setField('badge', e.target.value); if (errors.badge) setErrors(prev => ({ ...prev, badge: undefined })) }}
+                            placeholder="Most popular"
+                            aria-invalid={errors.badge ? 'true' : 'false'}
+                            className={`${inputClass} ${errors.badge ? 'border-rose-400! focus:border-rose-500!' : ''}`}
+                        />
+                    </Field>
+                    <Field
+                        label="Highlights"
+                        error={errors.highlights}
+                        hint={`One per line, up to ${HIGHLIGHTS_MAX} · ${parseHighlights(form.highlightsText).length}/${HIGHLIGHTS_MAX}`}
+                    >
+                        <textarea
+                            id="plan-highlights"
+                            value={form.highlightsText}
+                            onChange={e => { setField('highlightsText', e.target.value); if (errors.highlights) setErrors(prev => ({ ...prev, highlights: undefined })) }}
+                            placeholder={'Unlimited menu items\nKitchen display\nPriority support'}
+                            rows={4}
+                            aria-invalid={errors.highlights ? 'true' : 'false'}
+                            className={`${inputClass} ${errors.highlights ? 'border-rose-400! focus:border-rose-500!' : ''}`}
                         />
                     </Field>
                 </FormSection>
@@ -521,8 +646,9 @@ const VisibilityCard = ({ active, onClick, title, desc }) => (
     </button>
 );
 
-const FeatureToggle = ({ label, enabled, onChange }) => (
+const FeatureToggle = ({ id, label, enabled, onChange }) => (
     <button
+        id={id}
         type="button"
         onClick={() => onChange(!enabled)}
         aria-pressed={enabled}

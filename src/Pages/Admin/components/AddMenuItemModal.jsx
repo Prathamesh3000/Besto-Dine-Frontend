@@ -736,7 +736,7 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
                                     suggestion datalist so the old dropdown options are still
                                     one click away, but the chef can enter exact values like
                                     "8 min" or "3-4 person" without being boxed in. */}
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 items-start gap-4 mt-5">
                                     <div>
                                         <label className="block text-sm font-medium text-[#344054] mb-1.5 font-manrope">Cooking Time</label>
                                         <input
@@ -756,7 +756,7 @@ const AddMenuItemModal = ({ onClose, editItem, onRefresh }) => {
                                             <option value="30+ min" />
                                         </datalist>
                                     </div>
-                                    <div>
+                                    <div className="sm:col-span-2 sm:order-last">
                                         <label className="block text-sm font-medium text-[#344054] mb-1.5 font-manrope">Prep Time (min)</label>
                                         <input
                                             type="number"

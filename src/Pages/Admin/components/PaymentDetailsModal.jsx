@@ -234,7 +234,7 @@ const PaymentDetailsModal = ({ payment, onClose, onRefundComplete }) => {
             const refundBody = {
                 orderId: payment._orderId || payment.id,
                 amount: refundData.amount,
-                reason: refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason,
+                reason: (refundData.reason === 'Other' ? refundData.specifyReason : refundData.reason)?.trim() || 'Admin refund',
             }
             // One key per refund action (order+amount+reason); a retry of the same
             // refund reuses it so it can never be issued twice.

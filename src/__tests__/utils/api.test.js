@@ -550,6 +550,18 @@ describe('response interceptor — errors and toasts', () => {
     expect(tenant.getActiveTenantSlug()).toBe('spice')
   })
 
+  test('TENANT_REQUIRED on the platform portal is left alone (platform users have no restaurant)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    localStorage.setItem('activeTenant', JSON.stringify({ slug: 'old' }))
+    go('/superadmin/leads')
+    const { default: api } = await loadApi()
+    const tenant = await import('@/utils/tenant')
+    on('get', '/menu', (c) => reply(c, 400, { code: 'TENANT_REQUIRED' }))
+    await expect(api.get('/menu')).rejects.toBeTruthy()
+    // an off-portal page would have cleared this tenant and bounced to the branch picker
+    expect(tenant.getActiveTenantSlug()).toBe('old')
+  })
+
   test('BRANCH_NOT_FOUND drops only the dead branch', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     localStorage.setItem('activeTenant', JSON.stringify({ slug: 'spice', branch: { _id: 'dead' } }))
@@ -588,6 +600,32 @@ describe('response interceptor — errors and toasts', () => {
     expect(toastError).toHaveBeenCalledTimes(1)
     expect(toastError).toHaveBeenCalledWith('Please sign in as Super Admin', expect.anything())
     expect(sessionStorage.getItem('bd_auth_notice')).toBe('Please sign in as Super Admin')
+  })
+})
+
+describe('platformstaff 403s', () => {
+  test('PLATFORM_ACCESS_DENIED is a normal answer: no sign-out, no bounce, session kept', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    localStorage.setItem('platform_token', 'P')
+    localStorage.setItem('platform_user', JSON.stringify({ role: 'platformstaff', platformAccess: { leads: 'view' } }))
+    go('/superadmin/leads')
+    const { default: api } = await loadApi()
+    on('get', '/superadmin/plans', (c) => reply(c, 403, { code: 'PLATFORM_ACCESS_DENIED', message: 'No access' }))
+    await expect(api.get('/superadmin/plans')).rejects.toBeTruthy()
+    vi.runAllTimers()
+    expect(sessionStorage.getItem('bd_auth_notice')).toBeNull()
+    expect(localStorage.getItem('platform_token')).toBe('P')
+    expect(localStorage.getItem('platform_user')).not.toBeNull()
+  })
+
+  test('a platformstaff platform session is not treated as a wrong-account session', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    localStorage.setItem('platform_user', JSON.stringify({ role: 'platformstaff' }))
+    go('/superadmin/leads')
+    const { default: api } = await loadApi()
+    on('get', '/superadmin/stats', (c) => reply(c, 403, { message: 'Forbidden' }))
+    await Promise.allSettled([api.get('/superadmin/stats')])
+    expect(sessionStorage.getItem('bd_auth_notice')).toBeNull()
   })
 })
 

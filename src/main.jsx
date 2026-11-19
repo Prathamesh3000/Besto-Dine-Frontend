@@ -9,9 +9,11 @@ import App from './App.jsx'
 import UpdateAvailableToast from './Components/Common/UpdateAvailableToast'
 import { migrateLegacyPlatformSession } from './utils/authStorage'
 import { initSentry, Sentry } from './utils/sentry'
+import { installErrorToastDedupe } from './utils/dedupeToast'
 
 // Error reporting: no-op unless VITE_SENTRY_DSN is set at build time.
 const sentryOn = initSentry()
+installErrorToastDedupe()
 
 // One-time move of a Super Admin session from the shared staff_* keys to
 // its own platform_* keys (see utils/authStorage). Runs before the first

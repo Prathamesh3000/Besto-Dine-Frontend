@@ -15,8 +15,10 @@ import {
     Globe,
     BookOpen,
     ShieldCheck,
+    Users,
 } from 'lucide-react';
 import { useAuth } from '../../Context/AuthContext';
+import { PORTAL_NAV, canSeeNavItem } from './portalAccess';
 
 /**
  * SuperAdminLayout — chrome for the BestoDine platform operator portal.
@@ -35,18 +37,22 @@ import { useAuth } from '../../Context/AuthContext';
  *           via the chevron in the brand header
  */
 
-const NAV_ITEMS = [
-    { to: '/superadmin/dashboard',         label: 'Overview',          icon: LayoutDashboard },
-    { to: '/superadmin/restaurants',       label: 'Restaurants',       icon: Store },
-    { to: '/superadmin/pending-approvals', label: 'Pending Approvals', icon: Inbox },
-    { to: '/superadmin/leads',             label: 'Leads',             icon: Megaphone },
-    { to: '/superadmin/marketing',         label: 'Marketing',         icon: Globe },
-    { to: '/superadmin/blog',              label: 'Blog',              icon: BookOpen },
-    { to: '/superadmin/plans',             label: 'Plans',             icon: Receipt },
-    { to: '/superadmin/payments',          label: 'Payments',          icon: CreditCard },
-    { to: '/superadmin/audit-logs',        label: 'Audit Log',         icon: ClipboardList },
-    { to: '/superadmin/security',          label: 'Security',          icon: ShieldCheck },
-];
+// Which module gates each item (and which are full-super-admin only) lives
+// in portalAccess.js so routing and post-login redirects share it.
+const NAV_META = {
+    '/superadmin/dashboard':         { label: 'Overview',          icon: LayoutDashboard },
+    '/superadmin/restaurants':       { label: 'Restaurants',       icon: Store },
+    '/superadmin/pending-approvals': { label: 'Pending Approvals', icon: Inbox },
+    '/superadmin/leads':             { label: 'Leads',             icon: Megaphone },
+    '/superadmin/marketing':         { label: 'Marketing',         icon: Globe },
+    '/superadmin/blog':              { label: 'Blog',              icon: BookOpen },
+    '/superadmin/plans':             { label: 'Plans',             icon: Receipt },
+    '/superadmin/payments':          { label: 'Payments',          icon: CreditCard },
+    '/superadmin/audit-logs':        { label: 'Audit Log',         icon: ClipboardList },
+    '/superadmin/security':          { label: 'Security',          icon: ShieldCheck },
+    '/superadmin/team':              { label: 'Team',              icon: Users },
+};
+const NAV_ITEMS = PORTAL_NAV.map((item) => ({ ...item, ...NAV_META[item.to] }));
 
 const TITLE_BY_PATH = {
     '/superadmin/dashboard':         { title: 'Platform Overview',  crumb: 'Overview' },
@@ -59,6 +65,7 @@ const TITLE_BY_PATH = {
     '/superadmin/payments':          { title: 'Subscription Payments', crumb: 'Payments' },
     '/superadmin/audit-logs':        { title: 'Audit Log',           crumb: 'Audit Log' },
     '/superadmin/security':          { title: 'Security',            crumb: 'Security' },
+    '/superadmin/team':              { title: 'Team',                crumb: 'Team' },
 };
 
 const getCrumb = (pathname) => {
@@ -76,6 +83,8 @@ const getCrumb = (pathname) => {
 
 const SuperAdminLayout = () => {
     const { user, logout } = useAuth();
+    const isTeamMember = user?.role === 'platformstaff';
+    const navItems = NAV_ITEMS.filter((item) => canSeeNavItem(user, item));
     const navigate = useNavigate();
     const location = useLocation();
     const [collapsed, setCollapsed] = useState(false);
@@ -119,7 +128,7 @@ const SuperAdminLayout = () => {
             >
                 {/* Brand */}
                 <div className={`h-16 px-4 flex items-center border-b border-orange-100/70 ${collapsed ? 'md:justify-center md:px-2' : 'justify-between'}`}>
-                    <Link to="/superadmin/dashboard" className="flex items-center gap-3 min-w-0">
+                    <Link to={navItems[0]?.to || '/superadmin'} className="flex items-center gap-3 min-w-0">
                         <div className="w-10 h-10 rounded-xl bg-linear-to-br from-[#FE8301] to-[#e57601] text-white font-bold flex items-center justify-center shadow-[0_6px_16px_rgba(254,131,1,0.28)] shrink-0">
                             B
                         </div>
@@ -151,7 +160,7 @@ const SuperAdminLayout = () => {
                             Workspace
                         </div>
                     )}
-                    {NAV_ITEMS.map(item => {
+                    {navItems.map(item => {
                         const Icon = item.icon;
                         return (
                             <NavLink
@@ -210,7 +219,7 @@ const SuperAdminLayout = () => {
                             </div>
                             <div className="min-w-0 flex-1">
                                 <div className="text-xs font-semibold text-gray-900 truncate">
-                                    {user?.name || 'Super Admin'}
+                                    {user?.name || (isTeamMember ? 'Team member' : 'Super Admin')}
                                 </div>
                                 <div className="text-[11px] text-gray-500 truncate">{user?.email}</div>
                             </div>
@@ -252,7 +261,7 @@ const SuperAdminLayout = () => {
                     <div className="min-w-0 flex-1">
                         {meta.crumb && (
                             <nav className="hidden sm:flex items-center text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400 mb-0.5">
-                                <span>Super Admin</span>
+                                <span>{isTeamMember ? 'Team' : 'Super Admin'}</span>
                                 <ChevronRight size={11} className="mx-1" />
                                 <span>{meta.crumb}</span>
                                 {meta.leaf && (
@@ -275,7 +284,7 @@ const SuperAdminLayout = () => {
                         <div className="hidden md:flex items-center gap-3 pl-3 ml-1 border-l border-orange-100/80">
                             <div className="text-right hidden lg:block">
                                 <div className="text-xs font-semibold text-gray-900 truncate max-w-[160px]">
-                                    {user?.name || 'Super Admin'}
+                                    {user?.name || (isTeamMember ? 'Team member' : 'Super Admin')}
                                 </div>
                                 <div className="text-[10px] text-gray-500 truncate max-w-[160px]">{user?.email}</div>
                             </div>

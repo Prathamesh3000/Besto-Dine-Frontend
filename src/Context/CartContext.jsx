@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext';
 import { isDineInLocked, needsTableScan, requestTableScan } from '../utils/dineInSession';
 import { CUSTOMER_DATA_CLEARED_EVENT } from '../utils/customerSession';
 import { isDineInSelfOrderBlocked, QR_MENU_ONLY_NOTE } from '../utils/customerOrdering';
-import { mergeLine, countDistinctLines, cartSubtotal } from '../utils/cart';
+import { mergeLine, countDistinctLines, cartSubtotal, customerLineKey } from '../utils/cart';
 import { getActiveTenantSlug, subscribeActiveTenant } from '../utils/tenant';
 import toast from 'react-hot-toast';
 
@@ -45,12 +45,41 @@ function isDefaultCartSlot(key) {
 // per-table shape. If the legacy key exists and the new one doesn't,
 // move the entire blob into the default slot so nothing the customer
 // had in their cart disappears on first load after the upgrade.
+// Carts persisted before lines were keyed by size/toppings hold a sized
+// customer line under the bare product id. Re-key such a line to its
+// size-aware key (and stamp `lineKey`) so adding the same size merges
+// into it and another size becomes its own line. Waiter lines (id is
+// already the combo key, no selectedSizes[]) and plain lines are left
+// alone.
+export function migrateLineKeys(carts) {
+    const out = {};
+    for (const [slotName, slot] of Object.entries(carts || {})) {
+        if (!slot || typeof slot !== 'object') { out[slotName] = slot; continue; }
+        const next = {};
+        for (const [key, line] of Object.entries(slot)) {
+            if (line && typeof line === 'object' && !line.lineKey && String(line.id) === key) {
+                const want = customerLineKey(key, line);
+                if (want !== key) {
+                    const existing = next[want];
+                    next[want] = existing
+                        ? { ...existing, quantity: (Number(existing.quantity) || 0) + (Number(line.quantity) || 0) }
+                        : { ...line, lineKey: want };
+                    continue;
+                }
+            }
+            next[key] = line;
+        }
+        out[slotName] = next;
+    }
+    return out;
+}
+
 function loadInitial() {
     try {
         const fresh = localStorage.getItem(STORAGE_KEY);
         if (fresh) {
             const parsed = JSON.parse(fresh);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return migrateLineKeys(parsed);
         }
         const legacy = localStorage.getItem(LEGACY_KEY);
         if (legacy) {
@@ -64,7 +93,7 @@ function loadInitial() {
                 }, {})
                 : (parsed && typeof parsed === 'object' ? parsed : {});
             localStorage.removeItem(LEGACY_KEY);
-            return { [DEFAULT_SLOT]: asObject };
+            return migrateLineKeys({ [DEFAULT_SLOT]: asObject });
         }
     } catch (e) {
         console.error('Failed to parse waiter cart from localStorage', e);
@@ -188,7 +217,11 @@ export const CartProvider = ({ children }) => {
         setActiveTableIdState(tableId ? String(tableId) : null);
     }, []);
 
-    const updateQuantity = useCallback((productId, delta, productDetails = {}) => {
+    // `productId` is the menu item id; for a sized / topped item the
+    // line key is derived from the selection in `productDetails`
+    // (customerLineKey). `opts.exactKey` means `productId` already IS a
+    // stored line key (the cart page's +/- / remove on an existing line).
+    const updateQuantity = useCallback((productId, delta, productDetails = {}, opts = {}) => {
         if (!productId) return;
         const numericDelta = Number(delta);
         if (isNaN(numericDelta)) return;
@@ -235,29 +268,44 @@ export const CartProvider = ({ children }) => {
 
         setCartsByTable(prev => {
             const slot = prev[slotKey] || {};
-            const merged = mergeLine(slot[productId] || {}, productDetails, numericDelta, 'quantity');
+            const key = opts.exactKey ? productId : customerLineKey(productId, productDetails);
+            const merged = mergeLine(slot[key] || {}, productDetails, numericDelta, 'quantity');
 
             const nextSlot = { ...slot };
             if (!merged) {
-                delete nextSlot[productId];
+                delete nextSlot[key];
             } else {
-                nextSlot[productId] = merged;
+                nextSlot[key] = key === String(productId) || opts.exactKey
+                    ? merged
+                    : { ...merged, lineKey: key };
             }
             return { ...prev, [slotKey]: nextSlot };
         });
     }, [slotKey, isStaff]);
 
+    // `itemId` is a stored line key. When the update changes the size /
+    // toppings (the customize modal) the line moves to its new key and
+    // merges into a line already there.
     const updateCartItem = useCallback((itemId, updates) => {
         setCartsByTable(prev => {
             const slot = prev[slotKey] || {};
             if (!slot[itemId]) return prev;
-            return {
-                ...prev,
-                [slotKey]: {
-                    ...slot,
-                    [itemId]: { ...slot[itemId], ...updates },
-                },
+            const updated = { ...slot[itemId], ...updates };
+            const touchesSelection = updates && ('selectedSizes' in updates || 'selectedToppings' in updates);
+            const baseId = String(updated.id ?? itemId);
+            const newKey = touchesSelection ? customerLineKey(baseId, updated) : itemId;
+            if (newKey === itemId) {
+                return { ...prev, [slotKey]: { ...slot, [itemId]: updated } };
+            }
+            const nextSlot = { ...slot };
+            delete nextSlot[itemId];
+            const other = nextSlot[newKey];
+            nextSlot[newKey] = {
+                ...updated,
+                lineKey: newKey,
+                quantity: (Number(updated.quantity) || 0) + (other ? Number(other.quantity) || 0 : 0),
             };
+            return { ...prev, [slotKey]: nextSlot };
         });
     }, [slotKey]);
 

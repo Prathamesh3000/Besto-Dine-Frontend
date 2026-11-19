@@ -516,7 +516,7 @@ function ScanTable() {
             join the previous group's order (socket scanSessionId gate).
             Tell the user to flag staff instead of promising a non-existent
             "add to existing order" path. */}
-        {table.status === 'occupied' && (
+        {(table.openBill ?? table.status === 'occupied') && (
           <div className="mt-4 bg-gradient-to-br from-[#FFF9F2] to-[#FFF4E6] border border-orange-200/60 rounded-[20px] px-5 py-4 flex items-start gap-3 shadow-[0px_4px_12px_rgba(254,131,1,0.06)]">
             <div className="w-9 h-9 rounded-full bg-white border border-orange-100 flex items-center justify-center flex-shrink-0 shadow-sm">
               <AlertCircle size={18} className="text-[#FE8301]" strokeWidth={2.2} />

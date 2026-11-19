@@ -52,7 +52,7 @@ const CartPage = () => {
     }, []);
 
     const handleQuantityChange = (item, delta) => {
-        updateQuantity(item.id, delta, item);
+        updateQuantity(item.id, delta, item, { exactKey: true });
     };
 
     const handleOpenInstructions = (item) => {
@@ -90,8 +90,8 @@ const CartPage = () => {
                 {/* Cart Items */}
                 <main className="px-4 sm:px-6 mt-4 sm:mt-6 space-y-4">
                 {Object.values(cartItems).length > 0 ? (
-                    Object.values(cartItems).map((item) => (
-                        <div key={item.id} className="relative bg-white rounded-[24px] border border-[#F2F2F2] p-4 shadow-sm overflow-hidden mb-4">
+                    Object.values(cartItems).map((item, idx) => (
+                        <div key={`${item.lineKey || item.id}-${idx}`} className="relative bg-white rounded-[24px] border border-[#F2F2F2] p-4 shadow-sm overflow-hidden mb-4">
                             {/* Bookmark Icon */}
                             <div className="absolute top-4 right-4 text-[#8D848F]/20">
                                 <Bookmark size={20} fill="currentColor" stroke="none" />
@@ -100,7 +100,11 @@ const CartPage = () => {
                             <div className="flex gap-4">
                                 {/* Item Image */}
                                 <div className="relative w-[110px] h-[110px] flex-shrink-0">
-                                    <img src={item.image} alt={item.name || item.title || ''} className="w-full h-full object-cover rounded-[16px]" />
+                                    {item.image ? (
+                                        <img src={item.image} alt={item.name || item.title || ''} className="w-full h-full object-cover rounded-[16px]" />
+                                    ) : (
+                                        <div className="w-full h-full rounded-[16px] bg-gray-100" aria-hidden="true" />
+                                    )}
                                     <div className="absolute top-2 left-2 w-5 h-5 bg-white border border-[#E8E8E8] flex items-center justify-center rounded-sm shadow-sm">
                                         <div className={`w-3 h-3 rounded-full ${item.isVeg !== false ? 'bg-[#34C759]' : 'bg-[#FF3B30]'}`} />
                                     </div>
@@ -118,9 +122,9 @@ const CartPage = () => {
                                     </button>
 
                                     <div className="flex flex-wrap gap-2 mt-3">
-                                        {item.selectedSize && (
+                                        {(item.selectedSize || item.selectedSizes?.[0]?.name) && (
                                             <span className="text-[11px] font-bold text-[#645E66] bg-[#F9F1FB] px-3 py-1.5 rounded-full">
-                                                {item.selectedSize}
+                                                {item.selectedSize || item.selectedSizes[0].name}
                                             </span>
                                         )}
                                         {item.selectedToppings?.map((topping) => (

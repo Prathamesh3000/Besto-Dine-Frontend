@@ -15,7 +15,7 @@
  * Bill maths (tax, charges, rounding) is NOT here — see utils/billing.
  */
 
-import { round2 } from './pricing';
+import { round2, resolveLinePrice } from './pricing';
 
 function num(v) {
     const n = Number(v);
@@ -52,6 +52,44 @@ export function toppingSignature(toppings) {
 export function cartLineKey(productId, { size = null, toppings = [] } = {}) {
     const sizeLabel = (size && typeof size === 'object') ? (size.name ?? size.id) : size;
     return `${productId}-${sizeLabel || 'default'}-${toppingSignature(toppings)}`;
+}
+
+/**
+ * Line identity in the customer cart store (CartContext). A plain item
+ * (no size, no toppings) keeps the bare product id, which is the shape
+ * every stored cart and the Home / Search steppers already use. A line
+ * with a size and/or toppings gets the shared cartLineKey so Half and
+ * Full of the same dish are separate lines, while the same size and
+ * toppings merge. `details` is a cart line: { selectedSizes, selectedToppings }.
+ */
+export function customerLineKey(productId, details = {}) {
+    const size = Array.isArray(details?.selectedSizes) ? details.selectedSizes[0] : null;
+    const toppings = Array.isArray(details?.selectedToppings) ? details.selectedToppings : [];
+    const sizeName = size && typeof size === 'object' ? (size.name ?? size.id) : size;
+    if (!sizeName && toppingSignature(toppings) === '') return String(productId);
+    return cartLineKey(productId, { size: sizeName || null, toppings });
+}
+
+/**
+ * Quick-add (no picker) line for a menu item. A sized item is added with
+ * its default (cheapest) size stated explicitly, so the line's size and
+ * unit price always agree - never the flat base price with no size.
+ */
+export function quickAddLine(item) {
+    const sizes = Array.isArray(item?.sizes) ? item.sizes.filter((s) => s && s.name && Number.isFinite(Number(s.price))) : [];
+    if (!sizes.length || item?.isCombo) {
+        const unit = resolveLinePrice(item || {});
+        return { selectedSizes: [], selectedToppings: [], price: unit, unitPrice: unit };
+    }
+    const cheapest = sizes.reduce((a, b) => (Number(b.price) < Number(a.price) ? b : a));
+    const unit = resolveLinePrice(item, { size: cheapest });
+    return {
+        selectedSizes: [{ id: cheapest.id ?? cheapest._id ?? cheapest.name, name: cheapest.name, price: cheapest.price }],
+        selectedToppings: [],
+        size: cheapest.name,
+        price: unit,
+        unitPrice: unit,
+    };
 }
 
 /** Line identity of a kiosk cart line ({ menuItemId, size, addons }). */

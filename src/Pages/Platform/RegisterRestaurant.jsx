@@ -1,16 +1,26 @@
-// Hotel SELF-SIGNUP — route /register-restaurant. Two steps ("Your hotel",
-// "Your account") → POST /public/register-restaurant → "Application received".
-// The signup lands in Super Admin → Pending Approvals; the owner can sign in
-// at /staff-login once it's approved (until then login answers 403
-// SIGNUP_PENDING, which Pages/Login.jsx renders as a status panel).
-import React, { useEffect, useRef, useState } from 'react';
+// Hotel SELF-SIGNUP — route /register-restaurant (plan §5).
+// Steps: 1 "Your hotel" (name, city, web address, optional plan + billing
+// cycle), 2 "Your account", and — for a PAID plan only — 3 "Payment".
+// → POST /public/register-restaurant. 201 = instant start (the owner is
+// signed in and sent to the dashboard after a short ProvisioningProgress
+// screen); 202 = approval mode ("Application received", Super Admin →
+// Pending Approvals; login answers 403 SIGNUP_PENDING until approved).
+//
+// Outcome by chosen plan (getCTA in utils/planCta — one rule everywhere):
+//   trial-enabled plan → trial (same as /start-trial)
+//   free plan          → account active at once, no payment, no trial clock
+//   paid plan          → step 3: POST /public/register-order → Razorpay
+//                        checkout → register-restaurant with `payment`
+//   no plan            → "Decide later" = trial on the default trial plan
+// Enterprise (tier >= 30) plans are not selectable here — "Contact sales".
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
     Building2, MapPin, Globe, User, Mail, Phone, Lock, Eye, EyeOff, ArrowLeft, ArrowRight,
-    CheckCircle2, XCircle, Loader2, BadgeCheck, MailCheck, LogIn, Clock4, AlertCircle,
+    CheckCircle2, XCircle, Loader2, BadgeCheck, AlertCircle, CreditCard, RefreshCw, ShieldCheck,
 } from 'lucide-react';
 import { publicAPI } from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
@@ -18,10 +28,16 @@ import { setActiveTenant } from '../../utils/tenant';
 import { getPublicAppOrigin } from '../../utils/customerLinks';
 import { sanitizeMobileInput, mobileError, mobileInputAttrs } from '../../utils/mobile';
 import { passwordError, MIN_LENGTH } from '../../utils/passwordPolicy';
+import { getCTA, trialDaysOf } from '../../utils/planCta';
+import { isCycle, rowForCycle, formatINR, cycleSuffix, cycleLabel, DEFAULT_GST_RATE } from '../../utils/billingCycles';
 import PasswordStrengthMeter from '../../Components/Common/PasswordStrengthMeter';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
-import { PlatformBrand } from './components/PlatformChrome';
-import { usePageMeta, usePublicPlans, formatPlanPrice, readUtm } from './platformShared';
+import { usePageMeta, usePublicPlans, formatPlanCyclePrice, publicCycleOptions, readUtm } from './platformShared';
+import ProvisioningProgress from './components/ProvisioningProgress';
+import { useProvisioning, useProvisioningSteps } from './components/useProvisioning';
+import {
+    SignupShell, ApplicationReceived, FieldError, IconInput, FormErrorBanner, inputOk, inputErr, labelCls, primaryBtn,
+} from './components/SignupShared';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STEP1_FIELDS = new Set(['restaurantName', 'city', 'slug', 'planId']);
@@ -43,6 +59,12 @@ const FORM_FIELDS = new Set([
     'restaurantName', 'city', 'slug', 'planId', 'ownerName', 'contactEmail',
     'contactPhone', 'password', 'confirmPassword', 'acceptTerms',
 ]);
+// Payment outcomes the server reports on register-restaurant (not field errors).
+const PAYMENT_CODES = new Set(['PAYMENT_MISMATCH', 'PAYMENT_ALREADY_USED', 'PAYMENT_REQUIRED', 'PAYMENT_FAILED']);
+const RAZORPAY_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+// Server order amount may differ from the list price we showed by at most
+// this many rupees (rounding) before we stop and ask the user to review.
+const AMOUNT_TOLERANCE_RUPEES = 1;
 
 /** Name → URL slug, same shape the server accepts (a-z, 0-9, single hyphens). */
 function slugify(s) {
@@ -67,33 +89,61 @@ function sanitiseSlugInput(s) {
         .slice(0, 60);
 }
 
-const inputBase = 'w-full py-3 pr-4 border rounded-xl text-[15px] bg-white text-[#101828] placeholder:text-[#98A2B3] focus:outline-none focus:ring-2 transition-all';
-const inputOk = `${inputBase} border-[#D0D5DD] focus:ring-[#FE8301]/25 focus:border-[#FE8301]`;
-const inputErr = `${inputBase} border-red-400 focus:ring-red-200 focus:border-red-500`;
-const labelCls = 'block text-[13px] font-bold text-[#344054] mb-1.5';
-
-function FieldError({ id, message }) {
-    if (!message) return null;
-    return (
-        <p id={id} role="alert" className="mt-1.5 text-[12px] text-red-600 flex items-start gap-1">
-            <AlertCircle size={13} className="shrink-0 mt-px" /> {message}
-        </p>
-    );
+/** Load Razorpay checkout.js once (same pattern as Pages/Admin/Subscription). */
+function ensureRazorpay() {
+    if (window.Razorpay) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[src="${RAZORPAY_SRC}"]`);
+        if (existing) {
+            existing.addEventListener('load', resolve, { once: true });
+            existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay')), { once: true });
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = RAZORPAY_SRC;
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load Razorpay'));
+        document.body.appendChild(script);
+    });
 }
 
-function IconInput({ icon, id, error, className = '', ...props }) {
-    const Icon = icon;
+/** Paise (server) → rupees. */
+const paiseToRupees = (p) => (Number.isFinite(Number(p)) ? Number(p) / 100 : NaN);
+
+/** Monthly / Annual / 2-year toggle; `options` from publicCycleOptions(plans). */
+function CycleToggle({ options, value, onChange, idPrefix = 'signup-cycle' }) {
+    const { t } = useTranslation();
+    if (!options || options.length < 2) return null;
+    const names = {
+        monthly: t('platform.pricing.cycle_monthly', 'Monthly'),
+        annual: t('platform.pricing.cycle_annual', 'Annual'),
+        biennial: t('platform.pricing.cycle_biennial', '2-year'),
+    };
     return (
-        <div className="relative">
-            <Icon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#98A2B3] pointer-events-none" aria-hidden="true" />
-            <input
-                id={id}
-                name={id}
-                aria-invalid={error ? 'true' : 'false'}
-                aria-describedby={error ? `${id}-error` : undefined}
-                className={`${error ? inputErr : inputOk} pl-10 ${className}`}
-                {...props}
-            />
+        <div role="group" aria-label={t('platform.pricing.cycle_label', 'Billing period')} className="inline-flex items-center gap-1 rounded-full border border-[#EAECF0] bg-white p-1 shadow-sm">
+            {options.map(({ cycle: c, savings }) => {
+                const active = value === c;
+                return (
+                    <button
+                        key={c}
+                        type="button"
+                        onClick={() => onChange(c)}
+                        aria-pressed={active}
+                        data-testid={`${idPrefix}-${c}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition ${
+                            active ? 'bg-[#FE8301] text-white shadow' : 'text-[#475467] hover:bg-[#F9FAFB]'
+                        }`}
+                    >
+                        {names[c] || cycleLabel(c)}
+                        {savings > 0 && (
+                            <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${active ? 'bg-white/25 text-white' : 'bg-[#ECFDF3] text-[#067647]'}`}>
+                                {t('platform.pricing.save', 'Save {{pct}}%', { pct: savings })}
+                            </span>
+                        )}
+                    </button>
+                );
+            })}
         </div>
     );
 }
@@ -122,6 +172,11 @@ const RegisterRestaurant = () => {
         ownerName: '', contactEmail: '', contactPhone: '', password: '', confirmPassword: '',
         acceptTerms: false,
     }));
+    // Billing cycle for the plan picker / payment (?cycle= preselects).
+    const [billingCycle, setBillingCycle] = useState(() => {
+        const c = searchParams.get('cycle');
+        return isCycle(c) ? c : 'monthly';
+    });
     const [slugTouched, setSlugTouched] = useState(false);
     const [serverSuggestions, setServerSuggestions] = useState([]);
     const [errors, setErrors] = useState({});
@@ -133,13 +188,49 @@ const RegisterRestaurant = () => {
     const [showConfirm, setShowConfirm] = useState(false);
     const [phoneBlurred, setPhoneBlurred] = useState(false);
     const formErrorRef = useRef(null);
+    const { provisioning, start: startProvisioning } = useProvisioning();
+    const provisioningSteps = useProvisioningSteps();
+
+    // ── Payment step state ────────────────────────────────────────────
+    const [order, setOrder] = useState(null);          // register-order response
+    const [orderLoading, setOrderLoading] = useState(false);
+    const [orderError, setOrderError] = useState('');
+    const [orderNonce, setOrderNonce] = useState(0);   // bump → re-create the order
+    const [mismatch, setMismatch] = useState(null);    // { expected, actual } rupees
+    const [paying, setPaying] = useState(false);
 
     const plansQuery = usePublicPlans();
-    const plans = plansQuery.data || [];
+    const plans = useMemo(() => plansQuery.data || [], [plansQuery.data]);
     // ?plan= may carry a plan _id (pricing cards) or its slug (hand-made links).
-    const selectedPlan = values.planId
+    const matchedPlan = values.planId
         ? (plans.find(p => p._id === values.planId || (p.slug && p.slug === values.planId)) || null)
         : null;
+    // Enterprise plans are "Contact sales" — never selectable here.
+    const planKind = (p) => (p ? getCTA(p, billingCycle).kind : 'trial');
+    const selectedPlan = matchedPlan && planKind(matchedPlan) !== 'contact' ? matchedPlan : null;
+    const outcome = selectedPlan ? planKind(selectedPlan) : 'trial'; // trial | free | paid
+    const isPaid = outcome === 'paid';
+
+    const cycleOptions = useMemo(() => (plans.length ? publicCycleOptions(plans) : []), [plans]);
+    // Keep the toggle on a cycle some plan actually sells.
+    useEffect(() => {
+        if (cycleOptions.length && !cycleOptions.some(o => o.cycle === billingCycle)) {
+            setBillingCycle(cycleOptions[0].cycle);
+        }
+    }, [cycleOptions, billingCycle]);
+
+    // For a paid plan: the price row we charge. Falls back to the monthly row
+    // when the plan does not sell the chosen cycle (the server does the same).
+    const gstRate = Number.isFinite(Number(selectedPlan?.gstRate)) ? Number(selectedPlan.gstRate) : DEFAULT_GST_RATE;
+    const paidRow = isPaid
+        ? (rowForCycle(selectedPlan, billingCycle, gstRate) || rowForCycle(selectedPlan, 'monthly', gstRate))
+        : null;
+    const effectiveCycle = paidRow ? paidRow.cycle : billingCycle;
+    // What the page shows BEFORE the order call: list price + GST.
+    const displayedTotal = paidRow ? paidRow.total : null;
+    // What we charge once the order exists (server is authoritative).
+    const orderTotal = order ? paiseToRupees(order.amount) : NaN;
+    const payAmount = Number.isFinite(orderTotal) && !mismatch ? orderTotal : displayedTotal;
 
     // ── Web address availability ──────────────────────────────────────
     // Until the owner edits the address it follows the hotel name
@@ -268,22 +359,25 @@ const RegisterRestaurant = () => {
         focusField('ownerName');
     };
 
-    // ── Submit ────────────────────────────────────────────────────────
-    const handleSubmit = async (ev) => {
-        ev.preventDefault();
-        setFormError('');
+    /** Both steps valid? Moves to the offending step and focuses the field otherwise. */
+    const validateAll = () => {
         const e1 = validateStep1();
         if (Object.keys(e1).length) {
             setErrors(e1);
             setStep(1);
             focusField(Object.keys(e1)[0]);
-            return;
+            return false;
         }
         const e2 = validateStep2();
         setErrors(e2);
         const first = Object.keys(e2)[0];
-        if (first) { focusField(first); return; }
+        if (first) { setStep(2); focusField(first); return false; }
+        return true;
+    };
 
+    // ── Submit ────────────────────────────────────────────────────────
+    /** POST /public/register-restaurant; `payment` only after Razorpay checkout. */
+    const submitRegistration = async (payment) => {
         // Send the address only when the owner chose it or the server has
         // confirmed the name-derived one; otherwise let the server derive it.
         const sendSlug = slugTouched
@@ -299,31 +393,44 @@ const RegisterRestaurant = () => {
             acceptTerms: true,
             source: attribution.source,
             ...(sendSlug ? { slug: sendSlug } : {}),
-            ...(selectedPlan ? { planId: selectedPlan._id } : {}),
+            ...(selectedPlan ? { planId: selectedPlan._id, billingCycle: effectiveCycle } : {}),
+            ...(payment ? { payment } : {}),
             ...(attribution.utm ? { utm: attribution.utm } : {}),
         };
 
         setSubmitting(true);
+        setFormError('');
         try {
             const res = await publicAPI.registerRestaurant(payload);
             const data = res.data?.data || {};
+            const name = data.restaurant?.name || trimmedName;
             // INSTANT START (201): the response is the /auth/login body plus
-            // data.trialStarted — sign the owner in and open the dashboard.
-            // (202 = approval mode: no tokens, show the pending screen.)
-            if (res.status === 201 && data.trialStarted && (res.data?.token || res.data?.cookieAuth)) {
+            // data.trialStarted (trial) or an active subscription (free /
+            // paid) — show the provisioning screen, sign the owner in and
+            // open the dashboard. (202 = approval mode: no tokens.)
+            if (res.status === 201 && (res.data?.token || res.data?.cookieAuth)) {
                 // eslint-disable-next-line no-unused-vars
                 const { success, data: _d, message: _m, ...loginBody } = res.data;
-                const session = startSession(loginBody);
-                if (session?.success) {
-                    const tn = session.user?.tenant;
-                    if (tn?.slug) setActiveTenant({ slug: tn.slug, name: tn.name, _id: tn._id });
-                    toast.success(t('register_hotel.toast_trial_started', 'Your 14-day free trial has started'), { id: 'register-hotel-success' });
-                    navigate('/admin/dashboard', { replace: true });
-                    return;
-                }
+                const successToast = data.trialStarted
+                    ? t('register_hotel.toast_trial_started', 'Your 14-day free trial has started')
+                    : payment
+                        ? t('register_hotel.toast_paid_active', 'Payment received — your account is active')
+                        : t('register_hotel.toast_free_active', 'Your account is active — welcome to BestoDine');
+                startProvisioning(name, provisioningSteps.length, () => {
+                    const session = startSession(loginBody);
+                    toast.success(successToast, { id: 'register-hotel-success' });
+                    if (session?.success) {
+                        const tn = session.user?.tenant;
+                        if (tn?.slug) setActiveTenant({ slug: tn.slug, name: tn.name, _id: tn._id });
+                        navigate('/admin/dashboard', { replace: true });
+                    } else {
+                        navigate('/staff-login', { replace: true });
+                    }
+                });
+                return;
             }
             setResult({
-                name: data.restaurant?.name || trimmedName,
+                name,
                 slug: data.restaurant?.slug || sendSlug || '',
                 pageUrl: data.pageUrl || '',
                 message: data.message || res.data?.message || '',
@@ -345,6 +452,12 @@ const RegisterRestaurant = () => {
                 setFormError(t('register_hotel.err_network', "We couldn't reach BestoDine. Check your connection and try again."));
             } else if (status === 429) {
                 setFormError(body.message || t('register_hotel.err_rate', 'Too many signup attempts from this network. Please try again in a little while.'));
+            } else if (PAYMENT_CODES.has(body.code)) {
+                // Payment was taken but the server could not match it to this
+                // order (or it was already used): show the server's message on
+                // the payment step; the owner can refresh the order and retry.
+                setStep(3);
+                setFormError(body.message || t('register_hotel.err_payment', 'We could not verify your payment. Please review and try again.'));
             } else {
                 let field = CODE_FIELDS[body.code] || FIELD_ALIASES[body.field] || body.field;
                 if (!FORM_FIELDS.has(field)) field = null;
@@ -358,7 +471,7 @@ const RegisterRestaurant = () => {
                         queryClient.invalidateQueries({ queryKey: ['public', 'slug-availability'] });
                     }
                     setErrors(prev => ({ ...prev, [field]: message }));
-                    if (STEP1_FIELDS.has(field)) setStep(1);
+                    setStep(STEP1_FIELDS.has(field) ? 1 : 2);
                     focusField(field);
                 } else {
                     setFormError(message);
@@ -367,6 +480,107 @@ const RegisterRestaurant = () => {
             setTimeout(() => formErrorRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }), 60);
         } finally {
             setSubmitting(false);
+            setPaying(false);
+        }
+    };
+
+    /** Step 2 submit: paid plan → payment step; otherwise register now. */
+    const handleSubmit = async (ev) => {
+        ev.preventDefault();
+        setFormError('');
+        if (!validateAll()) return;
+        if (isPaid) {
+            setStep(3);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+        await submitRegistration(null);
+    };
+
+    // ── Payment step: create the Razorpay order ───────────────────────
+    // Re-runs when the plan or cycle changes (toggle on step 3) or after
+    // "Refresh amount". The displayed total is compared with the server's
+    // amount: a difference beyond ₹1 stops the flow for review.
+    const selectedPlanId = selectedPlan?._id || '';
+    useEffect(() => {
+        if (step !== 3 || !isPaid || !selectedPlanId) return undefined;
+        let cancelled = false;
+        setOrder(null);
+        setMismatch(null);
+        setOrderError('');
+        setOrderLoading(true);
+        const expected = displayedTotal;
+        publicAPI.registerOrder({ planId: selectedPlanId, billingCycle: effectiveCycle })
+            .then((res) => {
+                if (cancelled) return;
+                const o = res.data?.data || res.data || {};
+                const actual = paiseToRupees(o.amount);
+                if (!Number.isFinite(actual)) {
+                    setOrderError(t('register_hotel.pay_order_failed', 'We could not prepare your payment. Please try again.'));
+                    return;
+                }
+                if (Number.isFinite(expected) && Math.abs(actual - expected) > AMOUNT_TOLERANCE_RUPEES) {
+                    setMismatch({ expected, actual });
+                }
+                setOrder(o);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                const body = err.response?.data || {};
+                setOrderError(body.message || (err.response
+                    ? t('register_hotel.pay_order_failed', 'We could not prepare your payment. Please try again.')
+                    : t('register_hotel.err_network', "We couldn't reach BestoDine. Check your connection and try again.")));
+            })
+            .finally(() => { if (!cancelled) setOrderLoading(false); });
+        return () => { cancelled = true; };
+        // displayedTotal is derived from selectedPlanId + effectiveCycle; t is stable.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [step, isPaid, selectedPlanId, effectiveCycle, orderNonce]);
+
+    /** "Pay ₹X" → Razorpay checkout → register-restaurant with the payment proof. */
+    const payNow = async () => {
+        if (!order || mismatch || orderLoading || paying || submitting) return;
+        setFormError('');
+        setPaying(true);
+        try {
+            await ensureRazorpay();
+            const rzp = new window.Razorpay({
+                key: order.keyId,
+                amount: order.amount,
+                currency: order.currency || 'INR',
+                name: 'BestoDine',
+                description: t('register_hotel.pay_description', '{{plan}} plan — {{cycle}}', {
+                    plan: order.plan?.name || selectedPlan?.name || '', cycle: cycleLabel(effectiveCycle),
+                }),
+                order_id: order.orderId,
+                prefill: {
+                    name: values.ownerName.trim(),
+                    email: values.contactEmail.trim().toLowerCase(),
+                    contact: values.contactPhone,
+                },
+                handler: (response) => {
+                    submitRegistration({
+                        razorpayOrderId: response.razorpay_order_id,
+                        razorpayPaymentId: response.razorpay_payment_id,
+                        razorpaySignature: response.razorpay_signature,
+                    });
+                },
+                modal: {
+                    ondismiss: () => {
+                        setPaying(false);
+                        toast(t('register_hotel.pay_cancelled', 'Payment cancelled — your details are kept, pay when you are ready.'), { icon: '!' });
+                    },
+                },
+                theme: { color: '#FE8301' },
+            });
+            rzp.on?.('payment.failed', (resp) => {
+                setPaying(false);
+                setFormError(resp?.error?.description || t('register_hotel.pay_failed', 'Payment failed. You have not been charged — please try again.'));
+            });
+            rzp.open();
+        } catch {
+            setPaying(false);
+            setFormError(t('register_hotel.pay_load_failed', 'Could not open the payment window. Check your connection and try again.'));
         }
     };
 
@@ -375,88 +589,57 @@ const RegisterRestaurant = () => {
         ? mobileError(values.contactPhone)
         : '';
 
-    // ── Success ───────────────────────────────────────────────────────
-    if (step === 'done' && result) {
-        const pageUrl = result.pageUrl || (result.slug ? `${origin}/${result.slug}` : '');
+    // ── Provisioning (201) ────────────────────────────────────────────
+    if (provisioning) {
         return (
-            <Shell>
-                <div className="bg-white rounded-3xl border border-[#EAECF0] shadow-[0_12px_40px_rgba(16,24,40,0.08)] p-6 sm:p-8" role="status">
-                    <div className="w-14 h-14 rounded-2xl bg-[#ECFDF3] text-[#067647] flex items-center justify-center">
-                        <CheckCircle2 size={28} />
-                    </div>
-                    <h1 className="mt-5 text-[26px] font-extrabold tracking-tight text-[#101828]">
-                        {t('register_hotel.done_title', 'Application received')}
-                    </h1>
-                    <p className="mt-2 text-[15px] text-[#475467] leading-relaxed">
-                        {result.message || t('register_hotel.done_body', 'Thanks for registering {{name}} on BestoDine.', { name: result.name })}
-                    </p>
-                    <h2 className="mt-6 text-[13px] font-bold uppercase tracking-wide text-[#667085]">{t('register_hotel.next_title', 'What happens next')}</h2>
-                    <ol className="mt-3 space-y-4">
-                        <li className="flex gap-3">
-                            <span className="w-9 h-9 rounded-xl bg-[#FFF3E6] text-[#FE8301] flex items-center justify-center shrink-0"><Clock4 size={17} /></span>
-                            <span className="text-[14px] text-[#344054] leading-relaxed">
-                                <strong className="text-[#101828]">{t('register_hotel.next1_title', 'We review your application')}</strong><br />
-                                {t('register_hotel.next1_body', 'Usually within one business day.')}
-                            </span>
-                        </li>
-                        <li className="flex gap-3">
-                            <span className="w-9 h-9 rounded-xl bg-[#FFF3E6] text-[#FE8301] flex items-center justify-center shrink-0"><MailCheck size={17} /></span>
-                            <span className="text-[14px] text-[#344054] leading-relaxed">
-                                <strong className="text-[#101828]">{t('register_hotel.next2_title', 'You get an email when approved')}</strong><br />
-                                {t('register_hotel.next2_body', "We'll write to {{email}}. Then sign in at staff login with the password you just created.", { email: result.email })}
-                            </span>
-                        </li>
-                        {pageUrl && (
-                            <li className="flex gap-3">
-                                <span className="w-9 h-9 rounded-xl bg-[#FFF3E6] text-[#FE8301] flex items-center justify-center shrink-0"><Globe size={17} /></span>
-                                <span className="text-[14px] text-[#344054] leading-relaxed min-w-0">
-                                    <strong className="text-[#101828]">{t('register_hotel.next3_title', 'Your page goes live')}</strong><br />
-                                    {t('register_hotel.next3_body', 'Once approved, guests can find you at')}{' '}
-                                    <span className="font-mono text-[13px] font-semibold text-[#B54708] break-all">{pageUrl.replace(/^https?:\/\//, '')}</span>
-                                </span>
-                            </li>
-                        )}
-                    </ol>
-                    {showConfirm && (
-                        <SubmittedDialog
-                            name={result.name}
-                            email={result.email}
-                            onClose={() => setShowConfirm(false)}
-                        />
-                    )}
-                    {result.planName && (
-                        <p className="mt-5 text-[13px] text-[#667085]">
-                            {t('register_hotel.done_plan', 'Requested plan:')}{' '}
-                            <span className="font-semibold text-[#344054] capitalize">{result.planName}</span>
-                            {' — '}{t('register_hotel.done_plan_note', 'our team will confirm it when approving your account.')}
-                        </p>
-                    )}
-                    <div className="mt-8 flex flex-col sm:flex-row gap-3">
-                        <Link to="/staff-login" className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] transition-colors">
-                            <LogIn size={17} /> {t('register_hotel.go_login', 'Go to staff login')}
-                        </Link>
-                        <Link to="/" className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[15px] font-bold text-[#1A181B] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors">
-                            {t('register_hotel.go_home', 'Back to BestoDine')}
-                        </Link>
-                    </div>
-                </div>
-            </Shell>
+            <SignupShell>
+                <ProvisioningProgress name={provisioning.name} steps={provisioningSteps} done={provisioning.done} />
+            </SignupShell>
+        );
+    }
+
+    // ── Success (202) ─────────────────────────────────────────────────
+    if (step === 'done' && result) {
+        return (
+            <SignupShell>
+                <ApplicationReceived result={result} showConfirm={showConfirm} onCloseConfirm={() => setShowConfirm(false)} />
+            </SignupShell>
         );
     }
 
     // ── Form ──────────────────────────────────────────────────────────
-    const stepLabels = [t('register_hotel.step1', 'Your hotel'), t('register_hotel.step2', 'Your account')];
+    const stepLabels = [
+        t('register_hotel.step1', 'Your hotel'),
+        t('register_hotel.step2', 'Your account'),
+        ...(isPaid ? [t('register_hotel.step3', 'Payment')] : []),
+    ];
+    const planName = selectedPlan?.name || '';
+    const heading = outcome === 'free'
+        ? t('register_hotel.title_free', 'Create your free account')
+        : isPaid
+            ? t('register_hotel.title_paid', 'Get started with {{plan}}', { plan: planName })
+            : t('register_hotel.title', 'Start your 14-day free trial');
+    const subtitle = outcome === 'free'
+        ? t('register_hotel.subtitle_free', 'Two quick steps. The {{plan}} plan is free — no card, no trial clock.', { plan: planName })
+        : isPaid
+            ? t('register_hotel.subtitle_paid', 'Three quick steps: your hotel, your account, then a secure payment of {{total}}.', { total: formatINR(payAmount) })
+            : t('register_hotel.subtitle', 'Two quick steps. No card needed — you get instant access to every feature.');
+    const step2Label = isPaid
+        ? t('register_hotel.continue_payment', 'Continue to payment')
+        : outcome === 'free'
+            ? t('register_hotel.submit_free', 'Create account')
+            : t('register_hotel.submit', 'Start free trial');
+    const planCycleOptions = selectedPlan ? publicCycleOptions([selectedPlan]) : cycleOptions;
 
     return (
-        <Shell>
+        <SignupShell asideNote={isPaid
+            ? t('register_hotel.aside_note_paid', 'Secure payment via Razorpay. Your account is live the moment the payment goes through.')
+            : outcome === 'free' ? t('register_hotel.aside_note_free', 'Free forever on this plan — upgrade any time from your admin panel.') : undefined}
+        >
             <div className="bg-white rounded-3xl border border-[#EAECF0] shadow-[0_12px_40px_rgba(16,24,40,0.08)] overflow-hidden">
                 <div className="px-5 sm:px-8 pt-6 sm:pt-8 pb-5 border-b border-[#F2F4F7]">
-                    <h1 className="text-[24px] sm:text-[26px] font-extrabold tracking-tight text-[#101828]">
-                        {t('register_hotel.title', 'Start your 14-day free trial')}
-                    </h1>
-                    <p className="mt-1 text-[14px] text-[#667085]">
-                        {t('register_hotel.subtitle', 'Two quick steps. No card needed — you get instant access to every feature.')}
-                    </p>
+                    <h1 className="text-[24px] sm:text-[26px] font-extrabold tracking-tight text-[#101828]">{heading}</h1>
+                    <p className="mt-1 text-[14px] text-[#667085]">{subtitle}</p>
                     <ol className="mt-5 flex items-center gap-2" aria-label={t('register_hotel.progress', 'Progress')}>
                         {stepLabels.map((label, i) => {
                             const n = i + 1;
@@ -478,13 +661,9 @@ const RegisterRestaurant = () => {
                 </div>
 
                 <div className="px-5 sm:px-8 py-6">
-                    {formError && (
-                        <div ref={formErrorRef} role="alert" className="mb-5 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-[14px] text-red-700 font-medium">
-                            <AlertCircle size={17} className="shrink-0 mt-0.5" /> {formError}
-                        </div>
-                    )}
+                    <FormErrorBanner innerRef={formErrorRef} message={formError} />
 
-                    {step === 1 ? (
+                    {step === 1 && (
                         <form onSubmit={goNext} noValidate className="space-y-5">
                             <div>
                                 <label htmlFor="restaurantName" className={labelCls}>{t('register_hotel.name', 'Hotel / restaurant name')}</label>
@@ -577,35 +756,61 @@ const RegisterRestaurant = () => {
                                     <legend className={labelCls}>
                                         {t('register_hotel.plan', 'Plan')} <span className="font-medium text-[#98A2B3]">{t('register_hotel.optional', '(optional)')}</span>
                                     </legend>
-                                    <div className="grid gap-2">
+                                    {cycleOptions.length > 1 && (
+                                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                                            <CycleToggle options={cycleOptions} value={billingCycle} onChange={setBillingCycle} />
+                                            <span className="text-[12px] text-[#667085]">
+                                                {t('register_hotel.cycle_hint', 'Prices before {{rate}}% GST.', { rate: Number.isFinite(Number(plans[0]?.gstRate)) ? Number(plans[0].gstRate) : DEFAULT_GST_RATE })}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div className="grid gap-2" data-testid="plan-picker">
                                         {[{ _id: '', name: t('register_hotel.plan_later', 'Decide later') }, ...plans].map((p) => {
-                                            const checked = (selectedPlan?._id || '') === p._id;
-                                            const price = p._id ? formatPlanPrice(p) : null;
-                                            const trial = Number(p.trialDays) || 0;
+                                            const isLater = !p._id;
+                                            const kind = isLater ? 'later' : planKind(p);
+                                            const contact = kind === 'contact';
+                                            const checked = isLater ? !selectedPlan : (selectedPlan?._id || '') === p._id;
+                                            const price = isLater ? null : formatPlanCyclePrice(p, billingCycle);
+                                            const days = isLater ? 0 : trialDaysOf(p);
                                             return (
                                                 <label
                                                     key={p._id || 'later'}
-                                                    className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer transition ${
-                                                        checked ? 'border-[#FE8301] bg-[#FFF8F0] ring-1 ring-[#FE8301]' : 'border-[#EAECF0] hover:border-[#D0D5DD]'
-                                                    }`}
+                                                    data-testid={`plan-option-${p.slug || p._id || 'later'}`}
+                                                    className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition ${
+                                                        contact ? 'cursor-default border-[#EAECF0] bg-[#F9FAFB]' : 'cursor-pointer'
+                                                    } ${checked ? 'border-[#FE8301] bg-[#FFF8F0] ring-1 ring-[#FE8301]' : contact ? '' : 'border-[#EAECF0] hover:border-[#D0D5DD]'}`}
                                                 >
                                                     <input
-                                                        type="radio" name="planId" value={p._id} checked={checked}
+                                                        type="radio" name="planId" value={p._id} checked={checked} disabled={contact}
                                                         onChange={() => { setValues(prev => ({ ...prev, planId: p._id })); clearError('planId'); }}
                                                         className="accent-[#FE8301] w-4 h-4"
                                                     />
                                                     <span className="flex-1 min-w-0">
                                                         <span className="block text-[14px] font-bold text-[#101828] capitalize">{p.name}</span>
-                                                        {p._id && trial > 0 && (
-                                                            <span className="block text-[12px] text-[#067647] font-semibold">
-                                                                {t('platform.pricing.trial', '{{days}}-day free trial', { days: trial })}
-                                                            </span>
-                                                        )}
-                                                        {!p._id && (
+                                                        {isLater && (
                                                             <span className="block text-[12px] text-[#667085]">{t('register_hotel.plan_later_hint', 'Our team will help you choose.')}</span>
                                                         )}
+                                                        {kind === 'trial' && (
+                                                            <span className="block text-[12px] text-[#067647] font-semibold">
+                                                                {t('platform.pricing.trial', '{{days}}-day free trial', { days: days || 14 })}
+                                                            </span>
+                                                        )}
+                                                        {kind === 'free' && (
+                                                            <span className="block text-[12px] text-[#067647] font-semibold">{t('register_hotel.plan_free', 'Free')}</span>
+                                                        )}
+                                                        {kind === 'paid' && price && (
+                                                            <span className="block text-[12px] text-[#B54708] font-semibold">
+                                                                {t('register_hotel.plan_pay', 'Pay {{amount}} {{per}}', { amount: price.amount, per: price.per })}
+                                                                {price.savingsPct > 0 && !price.fellBack && <> · {t('platform.pricing.save', 'Save {{pct}}%', { pct: price.savingsPct })}</>}
+                                                            </span>
+                                                        )}
+                                                        {contact && (
+                                                            <span className="block text-[12px] text-[#667085]">
+                                                                <Link to="/contact" className="font-semibold text-[#FE8301] hover:underline">{t('platform.cta.contact_sales', 'Contact Sales')}</Link>
+                                                            </span>
+                                                        )}
                                                     </span>
-                                                    {price && (
+                                                    {price && kind !== 'free' && !contact && (
                                                         <span className="text-[14px] font-extrabold text-[#101828] shrink-0">
                                                             {price.amount} <span className="text-[12px] font-semibold text-[#667085]">{price.per}</span>
                                                         </span>
@@ -618,14 +823,13 @@ const RegisterRestaurant = () => {
                                 </fieldset>
                             )}
 
-                            <button
-                                type="submit"
-                                className="w-full inline-flex items-center justify-center gap-2 py-3.5 rounded-xl text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] shadow-[0_6px_20px_rgba(254,131,1,0.3)] transition-colors"
-                            >
+                            <button type="submit" className={`${primaryBtn} w-full`}>
                                 {t('register_hotel.continue', 'Continue')} <ArrowRight size={17} />
                             </button>
                         </form>
-                    ) : (
+                    )}
+
+                    {step === 2 && (
                         <form onSubmit={handleSubmit} noValidate className="space-y-5">
                             <div>
                                 <label htmlFor="ownerName" className={labelCls}>{t('register_hotel.owner', 'Your full name')}</label>
@@ -646,7 +850,11 @@ const RegisterRestaurant = () => {
                                     placeholder="you@yourhotel.com"
                                 />
                                 {!errors.contactEmail && (
-                                    <p className="mt-1.5 text-[12px] text-[#667085]">{t('register_hotel.email_hint', 'You’ll use this to sign in. We’ll send your trial details here.')}</p>
+                                    <p className="mt-1.5 text-[12px] text-[#667085]">
+                                        {outcome === 'trial'
+                                            ? t('register_hotel.email_hint', 'You’ll use this to sign in. We’ll send your trial details here.')
+                                            : t('register_hotel.email_hint_account', 'You’ll use this to sign in. We’ll send your account details here.')}
+                                    </p>
                                 )}
                                 <FieldError id="contactEmail-error" message={errors.contactEmail} />
                             </div>
@@ -746,14 +954,133 @@ const RegisterRestaurant = () => {
                                     type="submit"
                                     disabled={submitting}
                                     aria-busy={submitting ? 'true' : 'false'}
-                                    className="flex-1 inline-flex items-center justify-center gap-2 py-3.5 rounded-xl text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] shadow-[0_6px_20px_rgba(254,131,1,0.3)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                                    className={`${primaryBtn} flex-1`}
                                 >
                                     {submitting
                                         ? <><Loader2 size={17} className="animate-spin" /> {t('register_hotel.submitting', 'Submitting…')}</>
-                                        : <><BadgeCheck size={17} /> {t('register_hotel.submit', 'Start free trial')}</>}
+                                        : isPaid
+                                            ? <>{step2Label} <ArrowRight size={17} /></>
+                                            : <><BadgeCheck size={17} /> {step2Label}</>}
                                 </button>
                             </div>
                         </form>
+                    )}
+
+                    {step === 3 && isPaid && selectedPlan && (
+                        <div className="space-y-5" data-testid="payment-step">
+                            <div className="rounded-2xl border border-[#EAECF0] overflow-hidden">
+                                <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#EAECF0] flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <p className="text-[14px] font-bold text-[#101828] capitalize">{selectedPlan.name}</p>
+                                        <p className="text-[12px] text-[#667085]">
+                                            {t('register_hotel.pay_billed', 'Billed {{cycle}} · same price at renewal', { cycle: cycleLabel(effectiveCycle).toLowerCase() })}
+                                        </p>
+                                    </div>
+                                    <CycleToggle options={planCycleOptions} value={effectiveCycle} onChange={setBillingCycle} idPrefix="payment-cycle" />
+                                </div>
+                                <dl className="px-4 py-3 text-[14px] text-[#344054] space-y-2">
+                                    <div className="flex justify-between gap-3">
+                                        <dt>{t('register_hotel.pay_plan_price', 'Plan price')} <span className="text-[#98A2B3]">{cycleSuffix(effectiveCycle)}</span></dt>
+                                        <dd className="font-semibold tabular-nums">
+                                            {formatINR(order && !mismatch && Number.isFinite(paiseToRupees(order.baseAmount)) ? paiseToRupees(order.baseAmount) : paidRow?.price)}
+                                        </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-3">
+                                        <dt>{t('register_hotel.pay_gst', 'GST ({{rate}}%)', { rate: order && !mismatch && Number.isFinite(Number(order.gstRate)) ? Number(order.gstRate) : gstRate })}</dt>
+                                        <dd className="font-semibold tabular-nums">
+                                            {formatINR(order && !mismatch && Number.isFinite(paiseToRupees(order.gstAmount)) ? paiseToRupees(order.gstAmount) : paidRow?.gst)}
+                                        </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-3 pt-2 border-t border-[#EAECF0] text-[15px]">
+                                        <dt className="font-bold text-[#101828]">{t('register_hotel.pay_total', 'Total due today')}</dt>
+                                        <dd className="font-extrabold text-[#101828] tabular-nums" data-testid="payment-total">{formatINR(payAmount)}</dd>
+                                    </div>
+                                </dl>
+                            </div>
+
+                            {mismatch && (
+                                <div role="alert" data-testid="payment-mismatch" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[14px] text-amber-900">
+                                    <p className="font-bold flex items-center gap-2"><AlertCircle size={16} /> {t('register_hotel.pay_mismatch', 'The amount changed, please review.')}</p>
+                                    <p className="mt-1">
+                                        {t('register_hotel.pay_mismatch_detail', 'We showed {{expected}}; the current price for this plan is {{actual}}.', {
+                                            expected: formatINR(mismatch.expected), actual: formatINR(mismatch.actual),
+                                        })}
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setMismatch(null)}
+                                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501]"
+                                        >
+                                            {t('register_hotel.pay_accept_new', 'Continue with {{amount}}', { amount: formatINR(mismatch.actual) })}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setStep(1); setFormError(''); }}
+                                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-bold text-[#344054] border border-[#EAECF0] bg-white hover:bg-[#F9FAFB]"
+                                        >
+                                            {t('register_hotel.pay_change_plan', 'Change plan')}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {orderError && (
+                                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[14px] text-red-700">
+                                    <p className="font-semibold">{orderError}</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrderNonce(n => n + 1)}
+                                        className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-bold text-[#B42318] underline underline-offset-2"
+                                    >
+                                        <RefreshCw size={14} /> {t('register_hotel.pay_retry', 'Try again')}
+                                    </button>
+                                </div>
+                            )}
+
+                            <p className="text-[12px] text-[#667085] flex items-start gap-1.5">
+                                <ShieldCheck size={14} className="shrink-0 mt-px text-[#067647]" />
+                                {t('register_hotel.pay_secure', 'Payment is handled by Razorpay. Your account is created only after the payment succeeds.')}
+                            </p>
+
+                            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => { setStep(2); setFormError(''); }}
+                                    disabled={paying || submitting}
+                                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl text-[15px] font-bold text-[#344054] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors disabled:opacity-60"
+                                >
+                                    <ArrowLeft size={17} /> {t('register_hotel.back', 'Back')}
+                                </button>
+                                {!orderLoading && !orderError && order && !mismatch && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrderNonce(n => n + 1)}
+                                        disabled={paying || submitting}
+                                        title={t('register_hotel.pay_refresh', 'Refresh amount')}
+                                        className="inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-[14px] font-bold text-[#344054] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors disabled:opacity-60"
+                                    >
+                                        <RefreshCw size={16} /> <span className="sm:hidden">{t('register_hotel.pay_refresh', 'Refresh amount')}</span>
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={payNow}
+                                    disabled={!order || orderLoading || Boolean(mismatch) || Boolean(orderError) || paying || submitting}
+                                    aria-busy={orderLoading || paying || submitting ? 'true' : 'false'}
+                                    data-testid="pay-button"
+                                    className={`${primaryBtn} flex-1`}
+                                >
+                                    {submitting
+                                        ? <><Loader2 size={17} className="animate-spin" /> {t('register_hotel.pay_finishing', 'Finishing your signup…')}</>
+                                        : paying
+                                            ? <><Loader2 size={17} className="animate-spin" /> {t('register_hotel.pay_opening', 'Opening payment…')}</>
+                                            : orderLoading
+                                                ? <><Loader2 size={17} className="animate-spin" /> {t('register_hotel.pay_button', 'Pay {{amount}}', { amount: formatINR(payAmount) })}</>
+                                                : <><CreditCard size={17} /> {t('register_hotel.pay_button', 'Pay {{amount}}', { amount: formatINR(payAmount) })}</>}
+                                </button>
+                            </div>
+                        </div>
                     )}
                 </div>
             </div>
@@ -763,101 +1090,8 @@ const RegisterRestaurant = () => {
                 {' · '}
                 <Link to="/request-demo" className="font-semibold text-[#FE8301] hover:underline">{t('platform.cta.demo', 'Request a demo')}</Link>
             </p>
-        </Shell>
+        </SignupShell>
     );
 };
-
-/** "Registration submitted" confirmation popup (N5) — shown over the success screen. */
-function SubmittedDialog({ name, email, onClose }) {
-    const { t } = useTranslation();
-    const closeRef = useRef(null);
-    useEffect(() => {
-        closeRef.current?.focus();
-        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [onClose]);
-    return (
-        <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-            onClick={onClose}
-        >
-            <div
-                role="dialog" aria-modal="true" aria-labelledby="register-submitted-title"
-                className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 sm:p-7"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div className="w-14 h-14 rounded-2xl bg-[#ECFDF3] text-[#067647] flex items-center justify-center">
-                    <CheckCircle2 size={28} />
-                </div>
-                <h2 id="register-submitted-title" className="mt-4 text-[22px] font-extrabold tracking-tight text-[#101828]">
-                    {t('register_hotel.popup_title', 'Registration submitted 🎉')}
-                </h2>
-                <p className="mt-1.5 text-[15px] text-[#475467] leading-relaxed">
-                    {t('register_hotel.popup_body', "We'll review {{name}} and email you at {{email}}.", { name, email })}
-                </p>
-                <ol className="mt-4 space-y-2 text-[14px] text-[#344054] list-decimal pl-5">
-                    <li>{t('register_hotel.popup_step1', 'Our team reviews your application — usually within one business day.')}</li>
-                    <li>{t('register_hotel.popup_step2', 'You get an approval email at {{email}}.', { email })}</li>
-                    <li>{t('register_hotel.popup_step3', 'Sign in at Staff login with the email and password you just created.')}</li>
-                </ol>
-                <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                    <button
-                        ref={closeRef} type="button" onClick={onClose}
-                        className="flex-1 inline-flex items-center justify-center px-5 py-3 rounded-xl text-[15px] font-bold text-white bg-[#FE8301] hover:bg-[#E57501] transition-colors"
-                    >
-                        {t('register_hotel.popup_ok', 'Got it')}
-                    </button>
-                    <Link
-                        to="/staff-login"
-                        className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[15px] font-bold text-[#1A181B] border border-[#EAECF0] hover:bg-[#F9FAFB] transition-colors"
-                    >
-                        <LogIn size={17} /> {t('register_hotel.go_login', 'Go to staff login')}
-                    </Link>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-/** Page frame: slim brand bar, benefits column on desktop, content column. */
-function Shell({ children }) {
-    const { t } = useTranslation();
-    const perks = [
-        t('register_hotel.perk1', 'QR table ordering — no app for your guests'),
-        t('register_hotel.perk2', 'Kitchen display, waiter & captain apps'),
-        t('register_hotel.perk3', 'Table & hall bookings, wallet and loyalty'),
-        t('register_hotel.perk4', 'Razorpay payments and reports'),
-    ];
-    return (
-        <div className="min-h-screen bg-[#FCFCFD]">
-            <header className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-                <PlatformBrand />
-                <Link to="/staff-login" className="text-[14px] font-semibold text-[#344054] hover:text-[#FE8301]">
-                    {t('platform.nav.staff_login', 'Staff login')}
-                </Link>
-            </header>
-            <main className="max-w-6xl mx-auto px-4 sm:px-6 pb-16 pt-2 sm:pt-6 grid lg:grid-cols-[0.9fr_1.1fr] gap-10 items-start">
-                <aside className="hidden lg:block sticky top-8 rounded-3xl bg-linear-to-br from-[#FE8301] to-[#FF6B00] text-white p-8 overflow-hidden">
-                    <p className="text-[12px] font-bold uppercase tracking-[0.14em] text-white/80">BestoDine</p>
-                    <h2 className="mt-3 text-[30px] leading-tight font-extrabold tracking-tight">
-                        {t('register_hotel.aside_title', 'Bring your restaurant online in a day.')}
-                    </h2>
-                    <ul className="mt-6 space-y-3">
-                        {perks.map(p => (
-                            <li key={p} className="flex items-start gap-2.5 text-[15px] font-medium">
-                                <CheckCircle2 size={18} className="shrink-0 mt-0.5" /> {p}
-                            </li>
-                        ))}
-                    </ul>
-                    <p className="mt-8 text-[13px] text-white/85 leading-relaxed">
-                        {t('register_hotel.aside_note', '14 days free, no card needed, instant access — pick a plan only when you are ready.')}
-                    </p>
-                </aside>
-                <div className="w-full max-w-xl mx-auto lg:mx-0">{children}</div>
-            </main>
-        </div>
-    );
-}
 
 export default RegisterRestaurant;

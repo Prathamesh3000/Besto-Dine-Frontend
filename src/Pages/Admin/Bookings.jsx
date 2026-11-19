@@ -369,19 +369,18 @@ const Bookings = () => {
                 const res = await api.delete(`/booking-info/event-types/${typeToConfirm.id}`);
                 if (res.data.success) {
                     setEventTypesData(prev => prev.filter(t => t.id !== typeToConfirm.id))
-                    message.success('Event type deleted successfully');
+                    toast.success('Event type deleted successfully');
                 }
             } else {
                 const newStatus = typeConfirmAction === 'activate' ? true : false
                 const res = await api.put(`/booking-info/event-types/${typeToConfirm.id}`, { isActive: newStatus });
                 if (res.data.success) {
                     setEventTypesData(prev => prev.map(t => t.id === typeToConfirm.id ? { ...t, status: newStatus } : t))
-                    message.success(`Event type ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                    toast.success(`Event type ${newStatus ? 'activated' : 'deactivated'} successfully`);
                 }
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to update event type');
-            message.error('Action failed. Please try again.');
         } finally {
             setIsTypeConfirmModalOpen(false)
             setTypeToConfirm(null)
@@ -414,19 +413,18 @@ const Bookings = () => {
                 const res = await api.delete(`/booking-info/packages/${packageToConfirm._id || packageToConfirm.id}`);
                 if (res.data.success) {
                     setAllPackages(prev => prev.filter(p => (p._id || p.id) !== (packageToConfirm._id || packageToConfirm.id)))
-                    message.success('Package deleted successfully');
+                    toast.success('Package deleted successfully');
                 }
             } else {
                 const newStatus = packageConfirmAction === 'activate' ? true : false
                 const res = await api.put(`/booking-info/packages/${packageToConfirm._id || packageToConfirm.id}`, { isActive: newStatus });
                 if (res.data.success) {
                     setAllPackages(prev => prev.map(p => (p._id || p.id) === (packageToConfirm._id || packageToConfirm.id) ? { ...p, status: newStatus } : p))
-                    message.success(`Package ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                    toast.success(`Package ${newStatus ? 'activated' : 'deactivated'} successfully`);
                 }
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to update package');
-            message.error('Action failed. Please try again.');
         } finally {
             setIsPackageConfirmModalOpen(false)
             setPackageToConfirm(null)
@@ -459,19 +457,18 @@ const Bookings = () => {
                 const res = await api.delete(`/halls/${hallToConfirm._id || hallToConfirm.id}`);
                 if (res.data.success) {
                     setHallsData(prev => prev.filter(h => (h._id || h.id) !== (hallToConfirm._id || hallToConfirm.id)))
-                    message.success('Hall deleted successfully');
+                    toast.success('Hall deleted successfully');
                 }
             } else {
                 const newStatus = hallConfirmAction === 'activate' ? true : false
                 const res = await api.put(`/halls/${hallToConfirm._id || hallToConfirm.id}`, { status: newStatus });
                 if (res.data.success) {
                     setHallsData(prev => prev.map(h => (h._id || h.id) === (hallToConfirm._id || hallToConfirm.id) ? { ...h, status: newStatus } : h))
-                    message.success(`Hall ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                    toast.success(`Hall ${newStatus ? 'activated' : 'deactivated'} successfully`);
                 }
             }
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to update hall');
-            message.error('Action failed. Please try again.');
         } finally {
             setIsHallConfirmModalOpen(false)
             setHallToConfirm(null)
@@ -804,7 +801,7 @@ const Bookings = () => {
                                 <h2 className="text-[18px] font-[700] text-[#1A181B]">All Bookings</h2>
                                 <p className="text-[13px] text-gray-500 font-[500]">Manage and approve booking requests</p>
                             </div>
-                            <span className="text-[13px] text-gray-400 font-[500]">{bookingsTableData.filter(b => filter === 'All' || b.status === filter).length} orders</span>
+                            <span className="text-[13px] text-gray-400 font-[500]">{(() => { const n = bookingsTableData.filter(b => filter === 'All' || b.status === filter).length; return `${n} ${n === 1 ? 'booking' : 'bookings'}` })()}</span>
                         </div>
 
                         <div className="flex gap-2 mb-3 flex-shrink-0">
@@ -1023,6 +1020,8 @@ const Bookings = () => {
                                                 setEditingEventType(event)
                                                 setIsAddEventTypeModalOpen(true)
                                             }}
+                                            aria-label={`Edit event type ${event.title}`}
+                                            title="Edit event type"
                                             className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors">
                                             <Edit2 size={20} />
                                         </button>
@@ -1032,6 +1031,8 @@ const Bookings = () => {
                                                 setTypeConfirmAction('delete')
                                                 setIsTypeConfirmModalOpen(true)
                                             }}
+                                            aria-label={`Delete event type ${event.title}`}
+                                            title="Delete event type"
                                             className="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
                                             <Trash2 size={20} />
                                         </button>
@@ -1043,6 +1044,10 @@ const Bookings = () => {
                                                 setTypeConfirmAction(event.status ? 'deactivate' : 'activate')
                                                 setIsTypeConfirmModalOpen(true)
                                             }}
+                                            role="switch"
+                                            aria-checked={!!event.status}
+                                            aria-label={`${event.title} is ${event.status ? 'active' : 'inactive'}`}
+                                            title={event.status ? 'Deactivate event type' : 'Activate event type'}
                                             className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-200 focus:outline-none ml-1 ${event.status ? 'bg-[#34C759]' : 'bg-gray-200'}`}
                                         >
                                             <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full transition-transform duration-200 shadow-sm ${event.status ? 'translate-x-[20px]' : ''}`} />
@@ -1126,7 +1131,7 @@ const Bookings = () => {
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-4 text-[13px] text-gray-500">
-                                                    <span className="font-semibold text-gray-600">{pkg.price}</span>
+                                                    <span className="font-semibold text-gray-600">{typeof pkg.price === 'number' ? `₹${pkg.price}/person` : pkg.price}</span>
                                                     <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                                     <span>Min: {pkg.minPeople} people</span>
                                                     <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
@@ -1146,6 +1151,8 @@ const Bookings = () => {
                                                     setEditingPackage(pkg)
                                                     setIsAddPackageModalOpen(true)
                                                 }}
+                                                aria-label={`Edit package ${pkg.name}`}
+                                                title="Edit package"
                                                 className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors">
                                                 <Edit2 size={18} />
                                             </button>
@@ -1155,6 +1162,8 @@ const Bookings = () => {
                                                     setPackageConfirmAction('delete')
                                                     setIsPackageConfirmModalOpen(true)
                                                 }}
+                                                aria-label={`Delete package ${pkg.name}`}
+                                                title="Delete package"
                                                 className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-500 transition-colors">
                                                 <Trash2 size={18} />
                                             </button>
@@ -1314,7 +1323,7 @@ const Bookings = () => {
                                                 <p className="text-[14px] text-gray-500 font-[500] mb-2">{hall.description}</p>
                                                 <div className="flex items-center gap-4 text-[13px] text-gray-500">
                                                     <span className="font-semibold text-gray-600">{hall.price}</span>
-                                                    <span>Min: {hall.minPeople} people</span>
+                                                    {hall.minPeople ? <span>Min: {hall.minPeople} people</span> : null}
                                                     <span>Max: {hall.maxPeople} people</span>
                                                 </div>
                                             </div>
@@ -1329,6 +1338,8 @@ const Bookings = () => {
                                                         setEditingHall(hall)
                                                         setIsAddHallModalOpen(true)
                                                     }}
+                                                    aria-label={`Edit hall ${hall.name}`}
+                                                    title="Edit hall"
                                                     className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors">
                                                     <Edit2 size={18} />
                                                 </button>
@@ -1338,6 +1349,8 @@ const Bookings = () => {
                                                         setHallConfirmAction('delete')
                                                         setIsHallConfirmModalOpen(true)
                                                     }}
+                                                    aria-label={`Delete hall ${hall.name}`}
+                                                    title="Delete hall"
                                                     className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-500 transition-colors">
                                                     <Trash2 size={18} />
                                                 </button>
@@ -1526,6 +1539,8 @@ const Bookings = () => {
                                                         setEditingDecoration(deco)
                                                         setIsAddDecorationModalOpen(true)
                                                     }}
+                                                    aria-label={`Edit decoration ${deco.name}`}
+                                                    title="Edit decoration"
                                                     className="text-gray-400 hover:text-gray-600 transition-colors">
                                                     <Edit2 size={16} />
                                                 </button>
@@ -1535,6 +1550,8 @@ const Bookings = () => {
                                                         setDecorationConfirmAction('delete')
                                                         setIsDecorationConfirmModalOpen(true)
                                                     }}
+                                                    aria-label={`Delete decoration ${deco.name}`}
+                                                    title="Delete decoration"
                                                     className="text-gray-400 hover:text-red-500 transition-colors">
                                                     <Trash2 size={16} />
                                                 </button>
@@ -1553,7 +1570,7 @@ const Bookings = () => {
                                         {/* Tag */}
                                         <div className="mb-2">
                                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${deco.tagColor}`}>
-                                                {deco.tag}
+                                                {deco.category || deco.tag}
                                             </span>
                                         </div>
 

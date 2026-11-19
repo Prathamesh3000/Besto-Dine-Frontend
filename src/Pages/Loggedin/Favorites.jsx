@@ -9,7 +9,7 @@ import ProductDetails from "../../Components/Loggedin/ProductDetails";
 import BottomNav from "../../Components/Loggedin/BottomNav";
 import VegBadge from "../../Components/Common/VegBadge";
 import { hideBrokenImage, realImage } from "../../utils/image";
-import { resolveUnitPrice } from '../../utils/pricing';
+import { resolveUnitPrice, resolveFromPrice } from '../../utils/pricing';
 
 function Favorites() {
   const navigate = useNavigate();
@@ -87,6 +87,7 @@ function Favorites() {
               const price = Number(
                 resolveUnitPrice(item)
               );
+              const fromPrice = resolveFromPrice(item);
               const originalPrice = Number(
                 item.isCombo ? item.originalPrice ?? 0 : item.basePrice ?? 0
               );
@@ -153,9 +154,9 @@ function Favorites() {
                     <div className="flex items-center justify-between mt-2">
                       <div className="flex items-baseline gap-1.5">
                         <span className="text-base font-bold text-[#1A181B] nunito tabular-nums">
-                          ₹{price.toFixed(0)}
+                          {fromPrice != null ? `from ₹${fromPrice.toFixed(0)}` : `₹${price.toFixed(0)}`}
                         </span>
-                        {originalPrice > price && (
+                        {fromPrice == null && originalPrice > price && (
                           <span className="text-xs text-gray-400 line-through tabular-nums">
                             ₹{originalPrice.toFixed(0)}
                           </span>

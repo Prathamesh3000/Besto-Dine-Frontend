@@ -377,30 +377,33 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
 
     useEffect(() => {
         if (isOpen) {
+            setActiveTab('basic')
+            const defaults = {
+                name: '', category: '', description: '', themeStyle: '',
+                primaryColor: '#FF6B6B', secondaryColor: '#4ECDC4', accentColor: '#FFD93D',
+                suitableFor: { Indoor: false, Outdoor: false, Hall: false, Banquet: false, Garden: false, Terrace: false, Beach: false, Restaurant: false },
+                minArea: '', maxArea: '', ceilingHeight: '', searchTags: [], isFeatured: false, isPopular: false,
+                categories: [], materialsUsed: [], setupTime: '', advanceBookingDays: '',
+                waterRequired: false, technicalSupport: false, onSiteSupervision: false, numberOfCaretakers: '',
+                basePrice: '', dismantlingCharges: '', setupCharges: '', transportCharges: '', isCustomizable: false,
+                addons: [], allowCustomization: false, additionalChargesPercent: '',
+                restrictions: { indoorOnly: false, outdoorOnly: false, weatherDependent: false, fireHazard: false, specialPermission: false, notSuitableForKids: false },
+                bestFor: [], notRecommendedFor: [], simultaneousBookings: '',
+                seasonalAvailability: { spring: false, summer: false, fall: false, winter: false },
+                clientNotes: '', isActive: true, images: [], vendorName: '', vendorEmail: '', vendorPhone: '', vendorRating: ''
+            }
+
             if (packageData) {
                 setFormData({
-                    ...packageData,
+                    ...defaults,
+                    ...Object.fromEntries(Object.entries(packageData).map(([k, v]) => [k, v === null || v === undefined ? defaults[k] ?? '' : v])),
                     // Ensure nested objects exist to avoid crashes
                     suitableFor: packageData.suitableFor || { Indoor: false, Outdoor: false, Hall: false, Banquet: false, Garden: false, Terrace: false, Beach: false, Restaurant: false },
                     restrictions: packageData.restrictions || { indoorOnly: false, outdoorOnly: false, weatherDependent: false, fireHazard: false, specialPermission: false, notSuitableForKids: false },
                     seasonalAvailability: packageData.seasonalAvailability || { spring: false, summer: false, fall: false, winter: false }
                 })
             } else {
-                setActiveTab('basic')
-                setFormData({
-                    name: '', category: '', description: '', themeStyle: '',
-                    primaryColor: '#FF6B6B', secondaryColor: '#4ECDC4', accentColor: '#FFD93D',
-                    suitableFor: { Indoor: false, Outdoor: false, Hall: false, Banquet: false, Garden: false, Terrace: false, Beach: false, Restaurant: false },
-                    minArea: '', maxArea: '', ceilingHeight: '', searchTags: [], isFeatured: false, isPopular: false,
-                    categories: [], materialsUsed: [], setupTime: '', advanceBookingDays: '',
-                    waterRequired: false, technicalSupport: false, onSiteSupervision: false, numberOfCaretakers: '',
-                    basePrice: '', dismantlingCharges: '', setupCharges: '', transportCharges: '', isCustomizable: false,
-                    addons: [], allowCustomization: false, additionalChargesPercent: '',
-                    restrictions: { indoorOnly: false, outdoorOnly: false, weatherDependent: false, fireHazard: false, specialPermission: false, notSuitableForKids: false },
-                    bestFor: [], notRecommendedFor: [], simultaneousBookings: '',
-                    seasonalAvailability: { spring: false, summer: false, fall: false, winter: false },
-                    clientNotes: '', isActive: true, images: [], vendorName: '', vendorEmail: '', vendorPhone: '', vendorRating: ''
-                })
+                setFormData(defaults)
             }
         }
     }, [isOpen, packageData])
@@ -441,7 +444,7 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
                 {/* Header */}
                 <div className="px-8 py-4 bg-[#FFF7ED] border-b border-[#FED7AA] flex justify-between items-center shrink-0">
                     <h2 className="text-[20px] font-[700] text-[#1A181B]">
-                        Add Decoration Package
+                        {packageData ? 'Edit Decoration Package' : 'Add Decoration Package'}
                     </h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
                         <X size={24} />
@@ -1935,7 +1938,10 @@ const AddDecorationPackageModal = ({ isOpen, onClose, onSave, packageData }) => 
                                 }
                                 return
                             }
-                            onSave?.(formData)
+                            // Never send branch: '' (validator 400s) or a populated object.
+                            const { branch: rawBranch, ...rest } = formData
+                            const branchId = rawBranch && typeof rawBranch === 'object' ? (rawBranch._id || rawBranch.id) : rawBranch
+                            onSave?.(branchId ? { ...rest, branch: String(branchId) } : rest)
                         }}
                         className="px-8 py-2.5 rounded-[10px] bg-[#F97316] text-white text-[14px] font-semibold border border-[#F97316] hover:bg-[#EA580C] transition-colors flex items-center justify-center gap-2"
                     >

@@ -187,7 +187,7 @@ describe('Cart — bill summary equals computeBill', () => {
     let node = screen.getByText(`₹${formatPrice(35.25)} × 3`)
     while (node && !node.querySelector('svg.lucide-plus')) node = node.parentElement
     await user.click(node.querySelector('svg.lucide-plus').closest('button'))
-    expect(cartStore.updateQuantity).toHaveBeenCalledWith('m2', 1, expect.objectContaining({ id: 'm2' }))
+    expect(cartStore.updateQuantity).toHaveBeenCalledWith('m2', 1, expect.objectContaining({ id: 'm2' }), { exactKey: true })
     const expected = computeBill({ subtotal: computeSubtotal([PANEER, { ...CHAI, quantity: 4 }]), taxConfig: TAX_CONFIG, orderType: 'dine-in' })
     await waitFor(() => expect(row('Total')).toBe(money(expected.total)))
   })
@@ -301,14 +301,67 @@ describe('Cart — takeaway: wallet points and hand-off', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(msg)
   })
 
-  test('cannot redeem more than the subtotal', async () => {
+  // The cap is the order TOTAL (GST, delivery, tip in; coupon out), the same bill the server
+  // enforces at order create (WALLET_EXCEEDS_TOTAL: wallet may not exceed the total by > Rs 1).
+  // The old cap was the item subtotal, which rejected valid redemptions on bills with GST.
+  const THALI = { id: 'm9', _id: 'm9', title: 'Thali', name: 'Thali', finalPrice: 200, price: 200, quantity: 1 }
+  const GST_ONLY = { gst: { enabled: true, value: 5 }, serviceCharge: { enabled: false, value: 0 }, additionalCharges: [] }
+
+  async function redeem(user, amount) {
+    const input = screen.getByLabelText('Wallet points to redeem')
+    await user.clear(input)
+    await user.type(input, String(amount))
+    await user.click(screen.getByRole('button', { name: 'Redeem' }))
+  }
+
+  test('cannot redeem more than the order total', async () => {
     const user = renderCart({ orderType: 'takeaway', wallet: 5000 })
     await settle()
     await screen.findByText('5000.00 Points')
-    await user.type(screen.getByLabelText('Wallet points to redeem'), '605')
-    await user.click(screen.getByRole('button', { name: 'Redeem' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('cannot exceed order subtotal')
+    const total = computeBill({ subtotal: SUBTOTAL, taxConfig: TAX_CONFIG, orderType: 'takeaway' }).total
+    await redeem(user, Math.ceil(total) + 1)
+    expect(screen.getByRole('alert')).toHaveTextContent('cannot exceed the order total')
   })
+
+  test('redeeming exactly the post-GST total is accepted; one rupee above is refused', async () => {
+    settingsAPI.getSettings.mockResolvedValue({ data: { taxes: GST_ONLY } })
+    const user = renderCart({ lines: [THALI], orderType: 'takeaway', wallet: 5000 })
+    await settle()
+    await screen.findByText('5000.00 Points')
+    const total = computeBill({ subtotal: 200, taxConfig: toTaxConfig(GST_ONLY), orderType: 'takeaway' }).total
+    expect(total).toBe(210) // 200 + 5% GST: above the 200 subtotal the old cap allowed
+    await redeem(user, total + 1)
+    expect(screen.getByRole('alert')).toHaveTextContent('cannot exceed the order total of ₹210.00')
+    await redeem(user, total)
+    await waitFor(() => expect(row('Wallet Points')).toBe('-₹210.00'))
+    expect(row('Total')).toBe('₹0.00')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  test('with a coupon, a tip and a delivery fee the cap is the full bill the server will compute', async () => {
+    settingsAPI.getSettings.mockResolvedValue({
+      data: { taxes: GST_ONLY, delivery: { enabled: true, minOrderValue: 0, slabs: [{ fromKm: 0, toKm: 5, charge: 40 }] } },
+    })
+    promotionsAPI.applyCoupon.mockResolvedValue({ data: { success: true, discount: 20, coupon: { code: 'FLAT20' } } })
+    const user = renderCart({ lines: [THALI], orderType: 'takeaway', wallet: 5000 })
+    await settle()
+    await screen.findByText('5000.00 Points')
+    await user.type(screen.getByLabelText('Coupon code'), 'FLAT20')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(row('Coupon Discount')).toBe('-₹20.00'))
+    await user.click(screen.getByRole('button', { name: '₹30' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle home delivery' }))
+    await user.click(await screen.findByRole('button', { name: /0.5 km/ }))
+
+    // GST on (200 - 20) = 9; total = 200 + 9 - 20 + 30 tip + 40 delivery = 259
+    const total = computeBill({ subtotal: 200, taxConfig: toTaxConfig(GST_ONLY), orderType: 'delivery', couponDiscount: 20, tipAmount: 30, deliveryFee: 40 }).total
+    expect(total).toBe(259)
+    await redeem(user, total + 1)
+    expect(screen.getByRole('alert')).toHaveTextContent('cannot exceed the order total of ₹259.00')
+    await redeem(user, total)
+    await waitFor(() => expect(row('Wallet Points')).toBe('-₹259.00'))
+    expect(row('Total')).toBe('₹0.00')
+  }, 15000)
 
   test('coupon + wallet stack: bill-preview receives the displayed total and a matching orderPayload', async () => {
     promotionsAPI.applyCoupon.mockResolvedValue({ data: { success: true, discount: 50, coupon: { code: 'FLAT50' } } })

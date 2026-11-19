@@ -10,9 +10,11 @@ import { MenuProvider, useMenu } from './Context/MenuContext';
 import { NotificationProvider } from './Context/NotificationContext';
 import ProtectedRoute from './Components/ProtectedRoute';
 import RequireFeature from './Components/RequireFeature';
+import RequireModule from './Components/RequireModule';
+import { firstAllowedPath } from './Pages/SuperAdmin/portalAccess';
 import RequireStaffOrder from './Components/RequireStaffOrder';
 import RequireCaptainRole from './Components/Waiter/RequireCaptainRole';
-import { STAFF_ROLES, CAPTAIN_ROLES, CUSTOMER_ROLES, ADMIN_ROLES, CHEF_ROLES, SUPERADMIN_ROLES } from './Context/AuthContext';
+import { useAuth, STAFF_ROLES, CAPTAIN_ROLES, CUSTOMER_ROLES, ADMIN_ROLES, CHEF_ROLES, SUPERADMIN_ROLES } from './Context/AuthContext';
 // Roles the waiterDashboard plan gate applies to (admins also use /waiter/*).
 const WAITER_APP_ROLES = ['waiter', 'captain'];
 import { Toaster } from 'react-hot-toast';
@@ -178,6 +180,9 @@ function CustomerCacheGuard() {
 const PlatformHome = lazy(() => import('./Pages/Platform/PlatformHome'));
 const RegisterRestaurant = lazy(() => import('./Pages/Platform/RegisterRestaurant'));
 const RequestDemo = lazy(() => import('./Pages/Platform/RequestDemo'));
+// One-form free-trial signup (server picks the trial plan) — separate funnel
+// from /register-restaurant, see TRIAL_SIGNUP_AND_LEADS_PLAN.md §4.
+const StartTrial = lazy(() => import('./Pages/Platform/StartTrial'));
 const CustomerLogin = lazy(() => import('./Pages/Loggedin/Login'));
 const CustomerLayout = lazy(() => import('./Components/Loggedin/CustomerLayout'));
 const Unauthorized = lazy(() => import('./Pages/Unauthorized'));
@@ -275,6 +280,7 @@ const SuperAdminLeads      = lazy(() => import('./Pages/SuperAdmin/Leads'));
 const SuperAdminMarketing  = lazy(() => import('./Pages/SuperAdmin/Marketing'));
 const SuperAdminBlog       = lazy(() => import('./Pages/SuperAdmin/Blog'));
 const SuperAdminPayments   = lazy(() => import('./Pages/SuperAdmin/Payments'));
+const SuperAdminTeam       = lazy(() => import('./Pages/SuperAdmin/Team'));
 
 // Admin
 const AdminLayout = lazy(() => import('./Pages/Admin/AdminLayout'));
@@ -323,6 +329,14 @@ function LegacyRestaurantLinkRedirect() {
 // ─── Global Data Prefetcher ───────────────────────────────────────────────
 // Silently fetches all menu data as soon as the app starts.
 // By the time the user navigates to Menu/Home, data is already in cache.
+// /superadmin → the first page this user may open (platform staff may not
+// have Overview). Falls back to dashboard so RequireModule shows the
+// "no access" message instead of looping.
+function SuperAdminIndexRedirect() {
+    const { user } = useAuth();
+    return <Navigate to={firstAllowedPath(user) || '/superadmin/dashboard'} replace />;
+}
+
 function DataPrefetcher() {
   const { fetchMenuItems, fetchCategories, fetchCombos } = useMenu();
   React.useEffect(() => {
@@ -386,6 +400,10 @@ function App() {
                     and the request-a-demo lead form — both public. */}
                 <Route path="/register-restaurant" element={<RegisterRestaurant />} />
                 <Route path="/request-demo" element={<RequestDemo />} />
+                {/* `/contact` is the "Contact Sales" target for enterprise plans
+                    (utils/planCta.js) — same page as the demo request. */}
+                <Route path="/contact" element={<RequestDemo />} />
+                <Route path="/start-trial" element={<StartTrial />} />
                 <Route path="/force-change-password" element={<ForceChangePassword />} />
                 <Route path="/unauthorized" element={<Unauthorized />} />
 
@@ -469,25 +487,27 @@ function App() {
                         </ProtectedRoute>
                     }
                 >
-                    <Route index element={<Navigate to="dashboard" replace />} />
-                    <Route path="dashboard"        element={<SuperAdminDashboard />} />
-                    <Route path="restaurants"      element={<SuperAdminRestaurants />} />
-                    <Route path="restaurants/:id"  element={<SuperAdminRestaurantDetail />} />
-                    <Route path="pending-approvals" element={<SuperAdminPendingApprovals />} />
-                    <Route path="pending-approvals/signups/:id"             element={<SuperAdminSignupApplicationDetail />} />
-                    <Route path="pending-approvals/plan-changes/:requestId" element={<SuperAdminPlanChangeDetail />} />
-                    <Route path="pending-approvals/payments/:id"            element={<SuperAdminPaymentApprovalDetail />} />
-                    <Route path="leads"            element={<SuperAdminLeads />} />
-                    <Route path="marketing"        element={<SuperAdminMarketing />} />
-                    <Route path="blog"             element={<SuperAdminBlog />} />
-                    <Route path="plans"            element={<SuperAdminPlans />} />
-                    <Route path="payments"         element={<SuperAdminPayments />} />
-                    <Route path="audit-logs"       element={<SuperAdminAuditLogs />} />
-                    <Route path="security"         element={<SuperAdminSecurity />} />
+                    <Route index element={<SuperAdminIndexRedirect />} />
+                    <Route path="dashboard"        element={<RequireModule module="dashboard"><SuperAdminDashboard /></RequireModule>} />
+                    <Route path="restaurants"      element={<RequireModule module="trials"><SuperAdminRestaurants /></RequireModule>} />
+                    <Route path="restaurants/:id"  element={<RequireModule module="trials"><SuperAdminRestaurantDetail /></RequireModule>} />
+                    <Route path="pending-approvals" element={<RequireModule fullOnly><SuperAdminPendingApprovals /></RequireModule>} />
+                    <Route path="pending-approvals/signups/:id"             element={<RequireModule fullOnly><SuperAdminSignupApplicationDetail /></RequireModule>} />
+                    <Route path="pending-approvals/plan-changes/:requestId" element={<RequireModule fullOnly><SuperAdminPlanChangeDetail /></RequireModule>} />
+                    <Route path="pending-approvals/payments/:id"            element={<RequireModule fullOnly><SuperAdminPaymentApprovalDetail /></RequireModule>} />
+                    <Route path="leads"            element={<RequireModule anyOf={['signupLeads', 'leads']}><SuperAdminLeads /></RequireModule>} />
+                    <Route path="marketing"        element={<RequireModule module="marketing"><SuperAdminMarketing /></RequireModule>} />
+                    <Route path="blog"             element={<RequireModule module="blog"><SuperAdminBlog /></RequireModule>} />
+                    <Route path="plans"            element={<RequireModule module="plans"><SuperAdminPlans /></RequireModule>} />
+                    <Route path="payments"         element={<RequireModule module="payments"><SuperAdminPayments /></RequireModule>} />
+                    <Route path="audit-logs"       element={<RequireModule fullOnly><SuperAdminAuditLogs /></RequireModule>} />
+                    <Route path="team"             element={<RequireModule fullLevel><SuperAdminTeam /></RequireModule>} />
+                    <Route path="security"         element={<RequireModule fullOnly><SuperAdminSecurity /></RequireModule>} />
                 </Route>
 
                 {/* Free trial ended unpaid — owner-only lock screen. */}
-                <Route path="/trial-expired" element={<ProtectedRoute requiredRole={['admin']}><TrialExpired /></ProtectedRoute>} />
+                {/* Locked-trial gate. Every staff role may land here: ProtectedRoute sends any locked staff user to it, and the page shows the owner the upgrade/export actions and other roles the 'ask your owner' message. */}
+                <Route path="/trial-expired" element={<ProtectedRoute requiredRole={[...STAFF_ROLES, ...CHEF_ROLES]}><TrialExpired /></ProtectedRoute>} />
 
                 {/* ── Admin Routes ────────────────────────────────────────── */}
                 <Route path="/admin" element={<ProtectedRoute requiredRole={ADMIN_ROLES}><AdminLayout /></ProtectedRoute>}>

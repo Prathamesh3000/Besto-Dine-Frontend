@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, LogIn, Sparkles, CheckCircle2, X, Hourglass, XCircle, Building2 } from 'lucide-react';
 import { useAuth, USER_ROLES } from '../Context/AuthContext';
+import { portalHomePath } from './SuperAdmin/portalAccess';
 import { setActiveTenant, clearActiveTenant } from '../utils/tenant';
 import BestoDineMark from '../assets/BestoDineMark';
 import RequestDemoForm from '../Components/Common/RequestDemoForm';
@@ -77,10 +78,11 @@ const Login = () => {
         if (switchAccount || !isLoggedIn || !user?.role) return;
         const role = user.role;
         if (role === USER_ROLES.SUPERADMIN) navigate('/superadmin/dashboard', { replace: true });
+        else if (role === USER_ROLES.PLATFORMSTAFF) navigate(portalHomePath(user), { replace: true });
         else if (role === USER_ROLES.WAITER || role === USER_ROLES.CAPTAIN) navigate('/waiter/home', { replace: true });
         else if (role === USER_ROLES.CHEF) navigate('/chef/dashboard', { replace: true });
         else if (role === USER_ROLES.ADMIN || role === USER_ROLES.MANAGER) navigate('/admin/dashboard', { replace: true });
-    }, [switchAccount, isLoggedIn, user?.role, navigate]);
+    }, [switchAccount, isLoggedIn, user, navigate]);
 
     // Remember-email + mount-focus. Focus password if email is remembered,
     // otherwise focus email.
@@ -116,6 +118,7 @@ const Login = () => {
 
         const userRole = result.role;
         if (userRole === USER_ROLES.SUPERADMIN) navigate('/superadmin/dashboard');
+        else if (userRole === USER_ROLES.PLATFORMSTAFF) navigate(portalHomePath(result.user));
         else if (userRole === USER_ROLES.WAITER || userRole === USER_ROLES.CAPTAIN) navigate('/waiter/home');
         else if (userRole === USER_ROLES.CHEF) navigate('/chef/dashboard');
         else if (userRole === USER_ROLES.ADMIN || userRole === USER_ROLES.MANAGER) navigate('/admin/dashboard');
@@ -188,8 +191,9 @@ const Login = () => {
                 setFormError(result.restaurants?.length ? '' : (result.message || ''));
             } else if (result.code === 'SIGNUP_PENDING' || result.code === 'SIGNUP_REJECTED') {
                 setSignupStatus({ code: result.code, message: result.message, reason: result.reason });
-            } else if (result.code === 'TRIAL_EXPIRED') {
-                // Non-owner staff of a restaurant whose free trial ended.
+            } else if (result.code === 'SUBSCRIPTION_BLOCKED' || result.code === 'TRIAL_EXPIRED') {
+                // Non-owner staff of a restaurant whose free trial ended and
+                // is now locked (the owner can still log in to upgrade).
                 if (chosen?.slug) clearActiveTenant();
                 setFormError("This restaurant's trial has ended. Please ask the owner to choose a plan.");
             } else {

@@ -13,6 +13,33 @@ import { getWaiterScope } from '../../utils/waiterScope';
 import { useStaffOrderOff } from '../../Components/RequireStaffOrder';
 import useOperations from '../../hooks/useOperations';
 
+// Size + topping chips for a line. A Half and a Full of the same dish
+// otherwise render as identical rows (BUG-42). Works for cart lines
+// (selectedSizes[] or a plain `selectedSize`) and server order lines.
+export const lineVariantLabels = (item) => {
+    const sizes = (Array.isArray(item?.selectedSizes) ? item.selectedSizes : [])
+        .map((s) => s?.name).filter(Boolean);
+    if (!sizes.length && item?.selectedSize) sizes.push(String(item.selectedSize));
+    const toppings = (Array.isArray(item?.selectedToppings) ? item.selectedToppings : [])
+        .map((t) => t?.name).filter(Boolean);
+    return { sizes, toppings };
+};
+
+const VariantChips = ({ item }) => {
+    const { sizes, toppings } = lineVariantLabels(item);
+    if (!sizes.length && !toppings.length) return null;
+    return (
+        <div className="flex flex-wrap gap-1 mt-1" data-testid="variant-chips">
+            {sizes.map((n) => (
+                <span key={`s-${n}`} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-100">{n}</span>
+            ))}
+            {toppings.map((n) => (
+                <span key={`t-${n}`} className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-[#645E66]">+ {n}</span>
+            ))}
+        </div>
+    );
+};
+
 /**
  * Human labels for Request.type. The model's enum is
  * ['water', 'waiter', 'bill', 'other'] — 'bill' matters here because
@@ -512,13 +539,18 @@ const TableDetails = () => {
                         </div>
                         <div className="bg-white rounded-[24px] p-[16px] border-2 border-[#FF7A00]/20 shadow-[0_8px_30px_rgba(255,122,0,0.08)]">
                             {Object.values(cartItems).map((item, idx) => (
-                                <div key={item.id} className={`pb-[12px] flex gap-4 ${idx !== Object.values(cartItems).length - 1 ? 'border-b border-gray-50 mb-3' : ''}`}>
-                                    <img src={item.image} alt={item.name || item.title || ''} className="w-20 h-20 rounded-2xl object-cover shadow-sm" />
+                                <div key={`${item.lineKey || item.id}-${idx}`} className={`pb-[12px] flex gap-4 ${idx !== Object.values(cartItems).length - 1 ? 'border-b border-gray-50 mb-3' : ''}`}>
+                                    {item.image ? (
+                                        <img src={item.image} alt={item.name || item.title || ''} className="w-20 h-20 rounded-2xl object-cover shadow-sm" />
+                                    ) : (
+                                        <div className="w-20 h-20 rounded-2xl bg-gray-100 shrink-0" aria-hidden="true" />
+                                    )}
                                     <div className="flex-1 flex flex-col justify-between">
                                         <div className="flex justify-between items-start">
                                             <div>
                                                 <h4 className="text-[16px] font-bold text-[#1A181B]">{item.name || item.title}</h4>
                                                 <p className="text-[13px] text-[#645E66] line-clamp-1">{item.description || item.desc}</p>
+                                                <VariantChips item={item} />
                                             </div>
                                         </div>
                                         <div className="flex items-end justify-between">
@@ -568,11 +600,12 @@ const TableDetails = () => {
                         else originalActive.push(it);
                     }
                     const renderItem = (item, idx, total, isLate) => (
-                        <div key={item._id || `${isLate ? 'late' : 'orig'}-${idx}`} className={`pb-[12px] flex gap-4 ${idx !== total - 1 ? 'border-b border-gray-50' : ''}`}>
+                        <div key={`${item._id || 'line'}-${isLate ? 'late' : 'orig'}-${idx}`} className={`pb-[12px] flex gap-4 ${idx !== total - 1 ? 'border-b border-gray-50' : ''}`}>
                             <div className="flex-1 flex flex-col justify-between">
                                 <div className="flex justify-between items-start">
                                     <div>
                                         <h4 className="text-[16px] font-[600] text-[#1A181B]">{item.name}</h4>
+                                        <VariantChips item={item} />
                                         <p className="text-[14px] text-[#645E66]">{item.instructions}</p>
                                     </div>
                                     <div className={`px-[6px] py-[4px] rounded-[60px] gap-[4px] flex items-center shadow-sm ${isLate ? 'bg-[#FFEBDB] text-[#FE8301]' : 'bg-[#FFEFD0] text-[#FFB02E]'}`}>
@@ -622,13 +655,14 @@ const TableDetails = () => {
                 {deliveredItems.length > 0 && (
                 <div className="space-y-4">
                     <h4 className="text-[14px] font-bold text-gray-400 uppercase tracking-widest px-1">Delivered</h4>
-                    {deliveredItems.map((item) => (
-                    <div key={item._id} className="bg-white rounded-[24px] border border-gray-50 p-4 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
+                    {deliveredItems.map((item, dIdx) => (
+                    <div key={`${item._id || 'line'}-${dIdx}`} className="bg-white rounded-[24px] border border-gray-50 p-4 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
                         <div className="flex gap-4 mb-4">
                             <div className="flex-1 flex flex-col justify-between">
                                 <div className="flex justify-between items-start">
                                     <div>
                                         <h4 className="text-[15px] font-black leading-tight mb-0.5">{item.name}</h4>
+                                        <VariantChips item={item} />
                                     </div>
                                     <div className="bg-[#E5FFEB] text-[#34C759] px-[6px] py-[4px] rounded-[60px] gap-[4px] flex items-center shadow-sm">
                                         <CircleCheckBig size={12} strokeWidth={3} />

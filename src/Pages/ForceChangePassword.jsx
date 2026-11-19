@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, Lock, ShieldCheck, KeyRound, LogOut, CheckCircle2, Circle, AlertCircle } from 'lucide-react';
 import { useAuth, USER_ROLES } from '../Context/AuthContext';
+import { portalHomePath } from './SuperAdmin/portalAccess';
 import api from '../utils/api';
 import { currentAudience, setEntryAudience, loginPathForAudience, STAFF_SIDE_AUDIENCES } from '../utils/authStorage';
 import {
@@ -91,6 +92,8 @@ const ForceChangePassword = () => {
                     navigate('/admin/dashboard', { replace: true });
                 } else if (role === USER_ROLES.SUPERADMIN) {
                     navigate('/superadmin/dashboard', { replace: true });
+                } else if (role === USER_ROLES.PLATFORMSTAFF) {
+                    navigate(portalHomePath(user), { replace: true });
                 } else {
                     navigate('/', { replace: true });
                 }

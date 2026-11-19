@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../utils/api';
 import { getActiveTenant, getActiveTenantSlug, subscribeActiveTenant } from '../utils/tenant';
 import { getToken } from '../utils/authStorage';
+import AuthContext from './AuthContext';
 import { resolveImageUrl } from '../utils/image';
 import { useMenuBootstrap, bumpMenuVersion } from '../hooks/queries/useMenuBootstrap';
 import { getSocket, joinMenuRoom, leaveRoom, onSocketReconnect } from '../utils/socket';
@@ -177,7 +178,17 @@ export function MenuProvider({ children }) {
     // Anonymous customer where bootstrap failed → fall back to per-
     // section fetches so the page still loads.
     const useBootstrapSource = isAnonymousCustomer && bootstrapLanded;
-    const perSectionEnabled = hasTenantContext && (!isAnonymousCustomer || bootstrapFailed);
+    // A staff member who must change their temporary password is held on
+    // /force-change-password and the API answers every other call with 403, so
+    // don't fire the menu / combo / category loads until that is done. Read the
+    // context directly (not useAuth) so the provider still mounts without one.
+    const authCtx = useContext(AuthContext);
+    const mustChangePassword = authCtx?.user?.mustChangePassword === true;
+    // Platform-portal users (super admin, delegated platform staff) never show a menu and may
+    // belong to no restaurant: a menu fetch for them is a TENANT_REQUIRED 400.
+    const role = authCtx?.user?.role;
+    const isPlatformUser = role === 'superadmin' || role === 'platformstaff';
+    const perSectionEnabled = hasTenantContext && !mustChangePassword && !isPlatformUser && (!isAnonymousCustomer || bootstrapFailed);
 
     // ══════════════════════════════════════════════════════════════════════════
     //  MENU ITEMS — default fetch via TanStack Query

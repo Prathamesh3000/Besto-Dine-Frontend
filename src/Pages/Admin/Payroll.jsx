@@ -145,6 +145,7 @@ export function RunDetail({ runId, onBack }) {
     if (isError) return <p role="alert" className="text-[13px] text-red-700">{apiMessage(error, 'Failed to load run')}</p>
 
     const draft = run.status === 'draft'
+    const emptyRun = draft && !((run.lines || []).reduce((t, l) => t + (Number(l.netPay) || 0), 0) > 0)
     const cell = (l, f) => (adj[l.staff]?.[f] ?? l[f])
     const setCell = (l, f) => (e) => setAdj((a) => ({
         ...a, [l.staff]: { advances: l.advances, deductions: l.deductions, ...a[l.staff], [f]: e.target.value },
@@ -159,6 +160,11 @@ export function RunDetail({ runId, onBack }) {
                 <button type="button" className={`${ghost} ml-auto`} onClick={download}>Download CSV</button>
             </div>
 
+            {emptyRun && (
+                <div role="alert" data-testid="empty-run-warning" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+                    No attendance in this period: nothing to pay. Check the period dates and staff attendance, then create a new draft. This run cannot be finalized.
+                </div>
+            )}
             <table className="w-full text-[13px] bg-white rounded-lg border border-gray-200">
                 <thead><tr className="text-left text-gray-500">
                     <th className="p-2">Staff</th><th>Days</th><th>Hours</th><th>OT hrs</th><th>Base</th><th>OT pay</th><th>Incentives</th>
@@ -195,7 +201,7 @@ export function RunDetail({ runId, onBack }) {
                 {draft && (
                     <>
                         <button type="button" className={ghost} disabled={!Object.keys(adj).length || saveAdj.isPending} onClick={() => saveAdj.mutate()}>Save adjustments</button>
-                        <button type="button" className={primary} disabled={finalize.isPending || Object.keys(adj).length > 0} onClick={() => finalize.mutate()}>Finalize</button>
+                        <button type="button" className={primary} disabled={finalize.isPending || emptyRun || Object.keys(adj).length > 0} title={emptyRun ? 'No attendance in this period: nothing to pay' : undefined} onClick={() => finalize.mutate()}>Finalize</button>
                     </>
                 )}
                 {run.status === 'finalized' && (

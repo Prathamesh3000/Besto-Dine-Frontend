@@ -101,7 +101,9 @@ const INVOICE_TONE = { paid: 'success', refunded: 'slate', partially_refunded: '
 
 const RestaurantDetail = () => {
     const { id } = useParams();
-    const { isFullSuperAdmin } = useAuth();
+    // isSuperAdmin is true only for real super admins; platform staff (read-only
+    // 'trials' access) must not trigger endpoints outside their module.
+    const { isFullSuperAdmin, isSuperAdmin, canManageModule } = useAuth();
     const [data, setData] = useState(null);
     const [plans, setPlans] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -130,6 +132,7 @@ const RestaurantDetail = () => {
     const [dlgApprovePlan, setDlgApprovePlan] = useState(null); // requestId | null
     const [dlgRejectPlan, setDlgRejectPlan] = useState(null);   // requestId | null
     const [dlgResendInvite, setDlgResendInvite] = useState(false);
+    const [dlgExtendTrial, setDlgExtendTrial] = useState(false);
 
     // Business-profile edit modal — fields default to whatever's already
     // saved on the restaurant, falling back to the Main branch when the
@@ -238,17 +241,18 @@ const RestaurantDetail = () => {
         try {
             const [resR, resP] = await Promise.all([
                 api.get(`/superadmin/restaurants/${id}`),
-                api.get('/superadmin/plans'),
+                // The plan list only feeds Assign plan (full super admin).
+                isSuperAdmin ? api.get('/superadmin/plans') : Promise.resolve(null),
             ]);
             setData(resR.data?.data || null);
-            setPlans(resP.data?.data || []);
+            setPlans(resP?.data?.data || []);
             setPlanId(resR.data?.data?.subscription?.plan || '');
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to load restaurant');
         } finally {
             setLoading(false);
         }
-    }, [id]);
+    }, [id, isSuperAdmin]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -273,6 +277,29 @@ const RestaurantDetail = () => {
             load();
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to assign plan');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    // Extend the free trial by N days (1..90). Works while on trial and after
+    // the trial locked the tenant (the server flips it back to 'trial').
+    const doExtendTrial = async (raw) => {
+        const days = Number.parseInt(String(raw || '').trim(), 10);
+        if (!Number.isInteger(days) || days < 1 || days > 90) {
+            toast.error('Enter a whole number of days between 1 and 90');
+            return;
+        }
+        setActionLoading(true);
+        try {
+            const res = await api.post(`/superadmin/restaurants/${id}/extend-trial`, { days });
+            const end = res.data?.data?.trialEndDate;
+            toast.success(end
+                ? `Trial extended — now ends ${new Date(end).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                : `Trial extended by ${days} day${days === 1 ? '' : 's'}`);
+            load();
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to extend trial');
         } finally {
             setActionLoading(false);
         }
@@ -519,6 +546,12 @@ const RestaurantDetail = () => {
     if ((data.metrics?.orderCount30d ?? 0) === 0) attentionFlags.push({ tone: 'danger', label: 'No orders in 30d' });
     if (!data.legal?.fssaiLicense) attentionFlags.push({ tone: 'warning', label: 'FSSAI missing' });
 
+    // "Extend trial" makes sense while the tenant is on a trial, or once an
+    // unpaid trial locked it (status suspended / subscription expired).
+    const subStatus = data.subscription?.status;
+    const canExtendTrial = subStatus === 'trial' || data.status === 'trial'
+        || (!!data.subscription?.trialEndDate && (subStatus === 'expired' || data.status === 'suspended'));
+
     return (
         <div className="px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-360 mx-auto">
             <Link
@@ -659,7 +692,7 @@ const RestaurantDetail = () => {
 
             {/* ── Tabs ───────────────────────────────────────────── */}
             <div className="flex items-center gap-1 bg-white border border-gray-200/70 rounded-xl p-1 mb-5 overflow-x-auto">
-                {TABS.map(t => {
+                {TABS.filter(t => isSuperAdmin || t.key !== 'operations').map(t => {
                     const Icon = t.icon;
                     const active = activeTab === t.key;
                     return (
@@ -690,13 +723,26 @@ const RestaurantDetail = () => {
                 icon={Building2}
                 className="mb-5"
                 actions={
-                    <Link
-                        to={`/superadmin/payments?search=${encodeURIComponent(data.name || '')}`}
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-white text-gray-700 border border-gray-200 hover:border-[#FE8301]/40 hover:bg-orange-50 hover:text-[#FE8301] transition"
-                    >
-                        <CreditCard size={13} />
-                        View payments
-                    </Link>
+                    <div className="flex items-center gap-2">
+                        {canManageModule('trials') && canExtendTrial && (
+                            <button
+                                type="button"
+                                onClick={() => setDlgExtendTrial(true)}
+                                disabled={actionLoading}
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-white text-gray-700 border border-gray-200 hover:border-[#FE8301]/40 hover:bg-orange-50 hover:text-[#FE8301] transition disabled:opacity-50"
+                            >
+                                <Clock size={13} />
+                                Extend trial
+                            </button>
+                        )}
+                        <Link
+                            to={`/superadmin/payments?search=${encodeURIComponent(data.name || '')}`}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-white text-gray-700 border border-gray-200 hover:border-[#FE8301]/40 hover:bg-orange-50 hover:text-[#FE8301] transition"
+                        >
+                            <CreditCard size={13} />
+                            View payments
+                        </Link>
+                    </div>
                 }
             >
                 <DL columns={3}>
@@ -1240,7 +1286,7 @@ const RestaurantDetail = () => {
             )}
 
             {/* ── Modules — plan + paid add-ons + per-restaurant overrides ── */}
-            <RestaurantModulesPanel restaurant={data} canEdit={isFullSuperAdmin} onChanged={load} />
+            {isSuperAdmin && <RestaurantModulesPanel restaurant={data} canEdit={isFullSuperAdmin} onChanged={load} />}
 
             </>
             )}
@@ -1604,6 +1650,19 @@ const RestaurantDetail = () => {
                 danger
                 onClose={() => setDlgSuspend(false)}
                 onConfirm={doSuspend}
+            />
+
+            <PromptModal
+                open={dlgExtendTrial}
+                title="Extend free trial"
+                description="Number of days to add (1–90). Counted from today if the trial already ended; the tenant is unlocked and reminder emails may send again."
+                placeholder="e.g. 7"
+                confirmLabel="Extend trial"
+                required
+                rows={1}
+                maxLength={2}
+                onClose={() => setDlgExtendTrial(false)}
+                onConfirm={doExtendTrial}
             />
 
             <ConfirmModal

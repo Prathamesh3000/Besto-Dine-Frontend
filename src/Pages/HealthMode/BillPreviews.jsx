@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ChevronLeft, Clock, MapPin, Phone, ShoppingCart, ShieldCheck, User, Utensils } from "lucide-react";
+import { AlertCircle, ChevronLeft, Clock, MapPin, Phone, ShoppingCart, ShieldCheck, User, Utensils } from "lucide-react";
+import { describePaymentInitError } from "../../utils/payInitError";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 import toast from "react-hot-toast";
@@ -15,6 +16,7 @@ import { getActiveTenant } from "../../utils/tenant";
 import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
 import { computeBill, toTaxConfig } from "../../utils/billing";
+import { splitWalletPayment } from "../../utils/walletSplit";
 
 // Load the Razorpay checkout script on demand. Same pattern as
 // Payment.jsx — kept local instead of in utils/ because it's the only
@@ -84,6 +86,9 @@ const TakeawayBillPreview = ({ state }) => {
   const { menuItems } = useMenu();
   const { user, isGuest, isLoggedIn } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
+  // Set when the payment could not even be started (create-order failed); shown
+  // inline above the Pay button until the customer retries.
+  const [payError, setPayError] = useState(null);
   // Synchronous pay-button guard (state is async); released with releasePay.
   const payGuardRef = useRef(null);
   if (!payGuardRef.current) payGuardRef.current = createActionGuard();
@@ -95,6 +100,7 @@ const TakeawayBillPreview = ({ state }) => {
     couponDiscount = 0,
     appliedCoupon,
     appliedPoints = 0,
+    walletBalance,
     tipAmount = 0,
     selectedTime,
     selectedDay,
@@ -184,10 +190,15 @@ const TakeawayBillPreview = ({ state }) => {
   //   razorpayAmount — paid via Razorpay (skipped if wallet covers all)
   // Both rails together cover grandTotal. The order's walletAmountPaid
   // field records the wallet portion so verify-payment doesn't lose it.
-  const walletAvailable = Math.max(0, Number(appliedPoints) || 0);
-  const walletAmount = Math.min(walletAvailable, grandTotal);
-  const razorpayAmount = parseFloat((grandTotal - walletAmount).toFixed(2));
-  const walletCoversFull = razorpayAmount <= 0.5 && walletAmount > 0;
+  // Paise-exact split (utils/walletSplit): the two rails always add up to
+  // the bill, a sub-Rs-1 remainder is absorbed into the wallet (or the
+  // wallet shrinks so Razorpay gets Rs 1.00), and the preview, the button
+  // and the charged amounts all use these same numbers.
+  const { walletAmount, razorpayAmount, walletCoversFull, adjusted: splitAdjusted } = splitWalletPayment({
+    grandTotal,
+    applied: appliedPoints,
+    walletBalance,
+  });
 
   const branch = (() => {
     try {
@@ -311,7 +322,7 @@ const TakeawayBillPreview = ({ state }) => {
         return;
       }
 
-      toast.success(`Paid ₹${walletAmount.toFixed(0)} from wallet.`, { id: "pay-wallet-success", duration: 4000 });
+      toast.success(`Paid ₹${walletAmount.toFixed(2)} from wallet.`, { id: "pay-wallet-success", duration: 4000 });
       finishOrder(createdOrder.orderId, "wallet");
     } catch (err) {
       console.error("Wallet payment error:", err);
@@ -325,6 +336,7 @@ const TakeawayBillPreview = ({ state }) => {
   const handlePayBill = async () => {
     if (isProcessing || !payGuardRef.current.enter()) return;
     setIsProcessing(true);
+    setPayError(null);
 
     // Wallet covers it entirely → skip Razorpay, pay from wallet.
     if (walletCoversFull) {
@@ -350,9 +362,11 @@ const TakeawayBillPreview = ({ state }) => {
       // razorpayAmount = grandTotal - walletAmount (split-rail). Wallet
       // is only debited AFTER Razorpay clears so a Razorpay failure
       // never silently drains the customer's wallet.
-      const { data } = await razorpayAPI.createOrder(razorpayAmount, null, paymentKeys.get("rzp-create", `${razorpayAmount}|`));
+      // _silent: this screen renders its own inline error (payError) instead of the
+      // generic global toast that echoes the server's raw message.
+      const { data } = await razorpayAPI.createOrder(razorpayAmount, null, paymentKeys.get("rzp-create", `${razorpayAmount}|`), { _silent: true });
       if (!data.success) {
-        toast.error("Failed to initiate payment. Please try again.", { id: "pay-init" });
+        setPayError(describePaymentInitError());
         releasePay();
         return;
       }
@@ -476,7 +490,7 @@ const TakeawayBillPreview = ({ state }) => {
       rzp.open();
     } catch (err) {
       console.error("Takeaway payment error:", err);
-      toast.error("Failed to initiate payment. Please try again.");
+      setPayError(describePaymentInitError(err));
       releasePay();
     }
   };
@@ -739,6 +753,13 @@ const TakeawayBillPreview = ({ state }) => {
                     -₹{walletAmount.toFixed(2)}
                   </span>
                 </div>
+                {splitAdjusted && (
+                  <p className="text-[11px] text-[#645E66] font-varela" data-testid="wallet-split-note">
+                    {splitAdjusted === "absorbed"
+                      ? "The small balance under ₹1 is taken from your wallet (online payments need at least ₹1)."
+                      : "Wallet use was lowered so the online part meets the ₹1 minimum."}
+                  </p>
+                )}
                 {razorpayAmount > 0 && (
                   <div className="flex justify-between items-center">
                     <span className="text-[13px] text-[#1A181B] font-varela">
@@ -845,6 +866,19 @@ const TakeawayBillPreview = ({ state }) => {
                                               after Razorpay clears
              3. No wallet    → Razorpay full charge */}
       <footer className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full lg:max-w-3xl p-4 bg-white border-t border-[#F0F0F0] z-50">
+        {payError && (
+          <div
+            role="alert"
+            data-testid="pay-error"
+            className="mb-3 flex items-start gap-2.5 rounded-xl border border-[#FEC84B] bg-[#FFFAEB] px-3 py-2.5"
+          >
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[#B54708]" />
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold font-nunito text-[#93370D]">{payError.title}</p>
+              <p className="mt-0.5 text-[12px] font-varela leading-snug text-[#B54708]">{payError.message}</p>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-center gap-1.5 mb-2">
           <ShieldCheck size={14} className="text-[#027A48]" />
           <span className="text-[11px] font-varela text-[#645E66]">
@@ -874,10 +908,10 @@ const TakeawayBillPreview = ({ state }) => {
               <ShoppingCart size={18} />
               <span>
                 {walletCoversFull
-                  ? `Pay ₹${walletAmount.toFixed(0)} from Wallet`
+                  ? `Pay ₹${walletAmount.toFixed(2)} from Wallet`
                   : walletAmount > 0
-                    ? `Pay ₹${razorpayAmount.toFixed(0)} (₹${walletAmount.toFixed(0)} wallet)`
-                    : `Pay Bill ₹${grandTotal.toFixed(0)}`}
+                    ? `Pay ₹${razorpayAmount.toFixed(2)} (₹${walletAmount.toFixed(2)} wallet)`
+                    : `Pay Bill ₹${grandTotal.toFixed(2)}`}
               </span>
             </>
           )}
@@ -1413,7 +1447,7 @@ const DineInBillPreview = () => {
             className="w-full font-semibold h-[48px] bg-[#FE8301] text-white rounded-[16px] text-[14px] font-nunito leading-[16px] flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
           >
             <ShoppingCart size={18} />
-            <span>Pay Bill ₹{total.toFixed(0)}</span>
+            <span>Pay Bill ₹{total.toFixed(2)}</span>
           </button>
         )}
       </footer>

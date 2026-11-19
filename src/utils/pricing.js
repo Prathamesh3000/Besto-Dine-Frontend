@@ -119,6 +119,23 @@ export function resolveSizePrice(item, size) {
 }
 
 /**
+ * Lowest offer-adjusted size price for a menu-card "from ₹X" label, or
+ * null when the card should show a flat price (no sizes, a single size,
+ * all sizes priced the same, or a combo). The detail modal defaults to
+ * the first/cheapest size, so a flat basePrice on the card disagreed
+ * with what the customer was actually charged.
+ */
+export function resolveFromPrice(item) {
+    if (!item || item.isCombo || !Array.isArray(item.sizes)) return null;
+    const prices = item.sizes
+        .filter((s) => num(s?.price) !== null)
+        .map((s) => resolveSizePrice(item, s));
+    if (prices.length < 2) return null;
+    const min = Math.min(...prices);
+    return prices.some((p) => p !== min) ? min : null;
+}
+
+/**
  * Unit price including the selected size and toppings — the number
  * that belongs on a cart line.
  *

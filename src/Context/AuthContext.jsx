@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 import { QueryClientContext } from '@tanstack/react-query';
-import api, { CUSTOMER_SESSION_EXPIRED_EVENT, TRIAL_EXPIRED_EVENT } from '../utils/api';
+import api, { CUSTOMER_SESSION_EXPIRED_EVENT, SUBSCRIPTION_READ_ONLY_EVENT, SUBSCRIPTION_BLOCKED_EVENT } from '../utils/api';
+import { trialStateOf, isReadOnly as isTrialReadOnly } from '../utils/trialLock';
 import { toast } from 'react-hot-toast';
 import { disconnectSocket, reconnectWithAuth } from '../utils/socket';
 import { isGuestSessionExpired, clearGuestSession } from '../utils/guestSession';
@@ -12,6 +13,8 @@ import {
 } from '../utils/authStorage';
 import { claimCustomerData, clearCustomerPersonalData } from '../utils/customerSession';
 import SessionChangedOverlay from '../Components/Common/SessionChangedOverlay';
+import { fetchMe } from '../utils/fetchMe';
+import { canViewModule as portalCanView, canManageModule as portalCanManage } from '../Pages/SuperAdmin/portalAccess';
 
 const userIdOf = (u) => (u && (u._id || u.id) ? String(u._id || u.id) : null);
 
@@ -33,6 +36,8 @@ export const USER_ROLES = {
     MANAGER: 'manager',
     CHEF: 'chef',
     SUPERADMIN: 'superadmin',
+    // Delegated super-admin-portal user: opens only the modules the owner assigned.
+    PLATFORMSTAFF: 'platformstaff',
 };
 
 // Convenience role groups. Manager is grouped with Admin because per
@@ -44,8 +49,9 @@ export const STAFF_ROLES = [USER_ROLES.WAITER, USER_ROLES.CAPTAIN, USER_ROLES.AD
 export const CAPTAIN_ROLES = [USER_ROLES.CAPTAIN, USER_ROLES.ADMIN, USER_ROLES.MANAGER];
 export const CUSTOMER_ROLES = [USER_ROLES.CUSTOMER];
 export const CHEF_ROLES = [USER_ROLES.CHEF, USER_ROLES.ADMIN, USER_ROLES.MANAGER];
-export const SUPERADMIN_ROLES = [USER_ROLES.SUPERADMIN];
-export const ALL_AUTH_ROLES = [...STAFF_ROLES, ...CUSTOMER_ROLES, USER_ROLES.CHEF, USER_ROLES.SUPERADMIN];
+// Roles that may enter the /superadmin portal (per-page access is enforced by RequireModule).
+export const SUPERADMIN_ROLES = [USER_ROLES.SUPERADMIN, USER_ROLES.PLATFORMSTAFF];
+export const ALL_AUTH_ROLES = [...STAFF_ROLES, ...CUSTOMER_ROLES, USER_ROLES.CHEF, USER_ROLES.SUPERADMIN, USER_ROLES.PLATFORMSTAFF];
 
 export function AuthProvider({ children }) {
     // Optional: undefined when no QueryClientProvider wraps the tree.
@@ -118,7 +124,7 @@ export function AuthProvider({ children }) {
                 // tenant status) don't stay stale until the next login.
                 // Ignore failures — interceptor handles 401 / network loss
                 // and the cached copy is a safe fallback.
-                api.get('/auth/me', { _aud: aud })
+                fetchMe(aud)
                     .then(res => {
                         const fresh = res.data?.user || res.data;
                         if (fresh && fresh._id && userIdOf(fresh) === userIdOf(userRef.current)) {
@@ -455,7 +461,7 @@ export function AuthProvider({ children }) {
     const logout = () => {
         const aud = audRef.current || currentAudience();
         const wasStaff = STAFF_SIDE_AUDIENCES.includes(aud)
-            || ['waiter', 'captain', 'chef', 'admin', 'manager', 'superadmin'].includes(user?.role);
+            || ['waiter', 'captain', 'chef', 'admin', 'manager', 'superadmin', 'platformstaff'].includes(user?.role);
         notifyServerLogout('/auth/logout', aud);
         hardLogoutLocal({ audience: aud });
         return { wasStaff, audience: aud };
@@ -525,19 +531,30 @@ export function AuthProvider({ children }) {
     }, [setAudience]);
 
 
-    // Any API call answered 403 TRIAL_EXPIRED: flag the cached tenant as
-    // locked so the route guard shows the trial-ended screen. Only the owner
-    // (admin) is ever locked in-session; other roles are stopped at login.
+    // Any API call answered 403 SUBSCRIPTION_READ_ONLY / SUBSCRIPTION_BLOCKED:
+    // move the cached tenant to that trial state so the banner, the upgrade
+    // modal and the route guard react without waiting for the next /auth/me.
+    // Staff-side sessions only (customers and the super admin are never
+    // trial-gated).
     useEffect(() => {
-        const onTrialExpired = (e) => {
+        const applyTrialState = (e, state) => {
             const cur = userRef.current;
-            if (!cur || cur.role !== 'admin' || cur.tenant?.trialExpired) return;
+            if (!cur || cur.role === 'customer' || cur.role === 'superadmin' || cur.role === 'platformstaff') return;
+            const tenant = cur.tenant || {};
+            if (trialStateOf(tenant) === state) return;
+            // Never downgrade a locked tenant back to read-only on a late event.
+            if (state === 'read_only' && trialStateOf(tenant) === 'locked') return;
+            const d = e?.detail || {};
+            const locked = state === 'locked';
             const next = {
                 ...cur,
                 tenant: {
-                    ...(cur.tenant || {}),
-                    trialExpired: true,
-                    trialEndDate: e?.detail?.trialEndDate || cur.tenant?.trialEndDate || null,
+                    ...tenant,
+                    trialState: state,
+                    readOnly: !locked,
+                    trialExpired: locked,
+                    lockAt: d.lockAt || tenant.lockAt || null,
+                    trialEndDate: d.trialEndDate || tenant.trialEndDate || null,
                     daysLeft: 0,
                 },
             };
@@ -545,8 +562,14 @@ export function AuthProvider({ children }) {
             setUser(next);
             try { setStoredUser(next, audRef.current || currentAudience()); } catch { /* ignore */ }
         };
-        window.addEventListener(TRIAL_EXPIRED_EVENT, onTrialExpired);
-        return () => window.removeEventListener(TRIAL_EXPIRED_EVENT, onTrialExpired);
+        const onReadOnly = (e) => applyTrialState(e, 'read_only');
+        const onBlocked = (e) => applyTrialState(e, 'locked');
+        window.addEventListener(SUBSCRIPTION_READ_ONLY_EVENT, onReadOnly);
+        window.addEventListener(SUBSCRIPTION_BLOCKED_EVENT, onBlocked);
+        return () => {
+            window.removeEventListener(SUBSCRIPTION_READ_ONLY_EVENT, onReadOnly);
+            window.removeEventListener(SUBSCRIPTION_BLOCKED_EVENT, onBlocked);
+        };
     }, []);
 
     const setGuestMode = () => {
@@ -647,7 +670,7 @@ export function AuthProvider({ children }) {
     const featureTier = (key) => {
         if (!key) return 'advanced';
         // Super admins are above the tenant boundary — they see everything.
-        if (user?.role === 'superadmin') return 'advanced';
+        if (user?.role === 'superadmin' || user?.role === 'platformstaff') return 'advanced';
         // Legacy / single-tenant deployments — no tenant snapshot present.
         const tenant = user?.tenant;
         if (!tenant) return 'advanced';
@@ -691,6 +714,12 @@ export function AuthProvider({ children }) {
     const isChef = hasRole(USER_ROLES.CHEF);
     const isSuperAdmin = hasRole(USER_ROLES.SUPERADMIN);
     const isFullSuperAdmin = isSuperAdmin && user?.superadminLevel === 'full';
+    // Platform staff are NOT super admins: isSuperAdmin / isFullSuperAdmin stay
+    // false for them so every tenant-side check is unaffected.
+    const isPlatformStaff = hasRole(USER_ROLES.PLATFORMSTAFF);
+    const platformAccess = (isPlatformStaff && user?.platformAccess) || {};
+    const canViewModule = (key) => portalCanView(user, key);
+    const canManageModule = (key) => portalCanManage(user, key);
 
     const mustChangePassword = user?.mustChangePassword === true;
 
@@ -707,6 +736,10 @@ export function AuthProvider({ children }) {
         isChef,
         isSuperAdmin,
         isFullSuperAdmin,
+        isPlatformStaff,
+        platformAccess,
+        canViewModule,
+        canManageModule,
         superadminLevel: user?.superadminLevel || '',
         mustChangePassword,
         login,
@@ -727,6 +760,10 @@ export function AuthProvider({ children }) {
         hasTier,
         getLimit,
         tenant: user?.tenant ?? null,
+        // Free-trial lifecycle (utils/trialLock.js): 'none' | 'active' |
+        // 'read_only' | 'locked', and the read-only convenience flag.
+        trialState: trialStateOf(user?.tenant),
+        readOnly: isTrialReadOnly(user),
         // Resolved operations profile (how the tenant runs) — read it
         // through hooks/useOperations, which falls back to today's flow.
         operations: user?.tenant?.operations ?? null,
