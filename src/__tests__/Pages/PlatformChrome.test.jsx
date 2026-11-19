@@ -8,6 +8,7 @@ import { describe, test, expect, vi } from 'vitest'
 import { render, screen, within, fireEvent, act, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { DESKTOP_DOWNLOAD_URL } from '../../utils/desktopDownload'
 
 // The real module drags in api/socket/toast; the chrome only needs the context object.
 vi.mock('@/Context/AuthContext', async () => {
@@ -80,7 +81,7 @@ describe('PlatformHeader (home)', () => {
     expect(document.body.style.overflow).toBe('')
     expect(screen.getByRole('button', { name: 'Close menu' })).toHaveAttribute('aria-expanded', 'true')
     const links = within(menu).getAllByRole('link')
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['#features', '#how-it-works', '#pricing', '#faq', '/staff-login', '/start-trial'])
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['#features', '#how-it-works', '#pricing', '#faq', DESKTOP_DOWNLOAD_URL, '/staff-login', '/start-trial'])
 
     await user.keyboard('{Escape}')
     expect(document.getElementById('platform-mobile-nav')).not.toBeInTheDocument()
@@ -113,7 +114,7 @@ describe('PlatformHeader slot', () => {
     const menu = document.getElementById('platform-mobile-nav')
     expect(within(menu).getByText('6:45 PM')).toBeInTheDocument()
     const links = within(menu).getAllByRole('link')
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['#features', '#how-it-works', '#pricing', '#faq', '/staff-login', '/start-trial'])
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['#features', '#how-it-works', '#pricing', '#faq', DESKTOP_DOWNLOAD_URL, '/staff-login', '/start-trial'])
   })
 
   test('renders no slot by default', () => {

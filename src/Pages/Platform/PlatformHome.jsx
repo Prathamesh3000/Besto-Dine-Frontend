@@ -54,6 +54,7 @@ import { getCTA, hasTrial, trialDaysOf } from '../../utils/planCta';
 import { cycleSuffix, formatINR, rowForCycle } from '../../utils/billingCycles';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { PlatformHeader, PlatformFooter } from './components/PlatformChrome';
+import DesktopDownloadLink from '../../Components/Common/DesktopDownloadLink';
 import {
     PLATFORM_TITLE, PLATFORM_DESCRIPTION, usePageMeta, usePublicPlans, formatPlanCyclePrice, publicCycleOptions, planHighlights,
 } from './platformShared';
@@ -1070,6 +1071,9 @@ const PlatformHome = () => {
                                     {' · '}
                                     {t('platform.hero.proof', 'No app for guests. No new hardware.')}
                                 </p>
+                                <DesktopDownloadLink className={`mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold underline-offset-4 hover:underline ${MUTED}`}>
+                                    {t('platform.hero.desktop_note', 'Counter or kitchen PC? Download the Windows desktop app')}
+                                </DesktopDownloadLink>
                             </div>
 
                             <div className="relative mt-14 mb-12 pt-8 lg:my-0 lg:-mr-10 lg:pb-12 lg:pt-10 xl:-mr-16" data-reveal data-testid="hero-cluster">

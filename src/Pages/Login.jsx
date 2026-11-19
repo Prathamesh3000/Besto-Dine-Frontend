@@ -4,13 +4,14 @@
 // utils/authStorage), so signing in here never overwrites a Super Admin tab with a hotel admin.
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, LogIn, Sparkles, CheckCircle2, X, Hourglass, XCircle, Building2 } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, LogIn, Sparkles, CheckCircle2, X, Hourglass, XCircle, Building2, Download } from 'lucide-react';
 import { useAuth, USER_ROLES } from '../Context/AuthContext';
 import { portalHomePath } from './SuperAdmin/portalAccess';
 import { setActiveTenant, clearActiveTenant } from '../utils/tenant';
 import BestoDineMark from '../assets/BestoDineMark';
 import RequestDemoForm from '../Components/Common/RequestDemoForm';
 import InstallAppBanner from '../Components/Common/InstallAppBanner';
+import DesktopDownloadLink from '../Components/Common/DesktopDownloadLink';
 import TwoFactorCodeForm from '../Components/Auth/TwoFactorCodeForm';
 import {
     useFormValidation,
@@ -300,6 +301,19 @@ const Login = () => {
                     </div>
 
                     <InstallAppBanner className="mb-4" />
+                    {/* Windows installer for the counter / kitchen PC. Hidden in the desktop app and on phones. */}
+                    <DesktopDownloadLink
+                        icon={false}
+                        className="mb-4 flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-[#1A1A1A] transition hover:border-[#FE8301]/50 hover:bg-[#FFF4E8]"
+                    >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FE8301] text-white">
+                            <Download className="h-4 w-4" aria-hidden="true" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                            <span className="block font-semibold leading-tight">Download desktop app</span>
+                            <span className="mt-0.5 block text-xs text-gray-600">Windows app for the counter and kitchen PC. Prints KOTs and bills.</span>
+                        </span>
+                    </DesktopDownloadLink>
 
                     {/* Main card */}
                     <div className="bg-white rounded-2xl shadow-[0px_8px_32px_0px_#00000014] border border-gray-100 overflow-hidden">

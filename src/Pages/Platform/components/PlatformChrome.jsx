@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import BestoDineMark from '../../../assets/BestoDineMark';
 import AuthContext from '../../../Context/AuthContext';
 import { staffHomePath } from '../../../utils/roleRouting';
+import DesktopDownloadLink from '../../../Components/Common/DesktopDownloadLink';
 
 /** Height (px) of the sticky platform header; pages pad / scroll-margin by this. */
 export const PLATFORM_HEADER_HEIGHT = 64;
@@ -88,6 +89,9 @@ export function PlatformHeader({ onHome = false, slot = null }) {
                     ))}
                 </nav>
                 <div className="hidden md:flex items-center gap-5">
+                    <DesktopDownloadLink className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#475467] hover:text-[#FE8301] transition-colors">
+                        {t('platform.cta.download_short', 'Desktop app')}
+                    </DesktopDownloadLink>
                     <Link to="/staff-login" className="text-[14px] font-semibold text-[#101828] hover:text-[#FE8301] transition-colors">
                         {t('platform.nav.staff_login', 'Staff login')}
                     </Link>
@@ -124,6 +128,9 @@ export function PlatformHeader({ onHome = false, slot = null }) {
                             </a>
                         ))}
                     </nav>
+                    <DesktopDownloadLink className="mb-2 flex items-center justify-center gap-2 rounded-xl border border-[#EAECF0] py-3 text-[14px] font-semibold text-[#101828]">
+                        {t('platform.cta.download', 'Download desktop app')}
+                    </DesktopDownloadLink>
                     <div className="grid grid-cols-2 gap-2 pt-2">
                         <Link to="/staff-login" onClick={close} className="text-center py-3 rounded-xl text-[14px] font-semibold text-[#101828] border border-[#EAECF0]">
                             {t('platform.nav.staff_login', 'Staff login')}
@@ -173,6 +180,7 @@ export function PlatformFooter() {
                         <Link to="/start-trial" className={linkCls}>{t('platform.cta.trial', 'Start 14-day free trial')}</Link>
                         <Link to="/register-restaurant" className={linkCls}>{t('platform.cta.register', 'Register your hotel')}</Link>
                         <Link to="/request-demo" className={linkCls}>{t('platform.cta.demo', 'Request a demo')}</Link>
+                        <DesktopDownloadLink icon={false} className={linkCls}>{t('platform.cta.download', 'Download desktop app')}</DesktopDownloadLink>
                         <Link to="/staff-login" className={linkCls}>{t('platform.nav.staff_login', 'Staff login')}</Link>
                     </nav>
                     <nav className={colCls} aria-label={t('platform.footer.legal', 'Legal')}>
