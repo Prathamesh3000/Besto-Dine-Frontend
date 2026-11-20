@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 import {
-    getToken, identityMismatch, currentAudience, cookieAuthRequested,
+    getToken, identityMismatch, currentAudience, audienceForPath, cookieAuthRequested,
     COOKIE_SESSION, realToken, getCookieSessionMeta,
 } from './authStorage';
 import { configuredApiUrl } from './apiOrigin';
@@ -26,6 +26,9 @@ const _rooms = new Set();
 // tell a first connect (1) from a reconnect (>1) and resync their data.
 let _connected = false;
 let _connectCount = 0;
+// Did the most recent handshake carry a user identity (token, or the cookie
+// session's audience)? Guest/scan-only handshakes legitimately have none.
+let _handshakeAuthed = false;
 const _listeners = new Set();
 const _reconnectListeners = new Set();
 
@@ -39,7 +42,16 @@ export function subscribeSocketState(fn) {
 }
 
 export function isSocketConnected() {
-    return _connected;
+    if (!_connected) return false;
+    // A staff / platform screen only gets its live events (kitchen, floor,
+    // orders) through the staff rooms the server joins from the handshake
+    // identity. If the last handshake went out WITHOUT that identity (another
+    // tab signed a different account into the same storage, or a token
+    // refresh failed so we fell back to guest), the socket is open but
+    // deaf to those events — report "not live" so screens keep their fast
+    // fallback poll instead of waiting minutes on the slow one.
+    if (!_handshakeAuthed && audienceForPath(window.location.pathname) !== 'customer') return false;
+    return true;
 }
 
 /**
@@ -78,6 +90,7 @@ function readSocketAuth() {
     // audience so the server picks the right cookie, or 'none' to connect as
     // a guest. realToken() drops the cookie-session sentinel.
     const token = skip ? null : (realToken(getToken()) || null);
+    _handshakeAuthed = !!token || (cookieAuthRequested() && !skip);
     return {
         token,
         scanToken: localStorage.getItem('scanToken') || null,

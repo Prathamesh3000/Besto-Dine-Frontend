@@ -15,6 +15,7 @@ import { useCart } from '../../Context/CartContext';
 import { getSocket, joinStaffRoom } from '../../utils/socket';
 import { useAuth } from '../../Context/AuthContext';
 import useSocketEvent from '../../hooks/useSocketEvent';
+import useAutoRefresh from '../../hooks/useAutoRefresh';
 import useOperations from '../../hooks/useOperations';
 import TokenBoard from '../Admin/components/TokenBoard';
 import toast from 'react-hot-toast';
@@ -274,6 +275,12 @@ const WaiterHomePage = () => {
 
     // Table grid follow-up — reservations, merges, occupancy flips.
     useSocketEvent('table:updated', refreshTables);
+
+    // This screen had no safety net: a dropped socket (phone asleep, flaky
+    // Wi-Fi) left the Pending / Ready counters and the table grid stale until
+    // a manual reload. Resync when the app returns to the foreground, when
+    // the network comes back, and on a slow visible-only poll.
+    useAutoRefresh(() => { refreshOrderStats(); refreshTables(); }, { intervalMs: 60_000 });
 
     // Fetch Tables whenever activeFloor changes
     useEffect(() => {

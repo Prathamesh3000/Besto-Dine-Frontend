@@ -1110,6 +1110,26 @@ const DineInBillPreview = () => {
   const { subtotal, gst, gstPct, serviceCharge, serviceChargePct, additionalCharges: activeChargesDI } = bill;
   const total = Math.max(0, Math.round((bill.total - manualDiscount) * 100) / 100);
 
+  // A table with several unpaid rounds is paid in ONE payment against the
+  // first round; the server settles the rest (settleSiblingDineInRounds) and
+  // checks the amount is exactly what the table owes: this round's due plus
+  // every other unpaid round's (total − staff discount − already paid). Pay
+  // that server figure rather than the on-screen recompute, so a rounding
+  // difference between the two can never make the checkout refuse.
+  const roundCount = pendingOrders.length;
+  const roundMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const tableDue = roundCount > 1 && pendingOrders.every((o) => typeof o.total === 'number')
+    ? roundMoney(pendingOrders.reduce((sum, o, i) => {
+        const t = roundMoney(o.total);
+        if (i === 0) {
+          const paid = roundMoney(o.amountPaid);
+          return sum + (paid > 0 && paid < t ? roundMoney(t - paid) : t);
+        }
+        return sum + Math.max(0, t - (Number(o.manualDiscount) || 0) - roundMoney(o.amountPaid));
+      }, 0))
+    : null;
+  const payTotal = tableDue != null ? tableDue : total;
+
   const displayOrderId =
     pendingOrders.length > 0
       ? `#A${(pendingOrders[0].id || pendingOrders[0]._id || '').toString().slice(-4)}`
@@ -1438,7 +1458,7 @@ const DineInBillPreview = () => {
             onClick={() => {
               navigate("/customer/payment", {
                 state: {
-                  total,
+                  total: payTotal,
                   orderId: backendOrderId || displayOrderId,
                   tableNumber: tableNumber || "—",
                 },
@@ -1447,7 +1467,7 @@ const DineInBillPreview = () => {
             className="w-full font-semibold h-[48px] bg-[#FE8301] text-white rounded-[16px] text-[14px] font-nunito leading-[16px] flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
           >
             <ShoppingCart size={18} />
-            <span>Pay Bill ₹{total.toFixed(2)}</span>
+            <span>Pay Bill ₹{payTotal.toFixed(2)}</span>
           </button>
         )}
       </footer>

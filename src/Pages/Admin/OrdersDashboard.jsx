@@ -7,6 +7,7 @@ import api from '../../utils/api'
 import { adminOrderKeys, withIdempotencyKey, orderPayConfig, resetOrderPayKey, createActionGuard } from '../../utils/idempotency'
 import { useQueryClient } from '@tanstack/react-query'
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent'
+import useAutoRefresh from '../../hooks/useAutoRefresh'
 import { useAdminBranch } from '../../Context/AdminBranchContext'
 import { withAdminTenant } from '../../hooks/queries/queryKeys'
 import toast from 'react-hot-toast'
@@ -721,6 +722,8 @@ const OrdersDashboard = () => {
   useSocketEvent('order:cancelled', (data) => { patchOrderFromEvent(data, 'cancelled'); scheduleRefetch(true) })
   // BUG #12 — after a reconnect, resync anything missed while offline.
   useSocketReconnect(() => scheduleRefetch(true))
+  // Resync when the tab returns to the foreground (timers/sockets stall in the background).
+  useAutoRefresh(() => scheduleRefetch(true))
 
   // Client-side search+filter for Live / Takeaway tabs only.
   // Past tab short-circuits this path — its filtering happens server-side.

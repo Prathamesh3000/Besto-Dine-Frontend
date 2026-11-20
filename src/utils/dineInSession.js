@@ -191,3 +191,31 @@ export function useDineInLock() {
     }, []);
     return locked;
 }
+
+/**
+ * Staff moved this diner's party to another table (`table:moved`).
+ * Swap the table binding + the signed scan token in place so the visit
+ * (cart, orders, login) carries on at the new table. The old token is
+ * overwritten, never reused. Returns the new table id, or null when the
+ * push is not for this session / carries no usable table.
+ */
+export function applyTableMoved(payload = {}) {
+    try {
+        const toId = payload.toTableId || payload.tableId;
+        if (!toId) return null;
+        let cur = null;
+        try { cur = JSON.parse(localStorage.getItem('dineInTable') || 'null'); } catch { /* ignore */ }
+        const next = { ...(cur || {}), _id: toId };
+        if (payload.toTableName) next.name = payload.toTableName;
+        // Area / capacity / QR belong to the old table — don't carry them over.
+        delete next.qrToken;
+        if (cur && cur._id !== toId) { delete next.area; delete next.capacity; }
+        localStorage.setItem('dineInTable', JSON.stringify(next));
+        if (payload.toTableName) localStorage.setItem('tableNumber', payload.toTableName);
+        if (payload.scanToken) localStorage.setItem('scanToken', payload.scanToken);
+        localStorage.setItem('scanSessionStart', Date.now().toString());
+    } catch { return null; }
+    try { window.dispatchEvent(new Event('guestSessionChange')); } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event('storage_sync')); } catch { /* ignore */ }
+    return payload.toTableId || payload.tableId;
+}

@@ -16,7 +16,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../Context/AuthContext";
 import { useCart } from "../../Context/CartContext";
 import { useMenu } from "../../Context/MenuContext";
-import api, { settingsAPI } from "../../utils/api";
+import api, { settingsAPI, refundRequestAPI } from "../../utils/api";
+import RefundRequestModal from "../../Components/Loggedin/RefundRequestModal";
+import { refundableBalance } from "../../utils/refund";
 import { repeatKeys, withIdempotencyKey } from "../../utils/idempotency";
 import useSocketEvent from "../../hooks/useSocketEvent";
 import { joinRoom } from "../../utils/socket";
@@ -344,7 +346,7 @@ const OrderCard = React.memo(
 );
 
 // Past Order Summary Card Component
-const OrderSummaryCard = React.memo(({ order, onClick, cancelledOrders, taxConfig = null }) => {
+const OrderSummaryCard = React.memo(({ order, onClick, cancelledOrders, taxConfig = null, refundRequest = null, onRequestRefund = null }) => {
   // The whole-order cancellation flag: either the local cancellation map
   // recorded one, or the saved order's status came back as Cancelled.
   // Past orders that were cancelled need a visually distinct card —
@@ -369,7 +371,42 @@ const OrderSummaryCard = React.memo(({ order, onClick, cancelledOrders, taxConfi
   // Placed order: the server's stored total wins; billFromOrder only
   // recomputes (with the server's rounding) when there is none.
   const computedTotal = billFromOrder(order, taxConfig, renderItems).total;
-  const refundedAmt = Number(order.refundedAmount) || (isCancelledOrder ? computedTotal : 0);
+  // Only what the server says was refunded. (This used to fall back to the
+  // order total for any cancelled order, which claimed "refunded" while the
+  // request was still waiting for admin approval.)
+  const refundedAmt = Number(order.refundedAmount) || 0;
+
+  // Refund state — the request button (paid, served orders with a balance
+  // left and no request waiting) and a pill for the latest request.
+  const refundable = refundableBalance(order);
+  const pendingRefund = refundRequest?.status === 'pending';
+  const canRequestRefund = !!onRequestRefund && !isCancelledOrder
+    && order.paymentStatus === 'Paid' && refundable > 0 && !pendingRefund;
+  let refundRow = null;
+  if (pendingRefund) {
+    refundRow = {
+      label: `Refund of ₹${Number(refundRequest.amount || refundable).toFixed(0)} requested — pending admin approval`,
+      icon: 'fi-rr-hourglass-end', tone: 'bg-[#FFF8E1] text-[#92400E] border border-[#FDE68A]',
+    };
+  } else if (refundedAmt > 0) {
+    refundRow = {
+      label: order.paymentStatus === 'Refunded' || refundedAmt >= Number(order.amountPaid || 0)
+        ? `₹${Math.round(refundedAmt).toLocaleString()} refunded`
+        : `Partially refunded ₹${Math.round(refundedAmt).toLocaleString()}`,
+      icon: 'fi-rr-check-circle', tone: 'bg-[#E5FFEB] text-[#2E7D32] border border-[#BBF2C2]',
+    };
+  } else if (refundRequest?.status === 'rejected') {
+    refundRow = {
+      label: `Refund request declined${refundRequest.decisionNote ? ` — ${refundRequest.decisionNote}` : ''}`,
+      icon: 'fi-rr-info', tone: 'bg-[#FFF3E6] text-[#B45309] border border-[#FFE3BE]',
+    };
+  } else if (isCancelledOrder && Number(order.amountPaid || 0) > 0) {
+    // Cancelled after payment, nothing refunded yet: cancel queued a request.
+    refundRow = {
+      label: `Refund of ₹${Number(order.amountPaid).toFixed(0)} requested — pending admin approval`,
+      icon: 'fi-rr-hourglass-end', tone: 'bg-[#FFF8E1] text-[#92400E] border border-[#FDE68A]',
+    };
+  }
 
   const time = new Date(order.timestamp).toLocaleTimeString("en-US", {
     hour: "2-digit",
@@ -443,11 +480,6 @@ const OrderSummaryCard = React.memo(({ order, onClick, cancelledOrders, taxConfi
               {paymentMethodLabel}
             </span>
           )}
-          {isCancelledOrder && refundedAmt > 0 && (
-            <span className="text-[11px] font-nunito font-medium text-[#027A48] bg-[#E5FFEB] px-2 py-0.5 rounded-full">
-              ₹{Math.round(refundedAmt).toLocaleString()} refunded
-            </span>
-          )}
         </div>
         <span className={`font-nunito font-bold text-[15px] sm:text-[16px] tabular-nums whitespace-nowrap shrink-0 ${
           isCancelledOrder ? "text-[#8D848F] line-through" : "text-[#101828]"
@@ -455,6 +487,34 @@ const OrderSummaryCard = React.memo(({ order, onClick, cancelledOrders, taxConfi
           ₹{computedTotal.toLocaleString()}
         </span>
       </div>
+
+      {/* Refund row — request button / status of the latest request */}
+      {refundRow && (
+        <div className="mt-3 flex items-center justify-between gap-2" data-testid="refund-row">
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[11px] font-varela leading-[14px] min-w-0 ${refundRow.tone}`}>
+            <i className={`fi ${refundRow.icon} text-[12px] shrink-0`} />
+            <span className="break-words">{refundRow.label}</span>
+          </span>
+          {canRequestRefund && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRequestRefund(order); }}
+              className="shrink-0 px-4 py-2 border border-[#FE8301] text-[#FE8301] rounded-[10px] text-[13px] font-nunito font-semibold active:scale-95 transition-transform"
+            >
+              Request refund
+            </button>
+          )}
+        </div>
+      )}
+      {!refundRow && canRequestRefund && (
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={(e) => { e.stopPropagation(); onRequestRefund(order); }}
+            className="px-4 py-2 border border-[#FE8301] text-[#FE8301] rounded-[10px] text-[13px] font-nunito font-semibold active:scale-95 transition-transform"
+          >
+            Request refund
+          </button>
+        </div>
+      )}
     </div>
   );
 });
@@ -1222,6 +1282,34 @@ function Orders() {
   const [otherReason, setOtherReason] = useState("");
   const [showOtherInput, setShowOtherInput] = useState(false);
 
+  // Refund requests — only a logged-in customer can ask (server enforces
+  // ownership); the latest request per order drives the card's status pill.
+  const canRequestRefunds = isLoggedIn && user?.role === 'customer';
+  const [refundOrder, setRefundOrder] = useState(null);
+  const refundsQueryKey = useMemo(() => ['customer', 'refund-requests', sessionKey], [sessionKey]);
+  const { data: myRefundRequests } = useQuery({
+    queryKey: refundsQueryKey,
+    queryFn: () => refundRequestAPI.listMine().then((r) => r.data?.data || []),
+    enabled: canRequestRefunds,
+    staleTime: 10_000,
+    refetchInterval: 60_000,
+  });
+  const refreshRefunds = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: refundsQueryKey });
+    queryClient.invalidateQueries({ queryKey: ordersQueryKey });
+  }, [queryClient, refundsQueryKey, ordersQueryKey]);
+  // Admin decision lands → status pill + refunded amount update instantly.
+  useSocketEvent('refund-request:decided', refreshRefunds);
+  // Newest request first (the API sorts that way); keep one per order.
+  const refundByOrder = useMemo(() => {
+    const m = new Map();
+    for (const rr of myRefundRequests || []) {
+      const k = String(rr.orderIdRef || rr.order);
+      if (!m.has(k)) m.set(k, rr);
+    }
+    return m;
+  }, [myRefundRequests]);
+
   const [showQRCodeModal, setShowQRCodeModal] = useState(false);
 
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -1247,7 +1335,7 @@ function Orders() {
   // the bottom-sheet dialog — the "footer shows over the cancel popup"
   // report.
   const anyOverlayOpen = showCancelModal || showDetailsModal || showRepeatModal
-    || showFilterModal || showRatingModal || showQRCodeModal;
+    || showFilterModal || showRatingModal || showQRCodeModal || !!refundOrder;
   useEffect(() => {
     if (!anyOverlayOpen) return undefined;
     const prevBody = document.body.style.overflow;
@@ -1897,7 +1985,9 @@ function Orders() {
                     </span>
                   </div>
                   {orders.map((o) => (
-                    <OrderSummaryCard key={o.id} order={o} onClick={handleOpenDetails} cancelledOrders={cancelledOrders} taxConfig={taxConfig} />
+                    <OrderSummaryCard key={o.id} order={o} onClick={handleOpenDetails} cancelledOrders={cancelledOrders} taxConfig={taxConfig}
+                      refundRequest={refundByOrder.get(String(o.orderId || o.id)) || null}
+                      onRequestRefund={canRequestRefunds ? setRefundOrder : null} />
                   ))}
                 </div>
               );
@@ -2234,6 +2324,13 @@ function Orders() {
             <button onClick={confirmCancelOrder} disabled={!selectedCancelReason || (selectedCancelReason === "Other" && !otherReason.trim())} className={`w-full py-3 rounded-2xl font-nunito font-semibold text-[16px] transition-all ${selectedCancelReason && (selectedCancelReason !== "Other" || otherReason.trim()) ? "bg-[#FE8301] text-white" : "bg-[#F5F5F5] text-[#B6AEB8]"}`}>Submit</button>
           </div>
         </div>
+      )}
+      {refundOrder && (
+        <RefundRequestModal
+          order={refundOrder}
+          onClose={() => setRefundOrder(null)}
+          onSubmitted={refreshRefunds}
+        />
       )}
       <QRCodeModal
         isOpen={showQRCodeModal}

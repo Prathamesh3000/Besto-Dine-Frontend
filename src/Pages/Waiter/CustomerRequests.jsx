@@ -8,6 +8,7 @@ import NotificationBell from '../../Components/Waiter/NotificationBell';
 import { waiterAPI, settingsAPI } from '../../utils/api';
 import { useAuth } from '../../Context/AuthContext';
 import useSocketEvent from '../../hooks/useSocketEvent';
+import useAutoRefresh from '../../hooks/useAutoRefresh';
 import { resolveImageUrl } from '../../utils/image';
 import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
 import toast from 'react-hot-toast';
@@ -177,6 +178,8 @@ const CustomerRequests = () => {
     useSocketEvent('request:updated', fetchData);
     useSocketEvent('order:new', fetchData);
     useSocketEvent('order:updated', fetchData);
+    // Resync when the app returns to the foreground or the network comes back.
+    useAutoRefresh(fetchData);
 
     const handleUpdateStatus = async (requestId, status) => {
         try {

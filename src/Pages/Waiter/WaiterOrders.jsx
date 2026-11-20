@@ -7,6 +7,7 @@ import NotificationBell from '../../Components/Waiter/NotificationBell';
 import { Menu, CircleAlert, Clock3, Check, Loader2, CheckCircle2, Clock, User, X, RotateCw } from 'lucide-react';
 import api, { waiterAPI, settingsAPI } from '../../utils/api';
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent';
+import useAutoRefresh from '../../hooks/useAutoRefresh';
 import { useAuth } from '../../Context/AuthContext';
 import { resolveImageUrl } from '../../utils/image';
 import { getWaiterScope, inWaiterScope } from '../../utils/waiterScope';
@@ -493,6 +494,8 @@ const WaiterOrders = () => {
     useEffect(() => () => { if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current); }, []);
     // BUG #12 — resync after a reconnect.
     useSocketReconnect(refetchSilent);
+    // Resync when the app returns to the foreground (timers/sockets stall in the background).
+    useAutoRefresh(refetchSilent);
     useSocketEvent('order:new', refetchSilent);
     useSocketEvent('order:updated', refetchSilent);
     useSocketEvent('order:cancelled', refetchSilent);

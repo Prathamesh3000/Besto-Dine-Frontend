@@ -4,6 +4,8 @@ import { Clock } from 'lucide-react';
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent';
 import { useAuth } from '../../Context/AuthContext';
 import api from '../../utils/api';
+import toast from 'react-hot-toast';
+import { getSocket, joinRoom, leaveRoom } from '../../utils/socket';
 import { activeRestaurantPath, getActiveTenantSlug } from '../../utils/tenant';
 import {
     SCAN_TABLE_PATH,
@@ -11,6 +13,7 @@ import {
     needsTableScan,
     clearDineInTable,
     requestTableScan,
+    applyTableMoved,
 } from '../../utils/dineInSession';
 import { getCustomerOrderSession, readRecoveryOrderIds } from '../../utils/customerOrderIds';
 
@@ -190,6 +193,28 @@ const CustomerLayout = () => {
         const myTableId = currentTableId();
         if (!myTableId || String(payload.tableId) !== String(myTableId)) return;
         tableGone();
+    });
+    // ── Staff moved this party to another table ───────────────────
+    // Swap the table + scan token in place (cart and login untouched),
+    // follow the new table room, and tell the diner. A push whose
+    // fromTableId is a different table is not ours.
+    useSocketEvent('table:moved', (payload = {}) => {
+        if (!hasScanSession()) return;
+        const myTableId = currentTableId();
+        if (payload.fromTableId && myTableId && String(payload.fromTableId) !== String(myTableId)) return;
+        if (!payload.toTableId) return;
+        const newId = applyTableMoved(payload);
+        if (!newId) return;
+        try {
+            if (myTableId && String(myTableId) !== String(newId)) leaveRoom(`table:${myTableId}`);
+            joinRoom(`table:${newId}`);
+            // The handshake carries the scan token — reconnect so the
+            // server authorizes the new room with the fresh token.
+            const s = getSocket();
+            s.disconnect();
+            s.connect();
+        } catch { /* socket best-effort; the next reconnect re-joins */ }
+        toast(`Your table is now ${payload.toTableName || 'changed'}`, { icon: '🪑' });
     });
     // A push can be missed (screen off, network drop): re-check when the
     // socket reconnects or the page becomes visible again.

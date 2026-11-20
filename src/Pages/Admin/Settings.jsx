@@ -12,6 +12,7 @@ import LandingPageSettings from './components/LandingPageSettings'
 import PrinterSettings from './components/PrinterSettings'
 import TwoFactorSettings from '../../Components/Auth/TwoFactorSettings'
 import PaymentQrSettings from './components/PaymentQrSettings'
+import TableTimerSettings from './components/TableTimerSettings'
 import OperationsSummary from './components/OperationsSummary'
 import ParkingSettingsCard from './components/ParkingSettingsCard'
 import { IMAGE_ACCEPT } from '../../utils/imageFile'
@@ -145,6 +146,7 @@ const Settings = () => {
     const [printers, setPrinters] = useState({})
     // Payment QR (UPI) — Settings.payments; saved via PATCH /settings/payments.
     const [payments, setPayments] = useState({})
+    const [tableTimerCfg, setTableTimerCfg] = useState({})
 
     const [walletConfig, setWalletConfig] = useState({
         enableWallet: true,
@@ -238,6 +240,7 @@ const Settings = () => {
             setLandingPage(s.landingPage || {})
             setPrinters(s.printers || {})
             setPayments(s.payments || {})
+            setTableTimerCfg(s.tableTimer || {})
         } catch (error) {
             console.error('Settings fetch error:', error)
         } finally {
@@ -976,6 +979,9 @@ const Settings = () => {
                         </div>
                     </div>
                     )}
+
+                    {/* Table timer thresholds (saves on its own) */}
+                    {['admin', 'manager'].includes(user?.role) && <TableTimerSettings initial={tableTimerCfg} onSaved={fetchSettings} />}
 
                     {/* Operating Hours Section */}
                     <div>

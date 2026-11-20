@@ -86,6 +86,11 @@ const OrderDetailModal = ({ order, onClose }) => {
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-50 text-gray-700 text-xs font-bold uppercase tracking-wider ring-1 ring-gray-200">
                                 {tableLabel}
                             </span>
+                            {order.movedFrom?.tableName && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600 text-white text-xs font-black uppercase tracking-wider">
+                                    Moved from {order.movedFrom.tableName}
+                                </span>
+                            )}
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ring-1 ${statusBadge.cls}`}>
                                 {statusBadge.label}
                             </span>

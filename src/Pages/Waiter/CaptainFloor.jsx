@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Menu, Loader2, AlertTriangle, Clock, Users, LayoutGrid, UserPlus, ArrowUpRight, X, Check } from 'lucide-react';
+import { ArrowRightLeft, Menu, Loader2, AlertTriangle, Clock, Users, LayoutGrid, UserPlus, ArrowUpRight, X, Check } from 'lucide-react';
 import SeatedCount from '../../Components/Common/SeatedCount';
 import Sidebar from '../../Components/Waiter/Sidebar';
 import BottomNav from '../../Components/Waiter/BottomNav';
@@ -7,10 +7,14 @@ import WaiterEmptyState from '../../Components/Waiter/WaiterEmptyState';
 import StaffProfileMenu from '../../Components/Waiter/StaffProfileMenu';
 import NotificationBell from '../../Components/Waiter/NotificationBell';
 import { captainAPI } from '../../utils/api';
+import MoveTableModal from '../../Components/Common/MoveTableModal';
 import { useAuth } from '../../Context/AuthContext';
 import useOperations from '../../hooks/useOperations';
 import TokenBoard from '../Admin/components/TokenBoard';
+import TableTimer from '../../Components/Common/TableTimer';
+import { ingestTableTimerMeta, canSeeTableTimer } from '../../hooks/useServerClock';
 import useSocketEvent, { useSocketConnected, useSocketReconnect } from '../../hooks/useSocketEvent';
+import useAutoRefresh from '../../hooks/useAutoRefresh';
 import toast from 'react-hot-toast';
 
 // Captain Floor Overview — the "head of waiters" command screen.
@@ -35,6 +39,9 @@ const CaptainFloor = () => {
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
     const [tokenCount, setTokenCount] = useState(0);
+    // Move table: captain / manager / admin, only when the branch uses tables.
+    const canMoveTable = !tokenMode && ['captain', 'manager', 'admin'].includes(user?.role);
+    const [moveOpen, setMoveOpen] = useState(false);
 
     // Assign-waiter modal state
     const [assignTable, setAssignTable] = useState(null);
@@ -50,8 +57,12 @@ const CaptainFloor = () => {
     const load = useCallback(async (showSpinner = false) => {
         if (showSpinner) setLoading(true);
         try {
+            const sentAt = Date.now();
             const res = await captainAPI.getFloorOverview();
-            if (res.data?.success) setData(res.data);
+            if (res.data?.success) {
+                ingestTableTimerMeta(res.data, sentAt, Date.now());
+                setData(res.data);
+            }
         } catch (err) {
             if (showSpinner) toast.error(err?.response?.data?.message || 'Failed to load floor');
         } finally {
@@ -81,8 +92,21 @@ const CaptainFloor = () => {
     useSocketEvent('order:cancelled', scheduleLoad);
     useSocketEvent('order:appended', scheduleLoad);
     useSocketEvent('table:updated', scheduleLoad);
+    useSocketEvent('table:moved', scheduleLoad);
+    // Table timer: patch the one card immediately (table:updated also fires).
+    const patchTimer = useCallback((tableId, startedAt) => {
+        if (!tableId) return;
+        setData(d => (d && Array.isArray(d.tables)
+            ? { ...d, tables: d.tables.map(t => (String(t._id) === String(tableId) ? { ...t, sessionStartedAt: startedAt || null } : t)) }
+            : d));
+    }, []);
+    useSocketEvent('table:timer-started', (p) => patchTimer(p?.tableId, p?.startedAt));
+    useSocketEvent('table:timer-stopped', (p) => patchTimer(p?.tableId, null));
+    const showTimer = canSeeTableTimer(user?.role);
     // BUG #12 — resync after a reconnect.
     useSocketReconnect(scheduleLoad);
+    // Resync when the app returns to the foreground (timers/sockets stall in the background).
+    useAutoRefresh(scheduleLoad);
     const socketLive = useSocketConnected();
     useEffect(() => {
         const id = setInterval(() => load(), socketLive ? 120_000 : 30_000);
@@ -218,9 +242,18 @@ const CaptainFloor = () => {
                                 Captain · {user?.name || 'Floor'}{user?.branch?.name ? ` · ${user.branch.name}` : ''}
                             </p>
                         </div>
+                        {canMoveTable && (
+                            <button
+                                type="button"
+                                onClick={() => setMoveOpen(true)}
+                                className="ml-auto shrink-0 inline-flex items-center gap-1.5 min-h-10 px-3.5 rounded-full border border-[#FE8301] text-[#FE8301] bg-white text-sm font-bold active:scale-95 transition"
+                            >
+                                <ArrowRightLeft size={16} strokeWidth={2.5} /> Move table
+                            </button>
+                        )}
                         <button
                             onClick={() => { setEscalateFor(true); }}
-                            className="ml-auto shrink-0 inline-flex items-center gap-1.5 min-h-10 px-3.5 rounded-full bg-[#FF3B30] text-white text-sm font-bold shadow-sm active:scale-95 transition"
+                            className={`${canMoveTable ? '' : 'ml-auto '}shrink-0 inline-flex items-center gap-1.5 min-h-10 px-3.5 rounded-full bg-[#FF3B30] text-white text-sm font-bold shadow-sm active:scale-95 transition`}
                         >
                             <ArrowUpRight size={16} strokeWidth={2.5} /> Escalate
                         </button>
@@ -382,6 +415,9 @@ const CaptainFloor = () => {
                                                                 <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${st.chip}`}>
                                                                     {st.label}
                                                                 </span>
+                                                                {showTimer && t.sessionStartedAt && (
+                                                                    <TableTimer startedAt={t.sessionStartedAt} className="!text-[10px]" />
+                                                                )}
                                                                 {t.activeOrders > 0 && (
                                                                     <span className="text-[10px] font-bold text-[#FF7A00] bg-[#FFF4E8] px-1.5 py-0.5 rounded-md">
                                                                         {t.activeOrders} order{t.activeOrders > 1 ? 's' : ''}
@@ -425,6 +461,16 @@ const CaptainFloor = () => {
                     )}
                 </section>
             </div>
+
+            {moveOpen && canMoveTable && (
+                <MoveTableModal
+                    tables={data?.tables || []}
+                    areas={data?.areas || []}
+                    onClose={() => setMoveOpen(false)}
+                    onRefresh={() => load()}
+                    onMoved={() => load()}
+                />
+            )}
 
             {/* ── Assign waiter sheet ─────────────────────────────────────── */}
             {assignTable && (

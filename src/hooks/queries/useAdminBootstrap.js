@@ -4,6 +4,7 @@ import api from '../../utils/api';
 import { adminKeys } from './queryKeys';
 import useSocketEvent from '../useSocketEvent';
 import { useAdminBranch } from '../../Context/AdminBranchContext';
+import { ingestTableTimerMeta } from '../useServerClock';
 
 /**
  * Optimistic table-status patch from a `table:updated` socket payload
@@ -31,6 +32,23 @@ export function patchTableStatus(tables, payload) {
         return status === 'free'
             ? { ...t, status: 'free', mergedWith: [], activeOrder: null }
             : { ...t, status: 'occupied' };
+    });
+    return changed ? next : tables;
+}
+
+/**
+ * Table-timer socket patch: set (startedAt) or clear (null) one table's
+ * sessionStartedAt. Pure; returns the same array when nothing changed. The
+ * `table:updated` refetch that follows corrects a merged group's earliest start.
+ */
+export function patchTableTimer(tables, tableId, startedAt) {
+    if (!Array.isArray(tables) || !tableId) return tables;
+    let changed = false;
+    const next = tables.map((t) => {
+        if (!t || String(t._id) !== String(tableId)) return t;
+        if ((t.sessionStartedAt || null) === (startedAt || null)) return t;
+        changed = true;
+        return { ...t, sessionStartedAt: startedAt || null };
     });
     return changed ? next : tables;
 }
@@ -91,8 +109,19 @@ export function useAdminBootstrap({ sections, enabled = true } = {}) {
             // the leak the user reported on 2026-05-20.
             if (selectedBranchId) params.set('branch', selectedBranchId);
             const qs = params.toString();
+            const sentAt = Date.now();
             const res = await api.get(qs ? `/admin/bootstrap?${qs}` : '/admin/bootstrap');
-            return res.data?.data ?? {};
+            const receivedAt = Date.now();
+            const data = res.data?.data ?? {};
+            // Table timer: server clock offset + thresholds (admin/manager/
+            // captain only; absent otherwise). Accept the fields at the top
+            // level of the body or inside `data`; settings.tableTimer is the
+            // fallback for thresholds.
+            ingestTableTimerMeta({
+                serverTime: res.data?.serverTime ?? data.serverTime,
+                tableTimer: res.data?.tableTimer ?? data.tableTimer ?? data.settings?.tableTimer,
+            }, sentAt, receivedAt);
+            return data;
         },
         enabled,
         staleTime: 60 * 1000,
@@ -129,6 +158,18 @@ export function useAdminBootstrap({ sections, enabled = true } = {}) {
         queryClient.invalidateQueries({ queryKey: adminKeys.tables });
         queryClient.invalidateQueries({ queryKey: adminKeys.bootstrap });
     });
+    // Table timer: start/stop patches sessionStartedAt immediately.
+    const applyTimer = (tableId, startedAt) => {
+        if (!tableId) return;
+        queryClient.setQueriesData({ queryKey: adminKeys.bootstrap }, (old) => {
+            if (!old || !Array.isArray(old.tables)) return old;
+            const tables = patchTableTimer(old.tables, tableId, startedAt);
+            return tables === old.tables ? old : { ...old, tables };
+        });
+        queryClient.setQueriesData({ queryKey: adminKeys.tables }, (old) => patchTableTimer(old, tableId, startedAt));
+    };
+    useSocketEvent('table:timer-started', (p) => applyTimer(p?.tableId, p?.startedAt));
+    useSocketEvent('table:timer-stopped', (p) => applyTimer(p?.tableId, null));
     useSocketEvent('order:new', () => {
         queryClient.invalidateQueries({ queryKey: adminKeys.tables });
         queryClient.invalidateQueries({ queryKey: adminKeys.orders.live });

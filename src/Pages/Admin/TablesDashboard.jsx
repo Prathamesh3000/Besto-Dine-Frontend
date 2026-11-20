@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useContext } from 'react'
 import { orderPayConfig, resetOrderPayKey, createActionGuard } from '../../utils/idempotency'
 import { useLocation, Link as RouterLink } from 'react-router-dom'
-import { CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload, Ticket } from 'lucide-react'
+import { ArrowRightLeft, CalendarPlus, Plus, QrCode, Edit2, Link, X, CheckCircle, ArrowLeft, Minus, ChevronDown, Download, Trash2, AlertTriangle, Loader2, UtensilsCrossed, Upload, Ticket } from 'lucide-react'
 import TokenBoard from './components/TokenBoard'
 import SeatedCount, { seatInfo } from '../../Components/Common/SeatedCount'
 import AddReservationModal from './components/AddReservationModal'
@@ -9,6 +9,7 @@ import AddAreaModal from './components/AddAreaModal'
 import AddTableModal from './components/AddTableModal'
 import BulkAddTablesModal from './components/BulkAddTablesModal'
 import MergeTables from './components/MergeTables'
+import MoveTableModal from '../../Components/Common/MoveTableModal'
 import QRManagementModal from './components/QRManagementModal'
 import LateArrivalBanner from './components/LateArrivalBanner'
 import SplitTenderEditor from './components/SplitTenderEditor'
@@ -19,6 +20,9 @@ import {
 } from './utils/tableStyles.jsx'
 import api, { printAPI } from '../../utils/api'
 import useSocketEvent from '../../hooks/useSocketEvent'
+import TableTimer from '../../Components/Common/TableTimer'
+import { canSeeTableTimer } from '../../hooks/useServerClock'
+import useAutoRefresh from '../../hooks/useAutoRefresh'
 import toast from 'react-hot-toast'
 import { billFromOrders, orderAmountDue, settleAmountForOrders, toTaxConfig } from '../../utils/billing'
 import { useAdminBootstrap } from '../../hooks/queries/useAdminBootstrap'
@@ -122,6 +126,12 @@ const TablesDashboard = () => {
   // Optional (no provider in some tests): only admin/manager see Free all.
   const authCtx = useContext(AuthContext)
   const canFreeAll = ['admin', 'manager'].includes(authCtx?.user?.role)
+  // Move table: admin / manager / captain (the waiter role cannot).
+  const canMoveTable = ['admin', 'manager', 'captain'].includes(authCtx?.user?.role)
+  // Table timer: only roles the API sends sessionStartedAt to.
+  const showTableTimer = canSeeTableTimer(authCtx?.user?.role)
+  const [moveTableOpen, setMoveTableOpen] = useState(false)
+  const [moveSourceId, setMoveSourceId] = useState(null)
   const mergeTablesEnabled = operations?.tables?.mergeTables !== false
   const assignWaitersEnabled = operations?.tables?.assignWaiters !== false
   // Token-number mode (§12.2): the branch has no tables at all — dine-in
@@ -199,6 +209,14 @@ const TablesDashboard = () => {
   // and `request:updated` here closes that gap.
   useSocketEvent('request:new', fetchDashboardData)
   useSocketEvent('request:updated', fetchDashboardData)
+  // A party moved tables: both tables changed status and the open orders
+  // changed table — refresh the grid and the open drawer.
+  useSocketEvent('table:moved', () => {
+    fetchDashboardData()
+    setDrawerRefreshKey(k => k + 1)
+  })
+  // Resync when the tab returns to the foreground or the network comes back.
+  useAutoRefresh(fetchDashboardData)
 
   // ── Processed data (memoized) ───────────────────────────────────────────
   const sortedAreas = useMemo(() =>
@@ -382,6 +400,7 @@ const TablesDashboard = () => {
               counterPaymentRequestedAt: primaryOrder.counterPaymentRequestedAt
                 || mergedOrders.find(o => o.counterPaymentRequestedAt)?.counterPaymentRequestedAt
                 || null,
+              movedFrom: primaryOrder.movedFrom || mergedOrders.find(o => o.movedFrom)?.movedFrom || null,
               // A held (pay-first) order rides along → "Mark Paid"
               // must settle every order in the group, held one included.
               ...(heldOrders.length > 0 ? {
@@ -461,6 +480,7 @@ const TablesDashboard = () => {
                 paymentStatus: primary.paymentStatus || 'Pending',
                 paymentMethod: primary.paymentMethod || '',
                 counterPaymentRequestedAt: anyCounterRequest?.counterPaymentRequestedAt || null,
+                movedFrom: list.find(o => o.movedFrom)?.movedFrom || null,
                 // Independent-orders extras for the new aggregated UI.
                 allOrderIds: list.map(o => o._id),
                 orderCount: list.length,
@@ -1104,6 +1124,12 @@ const TablesDashboard = () => {
               Free all tables
             </button>
           )}
+          {canMoveTable && (
+            <button type="button" onClick={() => { setMoveSourceId(null); setMoveTableOpen(true) }} disabled={occupiedTableCount === 0} className="flex items-center gap-2 px-5 py-2.5 text-orange-500 font-[600] border border-orange-500 rounded-[10px] hover:bg-[#FFF3E6] active:bg-[#FFE6CC] transition-colors font-manrope text-[14px] disabled:opacity-50 disabled:cursor-not-allowed">
+              <ArrowRightLeft size={18} />
+              Move table
+            </button>
+          )}
           {mergeTablesEnabled && (
             <button onClick={() => setShowMergeTables(true)} className="flex items-center gap-2 px-5 py-2.5 text-orange-500 font-[600] border border-orange-500 rounded-[10px] hover:bg-[#FFF3E6] active:bg-[#FFE6CC] transition-colors font-manrope text-[14px]">
               <Link size={18} className="rotate-45" />
@@ -1176,6 +1202,9 @@ const TablesDashboard = () => {
                   />
                 )
               })()}
+              {showTableTimer && table.sessionStartedAt && ['occupied', 'alert', 'merged'].includes(table.status) && (
+                <div className="mt-1"><TableTimer startedAt={table.sessionStartedAt} /></div>
+              )}
             </div>
           ))}
         </div>
@@ -2158,6 +2187,16 @@ const TablesDashboard = () => {
       {activeTab === 'live-feed' ? renderLiveFeed() : renderManagement()}
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
+      {moveTableOpen && canMoveTable && (
+        <MoveTableModal
+          tables={processedTablesData}
+          areas={areasData}
+          preselectedSourceId={moveSourceId}
+          onClose={() => { setMoveTableOpen(false); setMoveSourceId(null) }}
+          onRefresh={fetchDashboardData}
+          onMoved={() => { fetchDashboardData(); setSelectedTable(null) }}
+        />
+      )}
       {showAddReservationModal && (
         <AddReservationModal onClose={() => setShowAddReservationModal(false)} onSubmit={() => { setShowAddReservationModal(false); fetchDashboardData() }} />
       )}
@@ -2198,14 +2237,25 @@ const TablesDashboard = () => {
                         </h2>
                       </div>
                       <p className={`text-[14px] font-[500] font-manrope capitalize ${selectedTable.status === 'reserved' ? 'text-[#007AFF]' : 'text-[#9E77ED]'}`}>{selectedTable.status}</p>
+                      {showTableTimer && selectedTable.sessionStartedAt && <div className="mt-1"><TableTimer startedAt={selectedTable.sessionStartedAt} label="Occupied" /></div>}
                     </>})() : (
                     <>
                       <h2 className={`text-[28px] font-[700] font-manrope ${drawerTitleColor(selectedTable.status)}`}>{selectedTable.name}</h2>
                       <p className={`text-[14px] font-[500] font-manrope capitalize ${drawerTitleColor(selectedTable.status)}`}>{selectedTable.status}</p>
+                      {showTableTimer && selectedTable.sessionStartedAt && <div className="mt-1"><TableTimer startedAt={selectedTable.sessionStartedAt} label="Occupied" /></div>}
                     </>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {canMoveTable && ['occupied', 'alert'].includes(selectedTable.underlyingStatus ?? selectedTable.status) && !(selectedTable.mergedWith?.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => { setMoveSourceId(selectedTable._id); setMoveTableOpen(true) }}
+                      className="px-3 py-1.5 rounded-[8px] text-[12px] font-[600] font-manrope border border-orange-500 text-orange-600 bg-white hover:bg-[#FFF3E6] transition-colors"
+                    >
+                      Move table
+                    </button>
+                  )}
                   {mergeTablesEnabled && selectedTable.mergedWith?.length > 0 && (() => {
                     // Block unmerge while the group has a live order —
                     // the order lives on the leader's tableId and would
@@ -2250,6 +2300,9 @@ const TablesDashboard = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-[14px] font-manrope font-[700] text-[#B42318] leading-tight">
                         Counter-payment requested
+                        {activeOrderMeta?.movedFrom?.tableName && (
+                          <span data-testid="moved-from-note" className="ml-2 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-[700] align-middle">Moved from {activeOrderMeta.movedFrom.tableName}</span>
+                        )}
                       </p>
                       <p className="text-[12px] font-manrope text-[#7A1F1F] mt-0.5">
                         Customer wants to settle ₹{counterSettleTotal.toFixed(2)} in cash.

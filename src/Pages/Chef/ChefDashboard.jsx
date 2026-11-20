@@ -354,6 +354,9 @@ const ChefDashboard = () => {
     useSocketEvent('order:new', handleOrderEvent);
     useSocketEvent('order:updated', handleOrderEvent);
     useSocketEvent('order:cancelled', handleOrderEvent);
+    // Party moved tables: the table label on live tickets changed. Bypasses
+    // the dedup ring (same orderId/status as the last order:updated).
+    useSocketEvent('table:moved', invalidateOrders);
 
     // ── Append highlight ──────────────────────────────────────────────
     // When admin / waiter appends items to an active order (`POST

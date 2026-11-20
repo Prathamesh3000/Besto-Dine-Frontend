@@ -1105,6 +1105,11 @@ export const refundRequestAPI = {
     reject:        (id, data)    => api.post(`/refund-requests/${id}/reject`, data),
 };
 
+export const tableAPI = {
+    // Move an occupied table's open orders to a free table. preview:true returns the summary only.
+    moveTable: (data) => api.post('/tables/move', data, { _silent: true }),
+};
+
 export const advanceBookingAPI = {
     createBooking:  (bookingData, idemKey) => api.post('/advance-booking/create', bookingData, withIdempotencyKey(idemKey)),
     // Customer-facing table list + booking. These deliberately do NOT

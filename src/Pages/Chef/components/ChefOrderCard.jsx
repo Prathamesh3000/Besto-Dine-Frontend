@@ -225,6 +225,11 @@ const ChefOrderCard = ({ order, onAction, onView, isActionLoading = false, nowMs
                         }
                         {tableLabel}
                     </span>
+                    {order.movedFrom?.tableName && (
+                        <span data-testid="moved-from-badge" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider bg-blue-600 text-white">
+                            Moved from {order.movedFrom.tableName}
+                        </span>
+                    )}
                     {justAppended && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-orange-500 text-white animate-pulse">
                             <Sparkles size={11} strokeWidth={3} />
